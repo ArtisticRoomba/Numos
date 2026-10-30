@@ -314,6 +314,9 @@ public sealed partial class AtmosSimulation : IDisposable
     [PublicAPI]
     public void Dispose()
     {
+        // The world gate comes first, as on every path that takes both. Unregistering takes it, and a voxel mixture
+        // operation takes the world's mixture gate before this simulation's gate.
+        lock (World.Gate)
         lock (_mixtureGate)
         {
             if (_disposed)
@@ -323,10 +326,10 @@ public sealed partial class AtmosSimulation : IDisposable
             World.UnregisterSimulation(this);
             _kernel.Dispose();
             _disposed = true;
-
-            if (_ownsWorld)
-                World.Dispose();
         }
+
+        if (_ownsWorld)
+            World.Dispose();
     }
 
     /// <summary>
@@ -402,11 +405,10 @@ public sealed partial class AtmosSimulation : IDisposable
     public bool SetAtmosConfig(AtmosConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        lock (_mixtureGate)
-        {
-            ThrowIfDisposed();
-            return World.SetAtmosConfig(config);
-        }
+
+        // Not under this simulation's gate. The world takes its own gates, which come before this one.
+        ThrowIfDisposed();
+        return World.SetAtmosConfig(config);
     }
 
     /// <summary>

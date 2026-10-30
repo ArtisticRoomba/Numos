@@ -1,11 +1,11 @@
 namespace Numos.API;
 
 /// <summary>
-///     Mutable, simulation-owned state for a standalone <see cref="GasMixture" />.
+///     Transient scratch for one mixture transaction.
 /// </summary>
 /// <remarks>
-///     Voxel mixtures do not use this type as backing storage. Numos captures a voxel into an instance for a
-///     transaction, then writes it back to the kernel as an atomic replacement.
+///     A transaction captures the mixtures it touches into instances, computes the result, validates it, and writes it
+///     back as an atomic replacement. Neither the pool nor the kernel stores this type.
 /// </remarks>
 internal sealed class GasMixtureState
 {
@@ -39,7 +39,23 @@ internal sealed class GasMixtureState
     internal int ActiveGasCount => Moles.Count;
 
     /// <summary>
-    ///     Gets the sum of the amounts of all gas species.
+    ///     Gets the total that the captured mixture's own <see cref="IGasMixture.TotalMoles" /> reported.
+    /// </summary>
+    /// <remarks>
+    ///     The storage sums its channels in page order, and <see cref="TotalMoles" /> sums in gas-ID order. The two can
+    ///     differ in the last bit. A ratio taken from a caller's amount must use this value, so that an amount equal to
+    ///     the mixture's <see cref="IGasMixture.TotalMoles" /> removes everything. Zero for a state that was not
+    ///     captured.
+    /// </remarks>
+    internal float CapturedTotalMoles { get; init; }
+
+    /// <summary>
+    ///     Gets the pressure that the captured mixture's own <see cref="IGasMixture.Pressure" /> reported.
+    /// </summary>
+    internal float CapturedPressure { get; init; }
+
+    /// <summary>
+    ///     Gets the sum of the amounts of all gas species, in gas-ID order.
     /// </summary>
     internal float TotalMoles
     {

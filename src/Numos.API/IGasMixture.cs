@@ -3,22 +3,36 @@ using JetBrains.Annotations;
 namespace Numos.API;
 
 /// <summary>
-///     A mutable, simulation-owned gas volume.
+///     A mutable gas volume that belongs to one <see cref="AtmosWorld" />.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Implementations either own detached container storage (<see cref="GasMixture" />) or address a live voxel
+///         Implementations either hold a pooled container (<see cref="GasMixture" />) or address a live voxel
 ///         (<see cref="AtmosSimulation.GetVoxelGasMixture(AtmosChunkHandle, ushort)" />). Members never expose the
 ///         solver's backing arrays or spans.
-///         Every live-voxel operation takes the simulation's state lock, so it waits for an in-progress tick instead
-///         of racing it.
+///         Every operation takes the locks of the storage it touches, so it waits for an in-progress tick instead of
+///         racing it. A solver callback can call these members on the tick thread. A worker thread that the callback
+///         starts must not call them, because the tick thread holds the locks that the call needs.
 ///         This is a common capability surface, not an extension point. Transfer endpoints must be instances created
-///         by <see cref="AtmosSimulation" />.
+///         by Numos in the same world.
 ///     </para>
 ///     <para>
-///         Numos records a live-voxel mutation as an external operation, and it survives replay. A standalone
-///         <see cref="GasMixture" /> is not simulation state. Numos never records or checkpoints it, so replay of a
-///         transfer between a voxel and a container reproduces only the voxel's side.
+///         Numos records a mutation through either kind as an external operation, and it survives replay. A
+///         <see cref="GasMixture" /> lives in the world's mixture pool. The world ticks, checkpoints, and hashes it, so
+///         a transfer between a voxel and a container replays both sides. To reach a container again after a restore
+///         or in a replayed world, save <see cref="GasMixture.Id" />. Then call
+///         <see cref="AtmosWorld.TryGetGasMixture" />.
+///     </para>
+///     <para>
+///         <see cref="Remove" />, <see cref="RemoveRatio" />, <see cref="RemoveVolume" />, and <see cref="Clone" />
+///         allocate a pooled <see cref="GasMixture" />, also when they are called on a voxel mixture. The caller must
+///         dispose the result. A result that is never disposed stays allocated until the world is disposed or a
+///         restore drops it. While it is live, <see cref="AtmosSimulation.RestoreCheckpoint" /> throws.
+///     </para>
+///     <para>
+///         A solver callback cannot allocate a pooled mixture, so these four members throw
+///         <see cref="InvalidOperationException" /> during a tick. To move gas from a solver callback, use
+///         <see cref="TransferTo" /> or <see cref="TransferRatioTo" /> with an existing destination.
 ///     </para>
 ///     <para>
 ///         A voxel mixture is bound to the chunk generation it was created from. After that chunk is unregistered,
@@ -31,15 +45,15 @@ namespace Numos.API;
 public interface IGasMixture
 {
     /// <summary>
-    ///     The simulation that owns this mixture and resolves its gas properties.
+    ///     The world that owns this mixture and resolves its gas properties.
     /// </summary>
-    AtmosSimulation Owner { get; }
+    AtmosWorld World { get; }
 
     /// <summary>
     ///     The represented volume, in cubic metres (m³).
     /// </summary>
     /// <remarks>
-    ///     For a voxel this is the owner's configured voxel volume.
+    ///     For a voxel this is the world's configured voxel volume.
     /// </remarks>
     float Volume { get; }
 
@@ -47,7 +61,7 @@ public interface IGasMixture
     ///     The stored temperature, in kelvins (K).
     /// </summary>
     /// <remarks>
-    ///     The setter stores the raw value. Pressure and energy calculations use the owner's configured fallback
+    ///     The setter stores the raw value. Pressure and energy calculations use the world's configured fallback
     ///     when the stored value is non-finite or nonpositive.
     /// </remarks>
     float Temperature { get; set; }
@@ -76,7 +90,7 @@ public interface IGasMixture
     /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
     /// <exception cref="ArgumentNullException">The gas name is null.</exception>
     /// <exception cref="ArgumentException">The gas name is empty.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     float GetMoles(string gasName);
 
     /// <summary>
@@ -87,7 +101,7 @@ public interface IGasMixture
     /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
     /// <exception cref="ArgumentNullException">The gas name is null.</exception>
     /// <exception cref="ArgumentException">The gas name is empty.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The amount is negative or non-finite.</exception>
     void SetMoles(string gasName, float moles);
 
@@ -99,7 +113,7 @@ public interface IGasMixture
     /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
     /// <exception cref="ArgumentNullException">The gas name is null.</exception>
     /// <exception cref="ArgumentException">The gas name is empty.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The adjustment is non-finite.</exception>
     void AdjustMoles(string gasName, float deltaMoles);
 
@@ -112,7 +126,7 @@ public interface IGasMixture
     /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
     /// <exception cref="ArgumentNullException">The gas name is null.</exception>
     /// <exception cref="ArgumentException">The gas name is empty.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An amount or temperature is invalid.</exception>
     /// <example>
     ///     After registering Oxygen, call <c>mixture.AddGas("Oxygen", 2f, 293.15f)</c> to add two moles.
@@ -122,36 +136,36 @@ public interface IGasMixture
     /// <summary>
     ///     Gets one gas amount, returning zero when the gas is absent.
     /// </summary>
-    /// <param name="gasId">The simulation gas ID. An unregistered nonnegative ID reads as zero.</param>
+    /// <param name="gasId">The world gas ID. An unregistered nonnegative ID reads as zero.</param>
     /// <returns>The amount in moles.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="gasId" /> is negative.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     float GetMoles(int gasId);
 
     /// <summary>
     ///     Sets one registered gas amount without changing the stored temperature.
     /// </summary>
-    /// <param name="gasId">The registered simulation gas ID.</param>
+    /// <param name="gasId">The registered gas ID.</param>
     /// <param name="moles">The nonnegative, finite amount to store, in moles. Zero removes the gas.</param>
     /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered or the amount is invalid.</exception>
     /// <exception cref="InvalidOperationException">The resulting pressure or heat capacity is not finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     void SetMoles(int gasId, float moles);
 
     /// <summary>
     ///     Adjusts one registered gas amount, clamping the result to zero, without changing the stored temperature.
     /// </summary>
-    /// <param name="gasId">The registered simulation gas ID.</param>
+    /// <param name="gasId">The registered gas ID.</param>
     /// <param name="deltaMoles">The finite signed adjustment, in moles.</param>
     /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered or the adjustment is invalid.</exception>
     /// <exception cref="InvalidOperationException">The adjusted amount, pressure, or heat capacity is not finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     void AdjustMoles(int gasId, float deltaMoles);
 
     /// <summary>
     ///     Adds a registered gas and mixes its sensible internal energy into this mixture.
     /// </summary>
-    /// <param name="gasId">The registered simulation gas ID.</param>
+    /// <param name="gasId">The registered gas ID.</param>
     /// <param name="moles">The positive, finite amount to add, in moles.</param>
     /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
     /// <remarks>
@@ -160,26 +174,27 @@ public interface IGasMixture
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered, or the amount or temperature is invalid.</exception>
     /// <exception cref="InvalidOperationException">The merged amount, heat capacity, or pressure is not finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     void AddGas(int gasId, float moles, float temperature);
 
     /// <summary>
     ///     Removes every gas while retaining this mixture's volume and temperature.
     /// </summary>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     void Clear();
 
     /// <summary>
     ///     Removes up to the requested total amount in the mixture's current proportions.
     /// </summary>
-    /// <param name="moles">The nonnegative, finite amount to remove, in moles. Amounts above
+    /// <param name="moles">The nonnegative, finite amount to remove, in moles. Amounts at or above
     /// <see cref="TotalMoles" /> remove everything.</param>
     /// <returns>
-    ///     A new detached <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
-    ///     temperature. It is empty when nothing was removed.
+    ///     A new pooled <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
+    ///     temperature. It is empty when nothing was removed. The caller disposes it.
     /// </returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="moles" /> is negative or non-finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback while a tick is executing.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     GasMixture Remove(float moles);
 
     /// <summary>
@@ -187,11 +202,12 @@ public interface IGasMixture
     /// </summary>
     /// <param name="ratio">The finite fraction to remove, clamped to [0, 1].</param>
     /// <returns>
-    ///     A new detached <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
-    ///     temperature.
+    ///     A new pooled <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
+    ///     temperature. The caller disposes it.
     /// </returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="ratio" /> is non-finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback while a tick is executing.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     GasMixture RemoveRatio(float ratio);
 
     /// <summary>
@@ -201,18 +217,19 @@ public interface IGasMixture
     /// <param name="volume">The nonnegative, finite volume to remove, in cubic metres. Values at or above
     /// <see cref="Volume" /> remove everything.</param>
     /// <returns>
-    ///     A new detached <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
-    ///     temperature.
+    ///     A new pooled <see cref="GasMixture" /> holding the removed gas, with this mixture's volume and
+    ///     temperature. The caller disposes it.
     /// </returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="volume" /> is negative or non-finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback while a tick is executing.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     GasMixture RemoveVolume(float volume);
 
     /// <summary>
-    ///     Transfers up to the requested total amount to another mixture owned by the same simulation.
+    ///     Transfers up to the requested total amount to another mixture in the same world.
     /// </summary>
-    /// <param name="destination">A <see cref="GasMixture" /> or voxel mixture owned by <see cref="Owner" />.</param>
-    /// <param name="moles">The nonnegative, finite amount to move, in moles. Amounts above
+    /// <param name="destination">A <see cref="GasMixture" /> or voxel mixture in <see cref="World" />.</param>
+    /// <param name="moles">The nonnegative, finite amount to move, in moles. Amounts at or above
     /// <see cref="TotalMoles" /> move everything.</param>
     /// <returns>The amount actually transferred, in moles (mol). Zero when the destination is this mixture.</returns>
     /// <remarks>
@@ -222,18 +239,17 @@ public interface IGasMixture
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="destination" /> is null.</exception>
     /// <exception cref="ArgumentException">
-    ///     <paramref name="destination" /> was not created by <see cref="AtmosSimulation" /> or belongs to a different
-    ///     simulation.
+    ///     <paramref name="destination" /> was not created by Numos or belongs to a different world.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="moles" /> is negative or non-finite.</exception>
     /// <exception cref="InvalidOperationException">The merged amount, heat capacity, temperature, or pressure is not finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     float TransferTo(IGasMixture destination, float moles);
 
     /// <summary>
-    ///     Transfers a fraction of every gas to another mixture owned by the same simulation.
+    ///     Transfers a fraction of every gas to another mixture in the same world.
     /// </summary>
-    /// <param name="destination">A <see cref="GasMixture" /> or voxel mixture owned by <see cref="Owner" />.</param>
+    /// <param name="destination">A <see cref="GasMixture" /> or voxel mixture in <see cref="World" />.</param>
     /// <param name="ratio">The finite fraction to move, clamped to [0, 1].</param>
     /// <returns>The amount actually transferred, in moles (mol). Zero when the destination is this mixture.</returns>
     /// <remarks>
@@ -241,29 +257,29 @@ public interface IGasMixture
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="destination" /> is null.</exception>
     /// <exception cref="ArgumentException">
-    ///     <paramref name="destination" /> was not created by <see cref="AtmosSimulation" /> or belongs to a different
-    ///     simulation.
+    ///     <paramref name="destination" /> was not created by Numos or belongs to a different world.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="ratio" /> is non-finite.</exception>
     /// <exception cref="InvalidOperationException">The merged amount, heat capacity, temperature, or pressure is not finite.</exception>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     float TransferRatioTo(IGasMixture destination, float ratio);
 
     /// <summary>
-    ///     Creates an owned, detached copy that remains associated with the same simulation.
+    ///     Creates a pooled copy in the same world.
     /// </summary>
     /// <returns>
-    ///     A new <see cref="GasMixture" /> with this mixture's volume, stored temperature, and gas amounts. Cloning a
-    ///     voxel gives a container sized to the voxel volume.
+    ///     A new pooled <see cref="GasMixture" /> with this mixture's volume, stored temperature, and gas amounts. Cloning
+    ///     a voxel gives a container sized to the voxel volume. The caller disposes it.
     /// </returns>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback while a tick is executing.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     GasMixture Clone();
 
     /// <summary>
     ///     Captures a detached, deterministic snapshot of this mixture.
     /// </summary>
     /// <returns>The current values, with gases ordered by ID and only positive amounts included.</returns>
-    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ObjectDisposedException">The mixture, its simulation, or its world has been disposed.</exception>
     GasMixtureSnapshot GetSnapshot();
 }
 
@@ -292,7 +308,7 @@ public readonly record struct GasMixtureSnapshot(
     /// <summary>
     ///     Gets one captured gas amount, returning zero when the gas is absent.
     /// </summary>
-    /// <param name="gasId">The simulation gas ID.</param>
+    /// <param name="gasId">The world gas ID.</param>
     /// <returns>The captured amount in moles.</returns>
     /// <remarks>
     ///     The lookup relies on <see cref="Gases" /> being sorted by ID, which snapshots from

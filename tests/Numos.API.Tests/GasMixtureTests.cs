@@ -12,9 +12,8 @@ public sealed class GasMixtureTests
     public void NamedMixtureOperations_ResolveRegisteredGases(bool useVoxel)
     {
         using var simulation = CreateSimulation();
-        var mixture = useVoxel
-            ? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0)
-            : simulation.CreateGasMixture(1f);
+        using var pooled = useVoxel ? null : simulation.World.CreateGasMixture(1f);
+        IGasMixture mixture = pooled ?? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0);
 
         mixture.SetMoles("Light", 2f);
         mixture.AdjustMoles("Light", -1f);
@@ -32,9 +31,8 @@ public sealed class GasMixtureTests
     public void MixtureMutations_RejectUnregisteredGasesWithoutMutation(bool useVoxel)
     {
         using var simulation = CreateSimulation();
-        var mixture = useVoxel
-            ? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0)
-            : simulation.CreateGasMixture(1f);
+        using var pooled = useVoxel ? null : simulation.World.CreateGasMixture(1f);
+        IGasMixture mixture = pooled ?? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0);
 
         mixture.SetMoles("Light", 2f);
         float beforeTemperature = mixture.Temperature;
@@ -64,17 +62,17 @@ public sealed class GasMixtureTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(() => simulation.CreateGasMixture(0f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => simulation.World.CreateGasMixture(0f), Throws.TypeOf<ArgumentOutOfRangeException>());
             Assert.That(
-                () => simulation.CreateGasMixture(float.PositiveInfinity),
+                () => simulation.World.CreateGasMixture(float.PositiveInfinity),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
 
             Assert.That(
-                () => simulation.CreateGasMixture(1f, -1f),
+                () => simulation.World.CreateGasMixture(1f, -1f),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
 
             Assert.That(
-                () => simulation.CreateGasMixture(1f, float.NaN),
+                () => simulation.World.CreateGasMixture(1f, float.NaN),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
         });
     }
@@ -83,7 +81,7 @@ public sealed class GasMixtureTests
     public void OwnedMixture_SupportsSparseRegisteredGasIdsAndDeterministicSnapshots()
     {
         using var simulation = CreateSimulation();
-        var mixture = simulation.CreateGasMixture(2f, 300f);
+        using var mixture = simulation.World.CreateGasMixture(2f, 300f);
 
         mixture.SetMoles(20, 1.5f);
         mixture.SetMoles(3, 2f);
@@ -94,7 +92,7 @@ public sealed class GasMixtureTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(mixture.Owner, Is.SameAs(simulation));
+            Assert.That(mixture.World, Is.SameAs(simulation.World));
             Assert.That(mixture.ActiveGasCount, Is.EqualTo(2));
             Assert.That(mixture.TotalMoles, Is.EqualTo(3f));
             Assert.That(mixture.GetMoles(999), Is.Zero);
@@ -112,7 +110,7 @@ public sealed class GasMixtureTests
     public void OwnedMixture_VolumeChangesPressureWithoutChangingContents()
     {
         using var simulation = CreateSimulation();
-        var mixture = simulation.CreateGasMixture(1f, 300f);
+        using var mixture = simulation.World.CreateGasMixture(1f, 300f);
         mixture.SetMoles(0, 2f);
         float initialPressure = mixture.Pressure;
 
@@ -131,7 +129,7 @@ public sealed class GasMixtureTests
     public void AddGas_MixesTemperatureByConstantVolumeHeatCapacity()
     {
         using var simulation = CreateSimulation();
-        var mixture = simulation.CreateGasMixture(1f, 300f);
+        using var mixture = simulation.World.CreateGasMixture(1f, 300f);
         mixture.SetMoles(0, 1f);
 
         mixture.AddGas(1, 1f, 600f);
@@ -146,10 +144,10 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void EnergyOperationsUseOwnersCurrentGasRegistry()
+    public void EnergyOperationsUseWorldsCurrentGasRegistry()
     {
         using var simulation = CreateSimulation();
-        var mixture = simulation.CreateGasMixture(1f, 300f);
+        using var mixture = simulation.World.CreateGasMixture(1f, 300f);
         mixture.SetMoles(0, 1f);
         simulation.SetAtmosConfig(
             new AtmosConfig
@@ -167,14 +165,14 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void RemoveRatio_PreservesCompositionTemperatureAndOwner()
+    public void RemoveRatio_PreservesCompositionTemperatureAndWorld()
     {
         using var simulation = CreateSimulation();
-        var source = simulation.CreateGasMixture(3f, 350f);
+        using var source = simulation.World.CreateGasMixture(3f, 350f);
         source.SetMoles(0, 2f);
         source.SetMoles(7, 6f);
 
-        var removed = source.RemoveRatio(0.25f);
+        using var removed = source.RemoveRatio(0.25f);
 
         Assert.Multiple(() =>
         {
@@ -184,7 +182,7 @@ public sealed class GasMixtureTests
             Assert.That(removed.GetMoles(7), Is.EqualTo(1.5f));
             Assert.That(removed.Volume, Is.EqualTo(3f));
             Assert.That(removed.Temperature, Is.EqualTo(350f));
-            Assert.That(removed.Owner, Is.SameAs(simulation));
+            Assert.That(removed.World, Is.SameAs(simulation.World));
             Assert.That(source.TotalMoles + removed.TotalMoles, Is.EqualTo(8f));
         });
     }
@@ -193,10 +191,10 @@ public sealed class GasMixtureTests
     public void CloneAndClear_DoNotShareBackingState()
     {
         using var simulation = CreateSimulation();
-        var source = simulation.CreateGasMixture(2f, 320f);
+        using var source = simulation.World.CreateGasMixture(2f, 320f);
         source.SetMoles(4, 3f);
 
-        var clone = source.Clone();
+        using var clone = source.Clone();
         source.Clear();
 
         Assert.Multiple(() =>
@@ -212,9 +210,9 @@ public sealed class GasMixtureTests
     public void TransferTo_ConservesMolesAndSensibleEnergy()
     {
         using var simulation = CreateSimulation();
-        var source = simulation.CreateGasMixture(1f, 600f);
+        using var source = simulation.World.CreateGasMixture(1f, 600f);
         source.SetMoles(1, 2f);
-        var destination = simulation.CreateGasMixture(1f, 300f);
+        using var destination = simulation.World.CreateGasMixture(1f, 300f);
         destination.SetMoles(0, 1f);
 
         float transferred = source.TransferTo(destination, 1f);
@@ -232,13 +230,13 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void TransferTo_DifferentOwnerIsRejectedWithoutMutation()
+    public void TransferTo_DifferentWorldIsRejectedWithoutMutation()
     {
         using var firstSimulation = CreateSimulation();
         using var secondSimulation = CreateSimulation();
-        var source = firstSimulation.CreateGasMixture(1f, 300f);
+        using var source = firstSimulation.World.CreateGasMixture(1f, 300f);
         source.SetMoles(0, 2f);
-        var destination = secondSimulation.CreateGasMixture(1f, 300f);
+        using var destination = secondSimulation.World.CreateGasMixture(1f, 300f);
 
         Assert.That(() => source.TransferTo(destination, 1f), Throws.ArgumentException);
         Assert.Multiple(() =>
@@ -305,7 +303,7 @@ public sealed class GasMixtureTests
         config.DefaultTemperatureFallback = 123f;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var owned = simulation.CreateGasMixture(1f, 300f);
+        using var owned = simulation.World.CreateGasMixture(1f, 300f);
         var voxel = simulation.GetVoxelGasMixture(chunk, 0);
 
         owned.SetMoles(0, 1f);
@@ -358,7 +356,7 @@ public sealed class GasMixtureTests
         using var simulation = CreateSimulation();
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetVoxelClassification(chunk, 0, VoxelClassification.RoomSolid);
-        var source = simulation.CreateGasMixture(1f, 300f);
+        using var source = simulation.World.CreateGasMixture(1f, 300f);
         source.SetMoles(0, 2f);
         var destination = simulation.GetVoxelGasMixture(chunk, 0);
 
@@ -395,11 +393,11 @@ public sealed class GasMixtureTests
         using var simulation = CreateSimulation();
         var chunk = simulation.CreateAndRegisterChunk(default);
         var voxel = simulation.GetVoxelGasMixture(chunk, 0, 0, 0);
-        var canister = simulation.CreateGasMixture(1f, 400f);
+        using var canister = simulation.World.CreateGasMixture(1f, 400f);
         canister.SetMoles(0, 4f);
 
         Assert.That(canister.TransferTo(voxel, 3f), Is.EqualTo(3f));
-        var sample = voxel.Remove(1f);
+        using var sample = voxel.Remove(1f);
 
         Assert.Multiple(() =>
         {
@@ -429,7 +427,7 @@ public sealed class GasMixtureTests
     public void MixtureOperationsAreSerializedAcrossThreads()
     {
         using var simulation = CreateSimulation();
-        var mixture = simulation.CreateGasMixture(1f, 300f);
+        using var mixture = simulation.World.CreateGasMixture(1f, 300f);
 
         Parallel.For(0, 1000, _ => mixture.AdjustMoles(0, 1f));
 
@@ -440,7 +438,7 @@ public sealed class GasMixtureTests
     public void SimulationDisposalInvalidatesOwnedAndVoxelMixtures()
     {
         var simulation = CreateSimulation();
-        var owned = simulation.CreateGasMixture(1f, 300f);
+        using var owned = simulation.World.CreateGasMixture(1f, 300f);
         var chunk = simulation.CreateAndRegisterChunk(default);
         var voxel = simulation.GetVoxelGasMixture(chunk, 0);
 
@@ -450,8 +448,8 @@ public sealed class GasMixtureTests
         {
             Assert.That(() => _ = owned.TotalMoles, Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => _ = voxel.TotalMoles, Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(owned.Owner, Is.SameAs(simulation));
-            Assert.That(voxel.Owner, Is.SameAs(simulation));
+            Assert.That(owned.World, Is.SameAs(simulation.World));
+            Assert.That(voxel.World, Is.SameAs(simulation.World));
         });
     }
 
@@ -459,7 +457,7 @@ public sealed class GasMixtureTests
     public void TransferTo_RejectsExternalInterfaceImplementations()
     {
         using var simulation = CreateSimulation();
-        var source = simulation.CreateGasMixture(1f, 300f);
+        using var source = simulation.World.CreateGasMixture(1f, 300f);
         source.SetMoles(0, 1f);
 
         Assert.That(() => source.TransferTo(new ExternalMixture(simulation), 1f), Throws.ArgumentException);
@@ -491,7 +489,7 @@ public sealed class GasMixtureTests
 
     private sealed class ExternalMixture(AtmosSimulation owner) : IGasMixture
     {
-        public AtmosSimulation Owner { get; } = owner;
+        public AtmosWorld World { get; } = owner.World;
 
         public float GetMoles(string gasName)
         {

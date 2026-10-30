@@ -109,6 +109,31 @@ solver's selector picks it up. See
 [Extending portal and dock transport](atmospherics_technical_documentation.md#extending-portal-and-dock-transport)
 for the full pattern, including how to replace default transport entirely or per link.
 
+### Link a canister to a voxel or another canister
+
+A `GasMixture` has a `CellRef`, so a canister can take part in any link. It can end a portal, a dock edge, or an
+edge in `CreateLinks`. The other end is a voxel or another mixture. A world with no simulation can still link
+canisters to each other.
+
+```csharp
+// The host keeps the canister as long as the entity exists and disposes it when the entity is deleted.
+GasMixture canister = world.CreateGasMixture(volume: 0.1f);
+canister.AddGas("Oxygen", 40f, 293.15f);
+
+// The valve opens at the next tick. Gas and heat then flow until the pressures match.
+AtmosPortalHandle valve = world.CreatePortal(canister.CellRef, station.GetCellRef(stationChunk, stationVoxelIndex));
+```
+
+The canister keeps its own volume, so the pressure settles where both containers hold the same pressure. A 0.1 m³
+canister next to a 1 m³ voxel ends with about a tenth as many moles as the voxel. To close the valve, call
+`world.DestroyPortal(valve)`. Disposing the mixture destroys every link set that uses it, and the links leave the
+solver at the next tick boundary. A mixture reference carries the generation of the mixture's slot. An old `CellRef`
+kept after disposal fails with `ArgumentException`, also after a new mixture takes the slot.
+
+Custom solvers see the mixture as an explicit neighbor of the voxel. The mixture has no chunk, so
+`context.TryGetChunk` returns `false` for its reference. Use `context.GasMixtures.TryGetPage` to reach its data (see
+"Keep per-mixture data in a custom solver").
+
 ## Use portals from a custom solver
 
 A plain `world.Solvers.Register(...)` stage cannot see portals or docks. `context.Topology` compiles to an
@@ -410,6 +435,50 @@ chunk fields in the file" in [deterministic replay](deterministic_replay.md).
 The accessors are C# 14 extension properties. A project pinned to an older `LangVersion` gets a compile error. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
+
+### Keep per-mixture data in a custom solver
+
+A standalone `GasMixture` is not in any simulation, so `context.Chunks(simulation)` never lists it. Numos stores
+mixtures as cells in pages. `context.GasMixtures` gives the solver those pages. A page is storage and not space,
+because cells in a page never neighbor each other. A transport solver that walks chunks can therefore ignore mixtures.
+
+A page works like a chunk view. `page.Get(field)` returns the field's array with one element per cell, and the field's
+rollback setting applies. `page.IsAllocated(cell)` tells whether a mixture uses the cell. `page.GetVolume`,
+`page.GetSlot`, and `page.GetCellRef` give its volume and address. The view works in a world with no simulation.
+
+This stage keeps a running heat exposure for every mixture. It reads the temperature through `Numos.API.Dangerous`,
+because the supported view does not expose gas or temperature.
+
+```csharp
+using Numos.API;
+using Numos.API.Dangerous;
+
+public static partial class HeatChunkData
+{
+    [ChunkData("my-mod/heat/exposure")]
+    public static partial ChunkField<float> Exposure { get; }
+}
+
+world.Solvers.Register("my-mod/heat-exposure", context =>
+{
+    foreach (AtmosSolverGasMixturePage page in context.GasMixtures)
+    {
+        Span<float> exposure = page.Get(HeatChunkData.Exposure).AsSpan();
+        Span<float> temperature = page.Dangerous().Chunk.Temperature;
+        for (ushort cell = 0; cell < page.CellCount; cell++)
+        {
+            if (page.IsAllocated(cell) && temperature[cell] > 400f)
+                exposure[cell] += 1f;
+        }
+    }
+});
+```
+
+Allocation and release reset every per-cell field of the cell, so a new mixture never sees data that an earlier
+mixture in the slot left. Check `IsAllocated` before you trust an element, because a solver can still write a free
+cell. To find the page of one mixture, call `context.GasMixtures.TryGetPage(canister.CellRef, out var page)` and index
+the field with `canister.CellRef.LocalVoxelIndex`. The call returns `false` for a grid cell and for a mixture that was
+disposed, also after a new mixture takes its slot.
 
 ## Solver configurations
 
@@ -897,6 +966,12 @@ dotnet add package Numos.API.Dangerous --prerelease
 
 Importing `Numos.API.Dangerous` adds the `simulation.Dangerous()` extension. The package is for measured, performance-sensitive, or experimental work where the supported facade falls short. It does not replace the supported lifecycle, topology, and physics rules.
 
+The dangerous package also opens a mixture page. `page.Dangerous()` on a view from `context.GasMixtures` gives the live
+chunk storage of the page and a `Volumes` span. `context.Dangerous().GetGasMixturePage(canister.CellRef)` resolves one
+mixture. A raw write to gas, temperature, or volume does not repair the pressure and heat-capacity caches of the cell.
+Mixture cells have no transport pass that would repair them later, so the solver must keep them consistent. Nothing
+written through the view is recorded, so the write must be deterministic solver work.
+
 The dangerous surface can bypass validation. It can also change faster than the supported API. Keep its use behind a small adapter in your engine integration. Document every assumption it relies on. Prefer the safe API whenever it does the job.
 
 ## Recording and deterministic replay
@@ -907,9 +982,24 @@ state hashes. A single grid is a one-simulation world, so use `simulation.World`
 `AtmosSimulation` still has grid-only `CaptureCheckpoint` and `RestoreCheckpoint` for quick rollback of one grid
 outside a recording.
 
+A `GasMixture` handle is an object of one world, so it cannot follow a mixture into a world that loads a replay. A
+disposed handle also stays disposed after a restore brings its mixture back. Save the handle's `Id` with the entity
+that owns the canister. After the restore, load, or replay, get a new handle from the id:
+
+```csharp
+GasMixtureId saved = canister.Id;
+
+// Later, in this world or in one that replayed its history:
+if (world.TryGetGasMixture(saved, out GasMixture? restored))
+    entity.Canister = restored;
+```
+
+`world.GetGasMixtureIds()` lists every live mixture in slot order, so a loader can also find mixtures it has no id
+for. An id never names a later mixture in the same slot.
+
 `AtmosWorldReplayTimeline` retains history for inspection. It can continue the simulation from a selected historical
 state. The Viewer layers session-only branches over the world timeline. It can export the selected branch as a linear
 replay.
 
 See [deterministic replay](deterministic_replay.md) for examples, the optional `Numos.Serialization` and
-`Numos.Serialization.FileSystem` packages, compatibility rules, detached-mixture scope, and benchmark commands.
+`Numos.Serialization.FileSystem` packages, compatibility rules, gas mixture replay, and benchmark commands.

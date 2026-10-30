@@ -227,7 +227,7 @@ internal sealed partial class AtmosKernel
                     for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                         chunk.ActiveGases[gas].Moles[index] = 0f;
 
-                    ApplyVoxelMixtureTotals(chunk, index, default);
+                    GasMixtureCells.ApplyTotals(chunk, index, default);
                 }
             }
         }

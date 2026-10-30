@@ -15,9 +15,9 @@ internal class ReactionSolver : IAtmosSolverStage
     private const string IgnitionSourceTempKey = "IgnitionSourceTemp";
     private const string IgnitionSourceVolumeKey = "IgnitionSourceVolume";
 
-    private static readonly ChunkFieldDescriptor<Scalar> IgnitionPercentField =
+    internal static readonly ChunkFieldDescriptor<Scalar> IgnitionPercentField =
         ChunkFieldRegistry.Register<Scalar>(IgnitionPercentKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
-    private static readonly ChunkFieldDescriptor<Kelvin> IgnitedVolumeTempField =
+    internal static readonly ChunkFieldDescriptor<Kelvin> IgnitedVolumeTempField =
         ChunkFieldRegistry.Register<Kelvin>(IgnitedVolumeTempKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
     private static readonly ChunkFieldDescriptor<Kelvin> IgnitionSourceTempField =
         ChunkFieldRegistry.Register<Kelvin>(IgnitionSourceTempKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
@@ -58,22 +58,11 @@ internal class ReactionSolver : IAtmosSolverStage
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        // Fast skip for empty configs.
-        if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
+        if (HasNoReactions(context.TickConfig))
             return;
 
         var tables = context.TickConfig.GetReactionTables();
-
-        // Tells ProcessChunk whether this per-chunk dispatch already saturates the worker pool.
-        // This mirrors the awakeChunkCount gate in ThermodynamicsSolver and PhaseChangeSolver.
-        // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its own parallelism.
-        // Once enough awake chunks occupy every worker, a second layer of parallelism inside each chunk is overhead.
-        int awakeChunkCount = 0;
-        for (int i = 0; i < context.Chunks.Length; i++)
-        {
-            if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveAirCount > 0)
-                awakeChunkCount++;
-        }
+        int awakeChunkCount = CountAwakeChunks(context.Chunks);
 
         _anyFullyIgnited = false;
 
@@ -87,6 +76,51 @@ internal class ReactionSolver : IAtmosSolverStage
                 context.Chunks.Length,
                 new TransferIgnitionAction(this, context.Chunks, context.TickConfig, context));
         }
+    }
+
+    /// <summary>
+    ///     Reacts chunks whose voxels are independent cells with their own volumes. It never transfers ignition,
+    ///     because the cells have no neighbors.
+    /// </summary>
+    /// <param name="chunks">The chunks to react.</param>
+    /// <param name="cellVolumes">The volume of every voxel in each chunk, in the same order as <paramref name="chunks" />.</param>
+    /// <param name="config">The solver settings captured for this tick.</param>
+    /// <param name="deltaTime">The gas time the reaction stage advances.</param>
+    internal void SolveIsolated(
+        AtmosChunk[] chunks, CubicMetre[][] cellVolumes, AtmosSolverConfigSnapshot config, Second deltaTime)
+    {
+        Debug.Assert(chunks.Length == cellVolumes.Length);
+        if (HasNoReactions(config))
+            return;
+
+        var tables = config.GetReactionTables();
+        int awakeChunkCount = CountAwakeChunks(chunks);
+
+        ParallelPhase.Run(
+            chunks.Length,
+            new ProcessChunkAction(this, chunks, config, tables, awakeChunkCount, deltaTime, cellVolumes));
+    }
+
+    // Fast skip for empty configs.
+    private static bool HasNoReactions(AtmosSolverConfigSnapshot config)
+    {
+        return GasReactionConfig.Get(config).Count == 0 || config.GasPropertyCount == 0;
+    }
+
+    // Tells ProcessChunk whether this per-chunk dispatch already saturates the worker pool.
+    // This mirrors the awakeChunkCount gate in ThermodynamicsSolver and PhaseChangeSolver.
+    // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its own parallelism.
+    // Once enough awake chunks occupy every worker, a second layer of parallelism inside each chunk is overhead.
+    private static int CountAwakeChunks(AtmosChunk[] chunks)
+    {
+        int awakeChunkCount = 0;
+        for (int i = 0; i < chunks.Length; i++)
+        {
+            if (chunks[i].IsAwake && chunks[i].ActiveAirCount > 0)
+                awakeChunkCount++;
+        }
+
+        return awakeChunkCount;
     }
 
     private static Mole[] RentReactionSpeeds(int reactionCount)
@@ -289,9 +323,13 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     At or above it, the outer per-chunk dispatch already saturates the pool, so the pass runs sequentially.
     ///     Defaults to 1 (parallelize) for callers processing a single chunk directly.
     /// </param>
+    /// <param name="cellVolumes">
+    ///     Optional volume of every voxel, indexed by local voxel index. Standalone mixture pages pass it so each
+    ///     cell reacts, and writes its pressure back, at its own volume. Null uses the configured voxel volume.
+    /// </param>
     internal void ProcessChunk(
         AtmosChunk chunk, Second deltaTime, IAtmosConfig config, ReactionTables tables, Mole[]? reactionCount = null,
-        int awakeChunkCount = 1)
+        int awakeChunkCount = 1, CubicMetre[]? cellVolumes = null)
     {
         Debug.Assert(tables.GasData.Length == config.GasPropertyCount, "Reaction tables were built from another config.");
 
@@ -337,7 +375,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 sourceVolumes,
                 sourceTemps,
                 mixtureLength,
-                tables));
+                tables,
+                cellVolumes));
 
         // Put data back. This O(activeAirCount * mixtureLength) pass does not shrink with worker count.
         // Run serially, it caps scaling for a dense chunk that is the only source of parallel work
@@ -365,13 +404,16 @@ internal class ReactionSolver : IAtmosSolverStage
             }
 
             int trackedChannels = chunk.ActiveGasCount;
-            ParallelPhase.Run(activeAirCount, new WriteBackAction(chunk, mixtures, newTemps, mixtureLength, config, trackedChannels));
+            ParallelPhase.Run(activeAirCount, new WriteBackAction(chunk, mixtures, newTemps, mixtureLength, config, trackedChannels, cellVolumes));
         }
         else
         {
             for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+                PascalPerMoleKelvin pressurePerMoleKelvin = cellVolumes == null
+                    ? config.PressurePerMoleKelvin
+                    : AtmosPhysicalConstants.MolarGasConstant / cellVolumes[voxelIndex];
                 Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
                 int c = chunk.ActiveGasCount;
                 // Adjust moles from the mixture vector.
@@ -386,7 +428,7 @@ internal class ReactionSolver : IAtmosSolverStage
                             diff,
                             newTemps[activeIndex],
                             config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
-                            config.PressurePerMoleKelvin);
+                            pressurePerMoleKelvin);
 
                         // Fix rounding errors that cause bad values.
                         if (gasChannel.Moles[voxelIndex] < 1e-10)
@@ -408,7 +450,7 @@ internal class ReactionSolver : IAtmosSolverStage
                         mixtureVector[i],
                         newTemps[activeIndex],
                         config.GetMolarHeatCapacityAtConstantVolume(i),
-                        config.PressurePerMoleKelvin);
+                        pressurePerMoleKelvin);
                 }
             }
         }
@@ -954,11 +996,14 @@ internal class ReactionSolver : IAtmosSolverStage
         IAtmosConfig config,
         ReactionTables tables,
         int awakeChunkCount,
-        Second deltaTime) : IAction
+        Second deltaTime,
+        CubicMetre[][]? cellVolumes = null) : IAction
     {
         public void Invoke(int index)
         {
-            solver.ProcessChunk(chunks[index], deltaTime, config, tables, awakeChunkCount: awakeChunkCount);
+            solver.ProcessChunk(
+                chunks[index], deltaTime, config, tables,
+                awakeChunkCount: awakeChunkCount, cellVolumes: cellVolumes?[index]);
         }
     }
 
@@ -982,11 +1027,15 @@ internal class ReactionSolver : IAtmosSolverStage
         Kelvin[] newTemps,
         int mixtureLength,
         IAtmosConfig config,
-        int trackedChannels) : IAction
+        int trackedChannels,
+        CubicMetre[]? cellVolumes) : IAction
     {
         public void Invoke(int activeIndex)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            PascalPerMoleKelvin pressurePerMoleKelvin = cellVolumes == null
+                ? config.PressurePerMoleKelvin
+                : AtmosPhysicalConstants.MolarGasConstant / cellVolumes[voxelIndex];
             Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
             foreach (var gasChannel in chunk.ActiveGases.AsSpan(0, trackedChannels))
             {
@@ -999,7 +1048,7 @@ internal class ReactionSolver : IAtmosSolverStage
                         diff,
                         newTemps[activeIndex],
                         config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
-                        config.PressurePerMoleKelvin);
+                        pressurePerMoleKelvin);
 
                     // Fix rounding errors that cause bad values.
                     if (gasChannel.Moles[voxelIndex] < 1e-10)
@@ -1013,7 +1062,7 @@ internal class ReactionSolver : IAtmosSolverStage
         ReactionSolver solver,
         AtmosChunk chunk,
         Second deltaTime,
-        CubicMetre volume,
+        CubicMetre chunkVolume,
         IAtmosConfig config,
         Mole[]? reactionCount,
         Mole[][]? reactionFeedbacks,
@@ -1024,11 +1073,13 @@ internal class ReactionSolver : IAtmosSolverStage
         CubicMetre[] sourceVolumes,
         Kelvin[] sourceTemps,
         int mixtureLength,
-        ReactionTables tables) : IAction
+        ReactionTables tables,
+        CubicMetre[]? cellVolumes) : IAction
     {
         public void Invoke(int activeIndex)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            CubicMetre volume = cellVolumes == null ? chunkVolume : cellVolumes[voxelIndex];
             Kelvin temp = chunk.Temperature[voxelIndex];
             Mole[]? reactionFeedback =
                 reactionCount == null ? null : ArrayPool<Mole>.Shared.Rent(tables.Reactions.Count);

@@ -100,7 +100,7 @@ internal static class EulerMixture
     /// <param name="volume">Voxel volume.</param>
     /// <param name="pressurePerMoleKelvin">
     ///     <c>R / V</c>, so the pressure is the same expression as
-    ///     <see cref="AtmosSolverMath.CalculatePressure" /> and agrees bitwise with the rest of the kernel.
+    ///     <see cref="AtmosSolverMath.CalculatePressure(IAtmosConfig, Mole, Kelvin)" /> and agrees bitwise with the rest of the kernel.
     /// </param>
     /// <param name="state">
     ///     The primitive state, or all zeros unless the result is <see cref="EulerCellKind.Gas" />.

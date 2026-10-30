@@ -54,6 +54,26 @@ public enum AtmosWorldOperationCode : ushort
     ///     Replaces the <c>[NumosSerialize]</c> state of one class solver after the host edited it.
     /// </summary>
     SetSolverState = 9,
+
+    /// <summary>
+    ///     Allocates a standalone gas mixture in the world's mixture pool.
+    /// </summary>
+    CreateGasMixture = 10,
+
+    /// <summary>
+    ///     Frees a standalone gas mixture slot.
+    /// </summary>
+    ReleaseGasMixture = 11,
+
+    /// <summary>
+    ///     Changes the volume of a standalone gas mixture.
+    /// </summary>
+    SetGasMixtureVolume = 12,
+
+    /// <summary>
+    ///     Replaces the resolved content of a standalone gas mixture.
+    /// </summary>
+    SetGasMixture = 13
 }
 
 /// <summary>
@@ -242,6 +262,122 @@ public sealed record SetAtmosWorldSolverStateOperation(string Name, ReadOnlyMemo
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetSolverState;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Records the allocation of a standalone gas mixture.
+/// </summary>
+/// <param name="Slot">The pool slot the allocation received.</param>
+/// <param name="Generation">The generation of that slot after the allocation.</param>
+/// <param name="Volume">The container volume, in cubic metres.</param>
+/// <param name="Temperature">The initial temperature, in kelvins.</param>
+/// <remarks>
+///     The pool hands out the lowest free slot, so replay allocates the same slot. Replay throws
+///     <see cref="InvalidOperationException" /> when the pool returns a different slot or generation.
+/// </remarks>
+public sealed record CreateGasMixtureOperation(int Slot, uint Generation, float Volume, float Temperature)
+    : AtmosWorldOperation
+{
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.CreateGasMixture;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Records the release of a standalone gas mixture.
+/// </summary>
+/// <param name="Slot">The pool slot that was freed.</param>
+/// <param name="Generation">The generation the released handle held.</param>
+public sealed record ReleaseGasMixtureOperation(int Slot, uint Generation) : AtmosWorldOperation
+{
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.ReleaseGasMixture;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Records a change to the volume of a standalone gas mixture.
+/// </summary>
+/// <param name="Slot">The pool slot of the mixture.</param>
+/// <param name="Generation">The generation of the mixture's handle.</param>
+/// <param name="Volume">The new container volume, in cubic metres.</param>
+public sealed record SetGasMixtureVolumeOperation(int Slot, uint Generation, float Volume) : AtmosWorldOperation
+{
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetGasMixtureVolume;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Sets the resolved gas and thermal state of a standalone gas mixture, including its caches and the channel
+///     order of its pool page.
+/// </summary>
+public sealed record SetGasMixtureOperation : AtmosWorldOperation
+{
+    internal SetGasMixtureOperation(int slot, uint generation, GasMixtureCellContent content)
+    {
+        Slot = slot;
+        Generation = generation;
+        Temperature = content.Temperature;
+        Pressure = content.Pressure;
+        HeatCapacity = content.HeatCapacity;
+        Gases = Array.AsReadOnly(content.Gases);
+    }
+
+    internal SetGasMixtureOperation(
+        int slot,
+        uint generation,
+        float temperature,
+        float pressure,
+        float heatCapacity,
+        IEnumerable<AtmosGasAmount> gases)
+    {
+        ArgumentNullException.ThrowIfNull(gases);
+        Slot = slot;
+        Generation = generation;
+        Temperature = temperature;
+        Pressure = pressure;
+        HeatCapacity = heatCapacity;
+        Gases = Array.AsReadOnly(gases.ToArray());
+    }
+
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetGasMixture;
+
+    /// <summary>
+    ///     Gets the pool slot of the mixture.
+    /// </summary>
+    public int Slot { get; }
+
+    /// <summary>
+    ///     Gets the generation of the mixture's handle.
+    /// </summary>
+    public uint Generation { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting temperature, in kelvins.
+    /// </summary>
+    public float Temperature { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting cached pressure, in pascals.
+    /// </summary>
+    public float Pressure { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting cached heat capacity, in joules per kelvin.
+    /// </summary>
+    public float HeatCapacity { get; }
+
+    /// <summary>
+    ///     Gets the amount of every channel of the mixture's pool page in page order, zero amounts included.
+    /// </summary>
+    public IReadOnlyList<AtmosGasAmount> Gases { get; }
 
     internal override void Apply(AtmosWorld world) => world.Apply(this);
 }

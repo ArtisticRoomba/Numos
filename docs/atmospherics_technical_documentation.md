@@ -320,23 +320,49 @@ applications are deterministic internal work, so the recorder does not log them 
 `IGasMixture` gives portable containers and individual voxels one interaction model without breaking the solver's
 structure-of-arrays layout:
 
-- `AtmosSimulation.CreateGasMixture(volume, temperature)` returns a concrete `GasMixture` with independent sparse
-  storage. Its `Volume` can change. It suits canisters, tanks, pipes, pumps, and temporary parcels.
+- `AtmosWorld.CreateGasMixture(volume, temperature)` returns a `GasMixture`, a handle to a cell in the world's mixture
+  pool. Its `Volume` can change. It suits canisters, tanks, pipes, pumps, and temporary parcels. The caller disposes
+  the handle. The same applies to the mixtures that `Remove`, `RemoveRatio`, `RemoveVolume`, and `Clone` return. These
+  four calls allocate a pooled mixture even on a voxel mixture. A solver callback cannot allocate, so they throw during
+  a tick. Use `TransferTo` or `TransferRatioTo` from a solver.
 - `AtmosSimulation.GetVoxelGasMixture(...)` returns an `IGasMixture` capability over one live voxel. It exposes no
   spans, gas-channel arrays, or references into pooled solver memory.
-- Every mixture retains its owning `AtmosSimulation`. Transfers require both endpoints to have the same owner, so one
-  applied configuration snapshot defines the gas IDs and molar heat capacities.
+- Every mixture belongs to one `AtmosWorld`. Transfers require both endpoints to be in the same world, so one applied
+  configuration snapshot defines the gas IDs and molar heat capacities. A canister can transfer into a voxel of any
+  simulation in its world, and a voxel can transfer into a voxel of another simulation.
 - `IGasMixture` is a common capability surface, not an extension point. Transfer endpoints must be mixtures created by
-  `AtmosSimulation`. Numos rejects external implementations before either endpoint changes.
+  Numos. Numos rejects external implementations before either endpoint changes.
 - A voxel capability records the chunk generation at creation. If the chunk is removed and recreated at the same
   position, the old capability becomes stale instead of retargeting to unrelated state.
-- Voxel reads and mutations enter the simulation state lock. Multi-endpoint transfers capture and validate both
-  results before committing, so a tick never observes a half-applied transfer.
-- Solid and void voxels can be inspected but reject mutation. Disposing the owner invalidates both container and
-  voxel mixtures.
+- A `GasMixture` records a slot and a generation. Disposing it frees the slot and makes later use throw
+  `ObjectDisposedException`. A restore can drop the slot, and the handle then throws `InvalidOperationException` until
+  a restore or replay brings back the same allocation. `GasMixture.Id` holds the same slot and generation as a value.
+  `AtmosWorld.TryGetGasMixture` turns it back into a new handle, also in a world that replayed the history.
+- Pool cells are 256-cell pages of ordinary chunk storage, each with its own volume. The world runs phase change in
+  the `thermodynamics` stage and reactions in the `gas-reactions` stage. A canister of hot fuel and oxidizer therefore
+  reacts without any simulation in the world.
+  Cells never exchange gas with each other or with a grid. Only a transfer or an explicit link (section 11.1) moves
+  gas.
+- A host that forgets to dispose a mixture keeps its slot until the world is disposed or a restore drops it. The pool
+  has no finalizer, because finalizer timing would make slot allocation nondeterministic. While a mixture is live, a
+  grid-only `AtmosSimulation.RestoreCheckpoint` throws.
+- Every operation enters its locks in a fixed order, so it waits for an in-progress tick instead of racing it. A solver
+  callback runs on the tick thread, so it can call mixture members. A worker thread that a callback starts must not
+  call mixture members, because the tick thread holds the locks that the call needs.
+  Multi-endpoint transfers capture and validate both results before committing, so a tick never observes a
+  half-applied transfer.
+- Solid and void voxels can be inspected but reject mutation. Disposing the world invalidates container mixtures.
+  Disposing a simulation invalidates its voxel mixtures.
+
+A pool page is an ordinary chunk, but no grid owns it. A mixture placed in a grid chunk would break in several ways.
+Vacuum cleanup empties an isolated cell below 1 Pa. Sleep follows transport activity and clears the ignition fields.
+Ignition transfer spreads fire to face neighbors, which would be unrelated canisters. All chunks of one grid also share
+dimensions and one voxel volume. Outside the grid, a page runs only the per-cell stages, and each cell uses its own
+`R / V`. A sealed cell whose volume equals the configured voxel volume therefore gives bit-identical results to a sealed
+grid voxel.
 
 Application code identifies gases by their registered names. Injection and mixture mutation reject unregistered gases.
-The numeric overloads also validate registry membership. Names resolve against the owner's current configuration, while
+The numeric overloads also validate registry membership. Names resolve against the world's current configuration, while
 snapshots and replay retain numeric IDs.
 
 The common surface exposes volume, temperature, pressure, total moles, sparse gas lookup, snapshots, proportional
@@ -364,12 +390,12 @@ incoming-gas operations still require finite, nonnegative temperatures.
 This example assumes `"Oxygen"` has been registered:
 
 ```csharp
-var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
+using var canister = simulation.World.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
 canister.AddGas("Oxygen", moles: 2f, temperature: 293.15f);
 
 IGasMixture voxel = simulation.GetVoxelGasMixture(chunk, x: 4, y: 3, z: 0);
 float moved = canister.TransferTo(voxel, moles: 0.5f);
-GasMixture sample = voxel.RemoveRatio(0.1f);
+using GasMixture sample = voxel.RemoveRatio(0.1f);
 ```
 
 The API follows the useful container semantics of
@@ -1488,6 +1514,36 @@ instead would look more consistent, but that flux is a rate, and a link is appli
 so the duct would overdraw its source by an order of magnitude before the limiter clipped it to something arbitrary.
 Cartesian faces avoid that because the Euler stage substeps them. Links are not part of that loop.
 
+A link can also end at a standalone `GasMixture` (see `GasMixture.CellRef`), whose volume differs from the voxel
+volume. Each endpoint then computes its pressure from its own `R / V`. Bulk flow moves
+
+`Δn = coeff · ΔP / (R · T_hi) · V_h`, with `V_h = 2 / (1 / V₁ + 1 / V₂)`,
+
+where `T_hi` is the temperature of the higher-pressure cell and `V_h` is the harmonic mean of the two volumes.
+Moving `Δn` changes the pressure difference by `Δn · R · T · (1 / V₁ + 1 / V₂)`. At `coeff = 0.5` the difference
+therefore drops to zero in one step. When both volumes are equal the formula gives `coeff · ΔP · V / (R · T)`.
+
+A link between two grid voxels keeps that single-volume expression. `2 / (2 / V)` does not round back to `V` in every
+case, and grid-only worlds must stay bit-identical. Diffusion for a mixture cell keeps the configured voxel spacing,
+and its rate scales by `V_voxel / V_cell`. Without the scale, two cells of unequal volume settle on equal moles and
+not on equal concentration.
+
+The per-edge cap of one seventh needs care on such a link. A grid voxel caps its outflow on its own. A canister much
+smaller than the voxel would then hit the cap while the voxel's inflow to it stays uncapped. The canister would settle
+above room pressure: a 1 L canister on a 1 m³ voxel ends at about three times the room pressure. So a link with a
+mixture endpoint computes both uncapped diffusion fractions `d₁` and `d₂` and scales both by one factor:
+
+`λ = min(1, (1/7) / max(d₁, d₂))`.
+
+The ratio of the two flows survives the cap, so the net flow is zero exactly at equal concentration. Each scaled
+fraction is at most one seventh, so one tick closes at most two sevenths of the concentration difference. The pair
+therefore relaxes without overshoot. The shared availability limiter still keeps every amount nonnegative and conserves
+moles. A link between two grid voxels keeps the separate cap per side. Thermal conductance has no volume term.
+
+The solver reads its configuration from a snapshot the world captures when a tick runs a stage. A world with no
+simulation therefore still moves gas between linked mixtures. Releasing a mixture destroys every link set that
+uses it, the same way removing a chunk does. Replay repeats the destruction when it applies the recorded release.
+
 ### 11.2 Creating and removing links
 
 Creating or destroying a link is queued, not immediate. The change lands at the next tick boundary, when
@@ -1906,6 +1962,11 @@ Parallel.For(0, chunks.Count, index =>
         exposure[voxel] += temperature[voxel] > 500f ? 1f : 0f;
 });
 ```
+
+Standalone gas mixtures are pool cells, so they are not in `context.Chunks(simulation)`. Use
+`context.GasMixtures` for their pages. `page.Dangerous()` gives the live page storage plus a `Volumes` span, and
+`context.Dangerous().GetGasMixturePage(cell)` resolves one mixture. Raw writes there must keep each cell's pressure
+and heat-capacity caches equal to what its gas, temperature, and volume imply.
 
 ### 12.5 Stages that touch portals and docks
 

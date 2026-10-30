@@ -254,3 +254,52 @@ public readonly ref struct AtmosDangerousGasChannel
     /// </remarks>
     public Span<float> Moles => _channel.Moles.AsSpan(0, _voxelCount);
 }
+
+/// <summary>
+///     Live, unchecked views over one page of the gas mixture pool.
+/// </summary>
+/// <remarks>
+///     <para>
+///         A page is a 256 by 1 by 1 chunk whose voxels are standalone <see cref="GasMixture" /> cells. Use
+///         <see cref="Chunk" /> for gas, temperature, and the cached totals. The same recording and lifetime rules as
+///         <see cref="AtmosDangerousChunk" /> apply. Nothing done through this view is recorded.
+///     </para>
+///     <para>
+///         The pool keeps each cell's <see cref="AtmosDangerousChunk.TotalPressure" /> and
+///         <see cref="AtmosDangerousChunk.TotalHeatCapacity" /> equal to what its gas, temperature, and volume imply.
+///         A raw write to gas, temperature, or <see cref="Volumes" /> must also update both caches, and the vacuum flag
+///         when the pressure reaches zero.
+///         The built-in stages recompute what they need and do not read the caches. The pool refreshes them when it
+///         runs phase change or reactions. Until then, other solvers read the stale values. A checkpoint, a state hash,
+///         or a recorded mixture write taken in between also stores them.
+///     </para>
+///     <para>
+///         A page never sleeps, and a write must not change the classification of a cell. Free cells have volume zero
+///         and must stay that way. Allocation and release only happen outside a tick.
+///     </para>
+/// </remarks>
+public readonly ref struct AtmosDangerousGasMixturePage
+{
+    private readonly AtmosChunk _chunk;
+    private readonly float[] _volumes;
+
+    internal AtmosDangerousGasMixturePage(AtmosChunk chunk, float[] volumes)
+    {
+        _chunk = chunk;
+        _volumes = volumes;
+    }
+
+    /// <summary>
+    ///     The page's live chunk storage, with one voxel per cell.
+    /// </summary>
+    public AtmosDangerousChunk Chunk => new(_chunk);
+
+    /// <summary>
+    ///     Live per-cell volume storage, in cubic metres.
+    /// </summary>
+    /// <remarks>
+    ///     A free cell holds zero. Changing the volume of an allocated cell changes the pressure it implies, so refresh
+    ///     the cell's pressure cache afterwards. The checkpoint and the state hash include the volumes.
+    /// </remarks>
+    public Span<float> Volumes => _volumes.AsSpan();
+}

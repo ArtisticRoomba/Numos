@@ -341,7 +341,9 @@ public sealed partial class AtmosWorld
         IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target)
     {
+        // The mixture gate keeps every mixture operation out while replay rewrites the pool.
         lock (Gate)
+        lock (_mixtureGate)
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("replay world history");

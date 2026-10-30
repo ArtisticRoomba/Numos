@@ -50,6 +50,12 @@ public readonly record struct AtmosNeighborEdge(
 ///     topology or the stage registration changes.
 ///     Cartesian adjacency is not precompiled. Numos derives it from chunk dimensions and the neighboring chunks
 ///     registered when a query runs. Adjacency is structural, so solid and void voxels still have neighbors.
+///     An explicit link can end at a standalone <see cref="GasMixture" />. The voxel at the other end lists the
+///     mixture as an explicit neighbor with its <see cref="GasMixture.CellRef" />. A mixture is not part of any
+///     simulation, so it has no chunk view of its own. <see cref="GetNeighbors(AtmosCellRef)" /> and
+///     <see cref="GetNeighborCount" /> throw for a mixture reference, and
+///     <see cref="AtmosWorldSolverContext.TryGetChunk" /> returns <see langword="false" />.
+///     <see cref="GetOwnedEdges" /> still lists the edge once.
 /// </remarks>
 public sealed class AtmosWorldNeighborTopology
 {
@@ -240,6 +246,8 @@ public sealed class AtmosWorldNeighborTopology
         var chunks = new Dictionary<CompiledChunkKey, CompiledChunkAdjacency>(entries.Count);
         foreach ((var key, List<CompiledNeighborEntry> neighbors) in entries)
         {
+            // A mixture has no simulation and so no chunk adjacency table. The voxel at the other end of the link
+            // still lists it.
             if (!world.TryGetSimulation(key.Simulation, out var simulation) || simulation == null)
                 continue;
 

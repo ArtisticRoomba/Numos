@@ -13,19 +13,39 @@ internal static class AtmosSolverMath
     /// </summary>
     internal static Pascal CalculatePressure(IAtmosConfig config, Mole moles, Kelvin temperature)
     {
-        Debug.Assert(float.IsFinite(moles) && moles >= 0f);
-        return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
+        return CalculatePressure(config, moles, temperature, config.PressurePerMoleKelvin);
     }
 
     /// <summary>
-    ///     Inverse of <see cref="CalculatePressure" />: <c>n = PV/(RT)</c>. Nonpositive or NaN pressure gives zero.
+    ///     Same as <see cref="CalculatePressure(IAtmosConfig, Mole, Kelvin)" />, with the cell's own
+    ///     <c>R / V</c> in place of the configured voxel volume.
+    /// </summary>
+    internal static Pascal CalculatePressure(
+        IAtmosConfig config, Mole moles, Kelvin temperature, PascalPerMoleKelvin pressurePerMoleKelvin)
+    {
+        Debug.Assert(float.IsFinite(moles) && moles >= 0f);
+        return moles * config.GetValidatedTemp(temperature) * pressurePerMoleKelvin;
+    }
+
+    /// <summary>
+    ///     Inverse of <see cref="CalculatePressure(IAtmosConfig, Mole, Kelvin)" />: <c>n = PV/(RT)</c>. Nonpositive or NaN pressure gives zero.
     /// </summary>
     internal static Mole PressureToMoles(IAtmosConfig config, Pascal pressure, Kelvin temperature)
+    {
+        return PressureToMoles(config, pressure, temperature, config.PressurePerMoleKelvin);
+    }
+
+    /// <summary>
+    ///     Same as <see cref="PressureToMoles(IAtmosConfig, Pascal, Kelvin)" />, with a caller-supplied <c>R / V</c> in
+    ///     place of the configured voxel volume.
+    /// </summary>
+    internal static Mole PressureToMoles(
+        IAtmosConfig config, Pascal pressure, Kelvin temperature, PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
 
-        PascalPerMole denominator = config.PressurePerMoleKelvin * config.GetValidatedTemp(temperature);
+        PascalPerMole denominator = pressurePerMoleKelvin * config.GetValidatedTemp(temperature);
         return pressure / denominator;
     }
 
@@ -40,6 +60,22 @@ internal static class AtmosSolverMath
         IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
+        return CalculatePressureAtVoxel(config, config.PressurePerMoleKelvin, chunk, localVoxelIndex);
+    }
+
+    /// <summary>
+    ///     Same as <see cref="CalculatePressureAtVoxel(IAtmosConfig, AtmosChunk, ushort)" />, with the cell's own
+    ///     <c>R / V</c> in place of the configured voxel volume.
+    /// </summary>
+    /// <remarks>
+    ///     The coefficient comes before the chunk because <see cref="Mole" /> and
+    ///     <see cref="PascalPerMoleKelvin" /> are both floats. A trailing coefficient would collide with the
+    ///     total-moles overload.
+    /// </remarks>
+    internal static Pascal CalculatePressureAtVoxel(
+        IAtmosConfig config, PascalPerMoleKelvin pressurePerMoleKelvin,
+        AtmosChunk chunk, ushort localVoxelIndex)
+    {
         Mole totalMoles = GetTotalMoles(chunk, localVoxelIndex);
         if (totalMoles <= 0f)
         {
@@ -48,7 +84,7 @@ internal static class AtmosSolverMath
         }
 
         chunk.IsVacuum[localVoxelIndex] = false;
-        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex], pressurePerMoleKelvin);
     }
 
     /// <summary>

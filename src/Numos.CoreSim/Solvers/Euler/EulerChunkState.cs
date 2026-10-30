@@ -1341,8 +1341,9 @@ internal sealed class EulerChunkWorkspace
     /// <remarks>
     ///     A vector that holds a vacuum voxel goes to <see cref="WriteBackVoxel" /> whole, because the vacuum path
     ///     clears the voxel through <see cref="AtmosChunk.SetVoxelToVacuum" />. The temperature written is already
-    ///     validated, so the pressure is <see cref="AtmosSolverMath.CalculatePressure" /> without its second
-    ///     validation, which would return the same value.
+    ///     validated, so the pressure is
+    ///     <see cref="AtmosSolverMath.CalculatePressure(IAtmosConfig, Mole, Kelvin)" /> without its second validation,
+    ///     which would return the same value.
     /// </remarks>
     private int WriteBackRun(
         AtmosSolverConfigSnapshot config, EulerChunkState buffer, Mole[][] channelMoles,

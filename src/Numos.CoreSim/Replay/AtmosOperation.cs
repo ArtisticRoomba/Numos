@@ -57,7 +57,7 @@ public enum AtmosOperationCode : ushort
     /// </summary>
     SleepChunk = 10,
     /// <summary>
-    ///     Apply resolved voxel gas and thermal state independent of detached container identity.
+    ///     Apply resolved voxel gas and thermal state. A transfer with a standalone mixture records that side separately.
     /// </summary>
     SetVoxelMixture = 12,
 

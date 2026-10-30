@@ -430,7 +430,7 @@ internal sealed class AtmosSolverTickScope
     internal static InvalidOperationException DefaultViewException()
     {
         return new InvalidOperationException(
-            "This solver chunk view is uninitialized. Obtain views from AtmosWorldSolverContext.Chunks or TryGetChunk.");
+            "This solver view is uninitialized. Obtain views from AtmosWorldSolverContext.Chunks, TryGetChunk, or GasMixtures.");
     }
 
     internal void Close()
@@ -443,7 +443,7 @@ internal sealed class AtmosSolverTickScope
         if (_closed)
         {
             throw new InvalidOperationException(
-                "This solver chunk view belongs to a tick that has ended. Request a new view from the solver context " +
+                "This solver view belongs to a tick that has ended. Request a new view from the solver context " +
                 "on each callback, or use AtmosSimulation.GetChunkField outside a tick.");
         }
     }

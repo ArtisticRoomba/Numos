@@ -20,6 +20,7 @@ public sealed class DimensionalAnalysisIntegrationTests
         var moles = gasChannelType.GetField("Moles")!;
         var calculatePressure = solverMathType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
             .Single(method => method.Name == "CalculatePressure" &&
+                              method.GetParameters().Length == 3 &&
                               method.GetParameters().First().ParameterType == configType);
 
         Assert.Multiple(() =>

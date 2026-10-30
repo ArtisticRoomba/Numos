@@ -28,8 +28,8 @@ public sealed partial class AtmosSimulation
     /// <remarks>
     ///     Only the grid is captured. World time, configuration, solver enablement, and explicit topology belong to
     ///     <see cref="World" />. For a complete continuation state that replay can start from, use
-    ///     <see cref="AtmosWorld.CaptureCheckpoint" />. The host owns detached containers and custom-solver closure
-    ///     state.
+    ///     <see cref="AtmosWorld.CaptureCheckpoint" />, which also holds the world's standalone gas mixtures. The host
+    ///     owns custom-solver closure state.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called during a solver tick.</exception>
@@ -54,17 +54,14 @@ public sealed partial class AtmosSimulation
     /// <exception cref="ArgumentException">The checkpoint is incompatible with this simulation.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     This is called during a solver tick, or the world is recording or replaying, has other simulations, or has
-    ///     explicit topology; restore the <see cref="AtmosWorldCheckpoint" /> through <see cref="World" /> then.
+    ///     This is called during a solver tick, or the world is recording or replaying, has other simulations, has
+    ///     explicit topology, or has a live <see cref="GasMixture" />. Outside a solver tick, restore an
+    ///     <see cref="AtmosWorldCheckpoint" /> through <see cref="World" /> instead. A mixture that
+    ///     <see cref="IGasMixture.Remove" /> or <see cref="IGasMixture.Clone" /> returned counts until it is disposed.
     /// </exception>
     public void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ThrowIfDisposed();
-        lock (World.Gate)
-        {
-            World.EnsureSimulationRestoreAllowed(this);
-            _kernel.RestoreCheckpoint(checkpoint, World.TickCount);
-            World.Solvers.NotifyRestored();
-        }
+        World.RestoreSimulationCheckpoint(this, checkpoint);
     }
 }

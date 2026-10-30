@@ -1,3 +1,4 @@
+using Numos.CoreSim;
 using Numos.CoreSim.State;
 using Numos.Maths;
 
@@ -15,6 +16,20 @@ public readonly partial record struct AtmosSimulationId(
     [property: NumosSerialize] int Index,
     [property: NumosSerialize] uint Generation) : IComparable<AtmosSimulationId>
 {
+    internal const int GasMixturePoolIndex = -1;
+
+    /// <summary>
+    ///     Gets whether this identifier stands for a world's standalone <see cref="GasMixture" /> instances in an
+    ///     <see cref="AtmosCellRef" />, and not for a simulation.
+    /// </summary>
+    /// <remarks>
+    ///     A mixture reference has index -1 and the generation of the mixture's pool slot, which is never zero. No
+    ///     registered simulation has a negative index, so <see cref="IsValid" /> is <see langword="false" /> here.
+    ///     The negative index also sorts every mixture reference before every grid, so the canonical order of
+    ///     explicit edges stays deterministic. Use <see cref="GasMixture.CellRef" /> to build a reference to a mixture.
+    /// </remarks>
+    public bool IsGasMixturePool => Index == GasMixturePoolIndex && Generation != 0;
+
     /// <summary>
     ///     Gets whether this value could have been issued by a world registry.
     /// </summary>
@@ -42,15 +57,66 @@ public readonly partial record struct AtmosSimulationId(
 /// <param name="Chunk">The owning chunk.</param>
 /// <param name="LocalVoxelIndex">The flat local voxel index within the chunk.</param>
 /// <remarks>
-///     The value contains no object references and is suitable for deterministic ordering, snapshots, and replay data.
-///     It does not prove that the simulation, chunk, or voxel still exists; mutation methods validate the complete
-///     address against the receiving world.
+///     <para>
+///         The value contains no object references and is suitable for deterministic ordering, snapshots, and replay
+///         data. It does not prove that the simulation, chunk, or voxel still exists. Mutation methods validate the
+///         complete address against the receiving world.
+///     </para>
+///     <para>
+///         A reference whose simulation has <see cref="AtmosSimulationId.IsGasMixturePool" /> set names a standalone
+///         <see cref="GasMixture" />. Get one from <see cref="GasMixture.CellRef" />. Its chunk position is only a
+///         page index. Its simulation generation is the generation of the mixture's pool slot. A reference kept after
+///         the mixture is disposed therefore never names a later mixture in the same slot. Links, solver views, and
+///         dangerous views reject it.
+///     </para>
 /// </remarks>
 public readonly partial record struct AtmosCellRef(
     [property: NumosSerialize] AtmosSimulationId Simulation,
     [property: NumosSerialize] AtmosChunkHandle Chunk,
     [property: NumosSerialize] ushort LocalVoxelIndex) : IComparable<AtmosCellRef>
 {
+    /// <summary>
+    ///     Gets whether this reference names a standalone <see cref="GasMixture" /> and not a grid voxel.
+    /// </summary>
+    public bool IsGasMixture => Simulation.IsGasMixturePool;
+
+    /// <summary>
+    ///     Builds the reference to one allocation of a pool slot.
+    /// </summary>
+    internal static AtmosCellRef ForGasMixtureSlot(int slot, uint generation)
+    {
+        return new AtmosCellRef(
+            new AtmosSimulationId(AtmosSimulationId.GasMixturePoolIndex, generation),
+            new AtmosChunkHandle(new Int3(slot / AtmosGasMixturePool.PageSize, 0, 0)),
+            (ushort)(slot % AtmosGasMixturePool.PageSize));
+    }
+
+    /// <summary>
+    ///     Maps a mixture reference back to its pool slot and generation, without checking that the slot holds that
+    ///     allocation.
+    /// </summary>
+    /// <param name="slot">The pool slot, or -1 when this is not a well-formed mixture reference.</param>
+    /// <param name="generation">The slot generation that the reference was issued for.</param>
+    /// <returns><see langword="true" /> when the reference names a slot position.</returns>
+    internal bool TryGetGasMixtureSlot(out int slot, out uint generation)
+    {
+        var position = Chunk.Position;
+        generation = Simulation.Generation;
+        if (!IsGasMixture ||
+            position.X < 0 ||
+            position.Y != 0 ||
+            position.Z != 0 ||
+            LocalVoxelIndex >= AtmosGasMixturePool.PageSize ||
+            position.X > (int.MaxValue - LocalVoxelIndex) / AtmosGasMixturePool.PageSize)
+        {
+            slot = -1;
+            return false;
+        }
+
+        slot = position.X * AtmosGasMixturePool.PageSize + LocalVoxelIndex;
+        return true;
+    }
+
     /// <summary>
     ///     Compares the complete stable address in simulation, chunk-coordinate, and voxel order.
     /// </summary>

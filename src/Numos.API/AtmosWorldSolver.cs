@@ -292,6 +292,44 @@ public sealed class AtmosWorldSolverContext
     }
 
     /// <summary>
+    ///     Gets lock-free views of the pages that hold the world's standalone <see cref="GasMixture" /> instances, in
+    ///     index order and valid until the tick ends.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Pages never appear in <see cref="Chunks" />, because cells of a page never neighbor each other and a page
+    ///         index is not a position. A transport solver that walks chunks can ignore mixtures. A solver that keeps
+    ///         per-mixture data reads it here. The view works when the world has no simulation.
+    ///     </para>
+    ///     <para>
+    ///         Like <see cref="Chunks" />, the views never take a lock, so call this once on the callback thread and
+    ///         hand the result to <c>Parallel.For</c> workers.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The tick has ended.</exception>
+    /// <example>
+    ///     <code>
+    ///     foreach (var page in context.GasMixtures)
+    ///     {
+    ///         Span&lt;float&gt; exposure = page.Get(HeatData.Exposure).AsSpan();
+    ///         for (ushort cell = 0; cell &lt; page.CellCount; cell++)
+    ///         {
+    ///             if (page.IsAllocated(cell))
+    ///                 exposure[cell] += 1f;
+    ///         }
+    ///     }
+    ///     </code>
+    /// </example>
+    public AtmosSolverGasMixtures GasMixtures
+    {
+        get
+        {
+            _solverScope.ThrowIfClosed();
+            return new AtmosSolverGasMixtures(_solverScope);
+        }
+    }
+
+    /// <summary>
     ///     Gets a lock-free view of the chunk that contains a world cell.
     /// </summary>
     /// <param name="cell">A cell in any simulation of this world, such as a portal or dock endpoint.</param>
@@ -301,7 +339,9 @@ public sealed class AtmosWorldSolverContext
     /// </returns>
     /// <remarks>
     ///     Index the chunk's fields with <see cref="AtmosCellRef.LocalVoxelIndex" /> to reach the cell itself. Like
-    ///     <see cref="Chunks" />, this is safe to call from worker threads during the callback.
+    ///     <see cref="Chunks" />, this is safe to call from worker threads during the callback. A reference to a
+    ///     standalone <see cref="GasMixture" /> has no chunk view, so this returns <see langword="false" /> for it.
+    ///     Use <see cref="AtmosSolverGasMixtures.TryGetPage" /> on <see cref="GasMixtures" /> to reach a mixture.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The tick has ended.</exception>
     /// <example>

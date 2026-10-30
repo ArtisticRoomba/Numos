@@ -105,46 +105,68 @@ public sealed class AtmosReplayTests
     }
 
     [Test]
-    public void MixtureOperations_ReplayResolvedGridEffectsWithoutDetachedContainerState()
+    public void MixtureOperations_ReplayGridEffectsAndContainerState()
     {
         using var simulation = CreateSimulation();
         var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var initial = world.CaptureCheckpoint();
         var voxel = simulation.GetVoxelGasMixture(chunk, 0);
         var other = simulation.GetVoxelGasMixture(chunk, 1);
-        var canister = simulation.CreateGasMixture(2f, 280f);
+        using var canister = world.CreateGasMixture(2f, 280f);
         canister.SetMoles(1, 3f);
         canister.SetMoles(0, 8f);
+        var initial = world.CaptureCheckpoint();
         world.StartRecording();
         var hashes = new List<AtmosWorldStateHash>();
+        var canisters = new List<GasMixtureSnapshot>();
+        void Observe()
+        {
+            hashes.Add(world.ComputeStateHash());
+            canisters.Add(canister.GetSnapshot());
+        }
+
         voxel.SetMoles(1, 2f);
-        hashes.Add(world.ComputeStateHash());
+        Observe();
         voxel.AdjustMoles(1, -0.1f);
-        hashes.Add(world.ComputeStateHash());
+        Observe();
         voxel.AddGas(0, 3f, 400f);
-        hashes.Add(world.ComputeStateHash());
+        Observe();
         voxel.Temperature = 340f;
-        hashes.Add(world.ComputeStateHash());
+        Observe();
         canister.TransferRatioTo(voxel, 0.25f);
-        hashes.Add(world.ComputeStateHash());
+        Observe();
         voxel.TransferTo(other, 0.5f);
-        hashes.Add(world.ComputeStateHash());
-        voxel.RemoveRatio(0.1f);
-        hashes.Add(world.ComputeStateHash());
+        Observe();
+        using var removed = voxel.RemoveRatio(0.1f);
+        Observe();
         other.Clear();
-        hashes.Add(world.ComputeStateHash());
+        Observe();
+        canister.Volume = 4f;
+        canister.Temperature = 301f;
+        Observe();
         var recording = world.StopRecording();
         canister.Clear();
 
-        foreach (var hash in hashes)
+        for (int index = 0; index < hashes.Count; index++)
         {
-            world.ReplayTo(initial, recording.Operations, hash.Position);
-            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+            world.ReplayTo(initial, recording.Operations, hashes[index].Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hashes[index]));
+            AssertSnapshotsEqual(canister.GetSnapshot(), canisters[index]);
         }
 
         Assert.That(() => voxel.TotalMoles, Throws.InvalidOperationException);
-        Assert.That(canister.TotalMoles, Is.Zero, "Detached canisters are outside the restored state domain.");
+    }
+
+    private static void AssertSnapshotsEqual(GasMixtureSnapshot actual, GasMixtureSnapshot expected)
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(actual.Volume, Is.EqualTo(expected.Volume));
+            Assert.That(actual.Temperature, Is.EqualTo(expected.Temperature));
+            Assert.That(actual.Pressure, Is.EqualTo(expected.Pressure));
+            Assert.That(actual.TotalMoles, Is.EqualTo(expected.TotalMoles));
+            Assert.That(actual.Gases, Is.EqualTo(expected.Gases));
+        });
     }
 
     [Test]

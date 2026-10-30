@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
@@ -134,11 +135,18 @@ public sealed partial class AtmosWorld : IDisposable
         ValidateTickRate(tickRate, nameof(tickRate));
         TickRate = tickRate;
         _config = config.CreateSnapshot();
+        GasMixtures = new AtmosGasMixturePool();
+        GasMixtures.SetConfig(_config);
         Solvers = new AtmosWorldSolverPipeline(this, transportModel);
         Services = new AtmosWorldServices(this);
     }
 
     internal object Gate { get; } = new();
+
+    /// <summary>
+    ///     Gets the standalone gas mixtures of this world. The world ticks, checkpoints, and disposes the pool.
+    /// </summary>
+    internal AtmosGasMixturePool GasMixtures { get; }
 
     /// <summary>
     ///     Gets whether the world has been disposed. Safe to read without <see cref="Gate" />.
@@ -353,21 +361,30 @@ public sealed partial class AtmosWorld : IDisposable
                 return;
 
             ThrowIfTickExecuting("dispose the world");
-            simulations = _orderedSimulations;
-            _simulationSlots.Clear();
-            _linkSlots.Clear();
-            _activeEdges = [];
-            _orderedSimulations = [];
-            _activeEdgesByChunk.Clear();
-            _linkSlotsByChunk.Clear();
-            _linkSlotsBySimulation.Clear();
-            _pendingLinkSlots.Clear();
-            _reservedEdges.Clear();
-            _disposed = true;
+            lock (_mixtureGate)
+            {
+                simulations = _orderedSimulations;
+                _simulationSlots.Clear();
+                _linkSlots.Clear();
+                _activeEdges = [];
+                _orderedSimulations = [];
+                _activeEdgesByChunk.Clear();
+                _linkSlotsByChunk.Clear();
+                _linkSlotsBySimulation.Clear();
+                _pendingLinkSlots.Clear();
+                _reservedEdges.Clear();
+                _disposed = true;
+            }
         }
 
         foreach (var simulation in simulations)
             simulation.DisposeFromWorld();
+
+        // After the simulations, and under the mixture gate so no mixture operation races the pool teardown.
+        lock (_mixtureGate)
+        {
+            GasMixtures.Dispose();
+        }
     }
 
     /// <summary>
@@ -518,8 +535,14 @@ public sealed partial class AtmosWorld : IDisposable
                 return true;
             }
 
-            ApplyConfig(snapshot);
-            RecordWorldOperation(new SetAtmosWorldConfigOperation(snapshot));
+            // A mixture operation reads the configuration several times and then records its result. The mixture
+            // gate makes it see one configuration and land on one side of this operation in the recording.
+            lock (_mixtureGate)
+            {
+                ApplyConfig(snapshot);
+                RecordWorldOperation(new SetAtmosWorldConfigOperation(snapshot));
+            }
+
             return true;
         }
     }
@@ -798,7 +821,10 @@ public sealed partial class AtmosWorld : IDisposable
             int enteredGates = EnterSimulationGates(simulations);
             try
             {
-                return AtmosWorldCheckpoint.Capture(this);
+                lock (GasMixtures.StateGate)
+                {
+                    return AtmosWorldCheckpoint.Capture(this);
+                }
             }
             finally
             {
@@ -842,7 +868,13 @@ public sealed partial class AtmosWorld : IDisposable
             }
 
             ValidateCheckpoint(checkpoint);
-            RestoreCheckpointCore(checkpoint);
+
+            // No mixture transaction may interleave with the restore.
+            lock (_mixtureGate)
+            {
+                RestoreCheckpointCore(checkpoint);
+            }
+
             // Last, so every hook sees the world's time, configuration, and topology already restored.
             Solvers.NotifyRestored();
         }
@@ -910,6 +942,12 @@ public sealed partial class AtmosWorld : IDisposable
             return slots;
         }
     }
+
+    /// <summary>
+    ///     Every standalone gas mixture: the pool's pages, volumes, slot generations, and allocation flags.
+    /// </summary>
+    [NumosSerialize("GasMixtures")]
+    internal AtmosGasMixturePoolCheckpoint CheckpointGasMixtures => GasMixtures.CaptureCheckpoint();
 
     private AtmosWorldSolverStateCheckpoint[] CaptureSolverStates()
     {
@@ -988,6 +1026,9 @@ public sealed partial class AtmosWorld : IDisposable
         RebuildOrderedSimulations();
         foreach (var saved in checkpoint.Simulations)
             TryGetSimulationCore(saved.Simulation)!.Kernel.RestoreValidatedCheckpoint(saved.Checkpoint, checkpoint.TickCount);
+
+        // After the configuration, so the pool also holds the restored one.
+        GasMixtures.RestoreCheckpoint(checkpoint.GasMixtures);
 
         RestoreTopology(checkpoint.LinkSlots);
         TickCount = checkpoint.TickCount;
@@ -1217,24 +1258,88 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
+    ///     Invalidates link sets that reference a standalone mixture whose slot was just released.
+    /// </summary>
+    /// <remarks>
+    ///     Like <see cref="InvalidateLinksForChunk" />, this does not record anything. Replay reaches the same call
+    ///     when it applies the recorded release.
+    /// </remarks>
+    internal void InvalidateLinksForMixture(int slot, uint generation)
+    {
+        lock (Gate)
+        {
+            if (_disposed)
+                return;
+
+            var cell = AtmosCellRef.ForGasMixtureSlot(slot, generation);
+            var key = new AtmosChunkKey(cell.Simulation, cell.Chunk.Position);
+            if (!_linkSlotsByChunk.TryGetValue(key, out HashSet<int>? slots))
+                return;
+
+            // The index is per page, so keep only the sets that touch this cell.
+            foreach (int slotIndex in slots.Order().ToArray())
+            {
+                foreach (var edge in _linkSlots[slotIndex].Edges)
+                {
+                    if (edge.First == cell || edge.Second == cell)
+                    {
+                        DestroyLinkSlot(slotIndex);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Backs <see cref="AtmosSimulation.RestoreCheckpoint" />.
+    /// </summary>
+    /// <remarks>
+    ///     The mixture gate stays held from the check to the end of the restore. A mixture created in between would
+    ///     otherwise survive a restore that the check only allows without mixtures.
+    /// </remarks>
+    internal void RestoreSimulationCheckpoint(AtmosSimulation simulation, AtmosSimulationCheckpoint checkpoint)
+    {
+        lock (Gate)
+        {
+            lock (_mixtureGate)
+            {
+                EnsureSimulationRestoreAllowed(simulation);
+                simulation.Kernel.RestoreCheckpoint(checkpoint, TickCount);
+            }
+
+            Solvers.NotifyRestored();
+        }
+    }
+
+    /// <summary>
     ///     Rejects a grid-only restore while the world is recording or replaying. It also rejects the restore when
     ///     other simulations or explicit links could point at chunks that no longer exist.
     /// </summary>
-    internal void EnsureSimulationRestoreAllowed(AtmosSimulation simulation)
+    private void EnsureSimulationRestoreAllowed(AtmosSimulation simulation)
     {
         lock (Gate)
         {
             ThrowIfDisposed();
             ValidateSimulation(simulation, nameof(simulation));
+
+            // The pool gate comes before the recording gate in the lock order.
+            bool hasGasMixtures;
+            lock (GasMixtures.StateGate)
+            {
+                hasGasMixtures = GasMixtures.AllocatedCount > 0;
+            }
+
             lock (_recordingGate)
             {
                 if (_isWorldRecording ||
                     _isReplayingWorld ||
+                    hasGasMixtures ||
                     _orderedSimulations.Length != 1 ||
                     _linkSlots.Any(static slot => slot.State != LinkSetState.Free))
                 {
                     throw new InvalidOperationException(
-                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, or an active recording or replay.");
+                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, live gas mixtures, or an active recording or replay.");
                 }
             }
         }
@@ -1260,7 +1365,11 @@ public sealed partial class AtmosWorld : IDisposable
         _isTickExecuting = true;
         AtmosSimulation[] simulations = _orderedSimulations;
         int enteredGates = 0;
+        int enteredSimulationGates = 0;
         int begunTicks = 0;
+        bool mixtureGateEntered = false;
+        bool poolGateEntered = false;
+        bool poolBegun = false;
         AtmosSolverExecutionContext[]? contexts = null;
         WorldSolverRegistration[] worldSteps = Solvers.EnabledSteps;
         AtmosSolverTickScope? solverScope = null;
@@ -1271,6 +1380,12 @@ public sealed partial class AtmosWorld : IDisposable
             // Before anything changes. A missing dependency abandons the tick with the world as it was. The next
             // tick retries because the failed registration is still stale.
             Solvers.InjectDependencies(false);
+
+            // The tick takes every gate a mixture operation can take, in the order that _mixtureGate documents. A
+            // solver callback runs on this thread, so its mixture calls re-enter these gates. A host call on another
+            // thread waits for the tick and never holds a gate that the callback needs.
+            Monitor.Enter(_mixtureGate);
+            mixtureGateEntered = true;
 
             if (_pendingConfig != null)
             {
@@ -1283,8 +1398,14 @@ public sealed partial class AtmosWorld : IDisposable
             // makes this a full tick.
             idle = _pendingLinkSlots.Count == 0 && !Solvers.AnyDueOnNextTick(worldSteps);
 
+            for (; enteredSimulationGates < simulations.Length; enteredSimulationGates++)
+                Monitor.Enter(simulations[enteredSimulationGates].MixtureGate);
+
             for (; enteredGates < simulations.Length; enteredGates++)
                 Monitor.Enter(simulations[enteredGates].Kernel.StateGate);
+
+            Monitor.Enter(GasMixtures.StateGate);
+            poolGateEntered = true;
 
             long tick = checked(TickCount + 1);
             if (idle)
@@ -1300,6 +1421,9 @@ public sealed partial class AtmosWorld : IDisposable
                 contexts = new AtmosSolverExecutionContext[simulations.Length];
                 for (; begunTicks < simulations.Length; begunTicks++)
                     contexts[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick(tick, TickRate);
+
+                GasMixtures.BeginTick(tick);
+                poolBegun = true;
 
                 solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts);
                 Solvers.Execute(worldSteps, solverScope);
@@ -1320,11 +1444,23 @@ public sealed partial class AtmosWorld : IDisposable
             // safe while this tick owns every simulation.
             solverScope?.Close();
 
+            if (poolBegun)
+                GasMixtures.CompleteTick();
+
             for (int index = begunTicks - 1; index >= 0; index--)
                 simulations[index].Kernel.CompleteWorldTick();
 
+            if (poolGateEntered)
+                Monitor.Exit(GasMixtures.StateGate);
+
             for (int index = enteredGates - 1; index >= 0; index--)
                 Monitor.Exit(simulations[index].Kernel.StateGate);
+
+            for (int index = enteredSimulationGates - 1; index >= 0; index--)
+                Monitor.Exit(simulations[index].MixtureGate);
+
+            if (mixtureGateEntered)
+                Monitor.Exit(_mixtureGate);
 
             _isTickExecuting = false;
         }
@@ -1390,7 +1526,7 @@ public sealed partial class AtmosWorld : IDisposable
     {
         // Every kernel reaches the same stage barrier before sparse transport runs. Registration order then cannot
         // decide whether an endpoint sees pre-transfer or post-transfer state.
-        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Gas, scope.DeltaTime);
+        SolveExplicitTransport(ExplicitTransportCapabilities.Gas, scope.DeltaTime);
     }
 
     internal void SolveBoundaryFlowStage(AtmosSolverTickScope scope)
@@ -1399,15 +1535,18 @@ public sealed partial class AtmosWorld : IDisposable
             scope.Simulations[index].Kernel.SolveBoundaryFlow(scope.Contexts[index]);
     }
 
+    // A host that replaces this stage or the reaction stage handles standalone mixtures itself.
     internal void SolveThermodynamicsStage(AtmosSolverTickScope scope)
     {
         for (int index = 0; index < scope.Simulations.Length; index++)
             scope.Simulations[index].Kernel.SolveThermodynamics(scope.Contexts[index]);
+
+        GasMixtures.SolveThermodynamics();
     }
 
     internal void SolveExplicitThermalTransportStage(AtmosSolverTickScope scope)
     {
-        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Thermal, scope.DeltaTime);
+        SolveExplicitTransport(ExplicitTransportCapabilities.Thermal, scope.DeltaTime);
     }
 
     internal void SolveThermalBoundaryStage(AtmosSolverTickScope scope)
@@ -1420,6 +1559,8 @@ public sealed partial class AtmosWorld : IDisposable
     {
         for (int index = 0; index < scope.Simulations.Length; index++)
             scope.Simulations[index].Kernel.SolveGasReactions(scope.Contexts[index]);
+
+        GasMixtures.SolveGasReactions(scope.DeltaTime);
     }
 
     private void ValidateCheckpoint(AtmosWorldCheckpoint checkpoint)
@@ -1430,6 +1571,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         ValidateTickRate(checkpoint.TickRate, nameof(checkpoint));
         checkpoint.Config.ValidateGasRegistry();
+        AtmosGasMixturePool.ValidateCheckpoint(checkpoint.GasMixtures);
         ValidateSolverStates(checkpoint);
 
         // Checked first, because the custom-stage comparison below assumes unique names.
@@ -1523,8 +1665,8 @@ public sealed partial class AtmosWorld : IDisposable
                 bool requiresLiveEndpoints = state is LinkSetState.PendingCreate or LinkSetState.Active;
                 if (definition.First.CompareTo(definition.Second) >= 0 ||
                     requiresLiveEndpoints &&
-                    (!CheckpointContainsCell(validCells, definition.First) ||
-                     !CheckpointContainsCell(validCells, definition.Second)))
+                    (!CheckpointContainsCell(validCells, checkpoint.GasMixtures, definition.First) ||
+                     !CheckpointContainsCell(validCells, checkpoint.GasMixtures, definition.Second)))
                 {
                     throw new ArgumentException("The world checkpoint contains an invalid or noncanonical edge.", nameof(checkpoint));
                 }
@@ -1707,12 +1849,10 @@ public sealed partial class AtmosWorld : IDisposable
         CompileActiveTopology();
     }
 
-    private void SolveExplicitTransport(
-        AtmosSimulation[] simulations,
-        ExplicitTransportCapabilities capabilities,
-        float deltaTime)
+    private void SolveExplicitTransport(ExplicitTransportCapabilities capabilities, float deltaTime)
     {
-        if (_activeEdges.Length == 0 || simulations.Length == 0)
+        // A world with no simulation still has links between standalone mixtures.
+        if (_activeEdges.Length == 0)
             return;
 
         ExplicitTransportEdge[] resolved = ArrayPool<ExplicitTransportEdge>.Shared.Rent(_activeEdges.Length);
@@ -1724,18 +1864,8 @@ public sealed partial class AtmosWorld : IDisposable
                 if (((ExplicitTransportCapabilities)edge.Flags & capabilities) == 0)
                     continue;
 
-                var firstSimulation = TryGetSimulationCore(edge.First.Simulation);
-                var secondSimulation = TryGetSimulationCore(edge.Second.Simulation);
-                if (firstSimulation == null ||
-                    secondSimulation == null ||
-                    !firstSimulation.Kernel.TryResolveExplicitEndpoint(
-                        edge.First.Chunk.Position,
-                        edge.First.LocalVoxelIndex,
-                        out var first) ||
-                    !secondSimulation.Kernel.TryResolveExplicitEndpoint(
-                        edge.Second.Chunk.Position,
-                        edge.Second.LocalVoxelIndex,
-                        out var second))
+                if (!TryResolveEndpoint(edge.First, out var first) ||
+                    !TryResolveEndpoint(edge.Second, out var second))
                 {
                     continue;
                 }
@@ -1749,9 +1879,11 @@ public sealed partial class AtmosWorld : IDisposable
 
             if (count > 0)
             {
+                // The pool captures the same applied configuration as every kernel at the start of the tick, so a
+                // world with grids sees the same values it did before standalone mixtures could be linked.
                 _explicitTransport.Solve(
                     resolved.AsSpan(0, count),
-                    simulations[0].Kernel.CurrentTickConfig,
+                    GasMixtures.CurrentTickConfig,
                     deltaTime,
                     capabilities);
             }
@@ -1762,11 +1894,18 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Applies a configuration to the world, every kernel, and the mixture pool. The caller holds
+    ///     <see cref="Gate" /> and <see cref="_mixtureGate" />.
+    /// </summary>
     private void ApplyConfig(AtmosConfigSnapshot snapshot)
     {
+        Debug.Assert(Monitor.IsEntered(_mixtureGate));
         _config = snapshot;
         foreach (var simulation in _orderedSimulations)
             simulation.Kernel.SetAtmosConfig(snapshot);
+
+        GasMixtures.SetConfig(snapshot);
     }
 
     private void ApplyPendingTopology()
@@ -1854,15 +1993,36 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void WakeEndpoint(AtmosCellRef cell)
     {
-        var simulation = TryGetSimulationCore(cell.Simulation);
-        if (simulation != null &&
-            simulation.Kernel.TryResolveExplicitEndpoint(
-                cell.Chunk.Position,
-                cell.LocalVoxelIndex,
-                out var endpoint))
-        {
+        // Pool pages never sleep.
+        if (!cell.IsGasMixture && TryResolveEndpoint(cell, out var endpoint))
             endpoint.Chunk.Wake();
+    }
+
+    /// <summary>
+    ///     Resolves a link endpoint in a grid or in the mixture pool. The caller holds <see cref="Gate" />.
+    /// </summary>
+    private bool TryResolveEndpoint(AtmosCellRef cell, out ExplicitTransportEndpoint endpoint)
+    {
+        if (cell.IsGasMixture)
+        {
+            if (cell.TryGetGasMixtureSlot(out int slot, out uint generation))
+                return GasMixtures.TryResolveExplicitEndpoint(slot, generation, out endpoint);
+
+            endpoint = default;
+            return false;
         }
+
+        var simulation = TryGetSimulationCore(cell.Simulation);
+        if (simulation == null)
+        {
+            endpoint = default;
+            return false;
+        }
+
+        return simulation.Kernel.TryResolveExplicitEndpoint(
+            cell.Chunk.Position,
+            cell.LocalVoxelIndex,
+            out endpoint);
     }
 
     private int AllocateLinkSlot(ExplicitAtmosEdge[] edges, ExplicitLinkSetKind kind)
@@ -1998,15 +2158,8 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void ValidateCell(AtmosCellRef cell, string parameterName)
     {
-        var simulation = TryGetSimulationCore(cell.Simulation);
-        if (simulation == null ||
-            !simulation.Kernel.TryResolveExplicitEndpoint(
-                cell.Chunk.Position,
-                cell.LocalVoxelIndex,
-                out _))
-        {
+        if (!TryResolveEndpoint(cell, out _))
             throw new ArgumentException("An explicit link endpoint does not identify a cell in this world.", parameterName);
-        }
     }
 
     private static void ValidateFlags(ExplicitLinkFlags flags, string parameterName)
@@ -2077,16 +2230,17 @@ public sealed partial class AtmosWorld : IDisposable
         return slot.Generation == id.Generation ? slot.Simulation : null;
     }
 
+    /// <summary>
+    ///     Tells whether a cell reference names a voxel of a registered chunk or an allocated standalone mixture.
+    /// </summary>
+    /// <param name="cell">The reference to resolve.</param>
+    /// <param name="simulation">The owning simulation, or <see langword="null" /> for a standalone mixture.</param>
     internal bool TryResolveCell(AtmosCellRef cell, out AtmosSimulation? simulation)
     {
         lock (Gate)
         {
-            simulation = TryGetSimulationCore(cell.Simulation);
-            return simulation != null &&
-                   simulation.Kernel.TryResolveExplicitEndpoint(
-                       cell.Chunk.Position,
-                       cell.LocalVoxelIndex,
-                       out _);
+            simulation = cell.IsGasMixture ? null : TryGetSimulationCore(cell.Simulation);
+            return TryResolveEndpoint(cell, out _);
         }
     }
 
@@ -2192,8 +2346,19 @@ public sealed partial class AtmosWorld : IDisposable
 
     private static bool CheckpointContainsCell(
         Dictionary<AtmosSimulationId, Dictionary<Int3, int>> validCells,
+        AtmosGasMixturePoolCheckpoint mixtures,
         AtmosCellRef cell)
     {
+        // A mixture endpoint is valid only when the same checkpoint holds that allocation of the slot, because restore
+        // installs the pool before the topology.
+        if (cell.IsGasMixture)
+        {
+            return cell.TryGetGasMixtureSlot(out int slot, out uint generation) &&
+                   slot < mixtures.Allocated.Count &&
+                   mixtures.Allocated[slot] &&
+                   mixtures.Generations[slot] == generation;
+        }
+
         return validCells.TryGetValue(cell.Simulation, out Dictionary<Int3, int>? chunks) &&
                chunks.TryGetValue(cell.Chunk.Position, out int voxelCount) &&
                cell.LocalVoxelIndex < voxelCount;

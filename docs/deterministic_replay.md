@@ -85,8 +85,9 @@ world.ResumeRecording(); // Replay ended at the unchanged stopped head, so the s
 rollback solver arrays. Restoring one leaves world time, configuration, and solver enablement alone. It is a quick
 rollback for a lone grid, not a replay starting point.
 
-Numos rejects a grid-only restore in two cases. The first is while the world is recording or replaying. The second is
+Numos rejects a grid-only restore in three cases. The first is while the world is recording or replaying. The second is
 when the world has other simulations or explicit links, because those links could point at chunks that no longer exist.
+The third is while the world holds a live standalone gas mixture, because the grid checkpoint does not cover it.
 
 The main replay types have separate jobs:
 
@@ -171,6 +172,7 @@ grid's data:
 | Stage schedule        | World      | Captures each stage's interval, next due tick, and last run tick. |
 | Solver state          | World      | Captures every class solver's `[NumosSerialize]` members, keyed by solver name in pipeline order. Delegates and solvers without marked members have no entry.              |
 | Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
+| Gas mixtures          | World      | Captures the mixture pool's pages, cell volumes, slot generations, and allocation flags.                                                                                   |
 | Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, per-voxel momentum (three components), valid gas channels, and per-voxel moles.    |
 | Continuation caches   | Simulation | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
 | Solver arrays         | Simulation | Captures `ChunkField<T>` storage registered with `rollback: true`: keys, exact element types, lengths, and values. Transient and private fields are excluded.              |
@@ -181,7 +183,7 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 16. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 17. The grid schema inside it is format
 version 12, compatibility version 5. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them. The version history is:
 
@@ -214,12 +216,13 @@ of translating them. The version history is:
   `FullSpeedVelocity`, and the per-chunk `EulerMomentumScale`. A missing scale reads as 1 and the new settings read as
   their defaults, so an old checkpoint would replay the same way. The hash covers the wire encoding, so every digest
   moved with the new fields. The bump makes Numos reject older data instead of failing on a digest mismatch.
+- World 17 added the gas mixture pool.
 
 ### Checkpoints are generated from the live types
 
 Hand-written checkpoint types drift from the live types, so Numos generates them. `AtmosChunk`, the kernel,
-`AtmosSimulation`, and `AtmosWorld` mark their continuation state `[NumosSerialize]`. Each has a partial snapshot class
-that points back at it:
+`AtmosSimulation`, the gas mixture pool, and `AtmosWorld` mark their continuation state `[NumosSerialize]`. Each has a
+partial snapshot class that points back at it:
 
 ```csharp
 [NumosSnapshotOf(typeof(AtmosChunk))]
@@ -258,7 +261,9 @@ such as a chunk's `Dimensions` must already match, and so must array lengths. A 
 capture-only, because creating or dropping children is the owner's job. The kernel and the world therefore restore
 themselves. The kernel materializes each saved chunk (`new AtmosChunk(dimensions)`, then
 `AtmosChunkCheckpoint.RestoreInto`) and swaps the whole map in at once. The world restores solver state first. It then
-restores solver flags, simulation membership, configuration, grids, topology, and time, in that order.
+restores solver flags, simulation membership, configuration, grids, the gas mixture pool, topology, and time, in that
+order. The pool comes after the configuration, so it holds the restored one. It comes before the topology, because a
+link can end at a mixture.
 
 Field ids hash the wire name. On a live type the wire name is the snapshot member's name. That is the member name unless
 `[NumosSerialize("Name")]` gives another one, as `AtmosChunk.Temperature` does to keep the `Temperatures` name. Renaming
@@ -301,7 +306,6 @@ Some data stays outside the checkpoint:
 - Custom solver delegates, closure state, unmarked fields on `IAtmosWorldSolver` instances, and `world.Services`
   entries belong to the host. Numos never checkpoints, clears, or disposes them. A solver class's unmarked fields
   should be scratch that `OnRestored` resets. Anything that must survive a restore gets `[NumosSerialize]`.
-- Detached `GasMixture` containers, such as canisters, stay host-owned.
 - Per-tick event queues and solver workspaces are transient. Numos clears or rebuilds them.
 - Values cached under a `SolverDataKey<T>` are transient too. Restore and configuration changes discard them, even when
   the configuration is unchanged. This includes the built-in boundary event batches and the reaction solver's per-gas
@@ -314,10 +318,10 @@ Some data stays outside the checkpoint:
   axis order. Its pooled buffers and activated chunks are rebuilt on every run from the checkpointed state, so a
   restored world sweeps exactly as the original run did.
 
-When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
-which the kernel zeroes when the write empties the voxel. Replaying that
-operation does not read, change, or restore the detached container. A custom solver must not depend on uncheckpointed
-canister or closure state if its result needs to replay deterministically.
+A transfer between a container and a voxel records both sides. The voxel side is a `SetVoxelMixtureOperation`. Its
+state includes the voxel's momentum, which the kernel zeroes when the write empties the voxel. The container side is a
+`SetGasMixtureOperation`. A custom solver must not depend on uncheckpointed closure state if its result needs to replay
+deterministically.
 
 Store persistent per-chunk solver state in a `ChunkField<T>` registered with `ChunkField<T>.Register(key, rollback: true)`.
 Numos then captures and restores it automatically. A rollback field needs a stable key and elements that contain no
@@ -438,8 +442,12 @@ time, configuration, and topology already restored. An exception from that hook 
 already in place.
 
 Address-only `AtmosChunkHandle` values can still identify the same chunk positions after restore. Voxel mixture objects
-are bound to a chunk generation and become stale, so reacquire them from the simulation. Chunk presentation versions and
-the collection revision also change, which tells renderers to refresh their copies.
+are bound to a chunk generation and become stale, so reacquire them from the simulation. A `GasMixture` handle names a
+pool slot and a generation. It stays valid when the restored pool holds that same allocation, and it is stale
+otherwise. A disposed handle stays disposed, and a handle never moves to another world. To reach a mixture after a
+restore, a load, or a replay, save `GasMixture.Id` and call `world.TryGetGasMixture(id, out var mixture)`.
+`world.GetGasMixtureIds()` lists every live mixture in slot order. Chunk presentation versions and the collection
+revision also change, which tells renderers to refresh their copies.
 
 ## How replay applies operations
 
@@ -558,11 +566,12 @@ digest. `AtmosWorldCheckpoint.ComputeStateHash()` gives the same result without 
 fast regression and replay check. It is not a cryptographic authenticity mechanism.
 
 The canonical encoding covers the format version, timeline position, topology version, and normalized configuration. It
-also covers solver identities, enable flags, solver state, simulation registry generations, link-set slots, and every
-simulation's grid. `AtmosSimulationCheckpoint.ComputeStateHash()` returns the digest of one grid. That digest is a plain
-`ulong` over the grid's format version, compatibility version, dimensions, and chunk continuation data. It has no
-timeline position. Numos sorts chunks by X, then Y, then Z. It preserves gas-channel order because the order can affect
-floating-point reductions.
+also covers solver identities, enable flags, solver state, simulation registry generations, link-set slots, every
+simulation's grid, and the gas mixture pool (pages, cell volumes, slot generations, and allocation flags).
+`AtmosSimulationCheckpoint.ComputeStateHash()` returns the digest of one grid. That digest is a plain `ulong` over the
+grid's format version, compatibility version, dimensions, and chunk continuation data. It has no timeline position.
+Numos sorts chunks by X, then Y, then Z. It preserves gas-channel order because the order can affect floating-point
+reductions.
 
 The hash input is the wire encoding. Every checkpoint type is generated, and its walker writes into either a
 `StateBinarySink` for bytes or a `StateHashSink` for the hash. The hash sink sees what the binary sink writes, except
@@ -632,6 +641,36 @@ changes state, so an invalid edit throws and records nothing.
 
 Numos adds opcodes without a checkpoint or file format bump, because a checkpoint holds the same fields as before. A
 reader that predates an opcode rejects a file that contains it.
+
+### Use standalone gas mixtures
+
+A canister (`GasMixture`) lives in the world's mixture pool, so it is world state. The pool hands out the lowest free
+slot, which makes slot numbers a pure function of the call sequence. Replay can therefore recreate every slot and
+generation exactly, so a saved `GasMixtureId` names the same mixture in the replayed world.
+
+The world records four operations:
+
+| Opcode | Operation                       | Recorded when                                                           |
+|--------|---------------------------------|-------------------------------------------------------------------------|
+| 10     | `CreateGasMixtureOperation`     | `CreateGasMixture`, `Remove`, `RemoveRatio`, `RemoveVolume`, or `Clone`  |
+| 11     | `ReleaseGasMixtureOperation`    | `Dispose` frees a live slot                                             |
+| 12     | `SetGasMixtureVolumeOperation`  | The `Volume` setter succeeds                                            |
+| 13     | `SetGasMixtureOperation`        | Any other content change, with the cell's resolved final state          |
+
+`SetGasMixtureOperation` holds the temperature, the cached pressure and heat capacity, and the amount of every channel
+of the cell's pool page in page order, zero amounts included. Replay writes those values exactly and creates channels in
+the recorded order, because channel order is part of the state hash. A hand-written codec pair writes the gas list.
+Replay of a create operation throws `InvalidOperationException` when the pool returns a different slot or generation,
+because that means the replay has diverged.
+
+A compound call records its steps in application order. `voxel.RemoveRatio()` records the new mixture's creation, the new
+mixture's content, and then the voxel's `SetVoxelMixtureOperation`. Numos validates the whole call before it allocates,
+so a failed call allocates nothing.
+
+Reactions and phase change in the pool run inside the tick, so they are not recorded. Numos also skips recording for a
+mixture call made from a solver during a tick. A solver cannot create, release, or remove from a mixture, because those
+calls allocate. A host that forgets to dispose a mixture keeps its slot until the world is disposed or a restore drops
+it, because the pool has no finalizer.
 
 ### Ignite a voxel
 
@@ -752,7 +791,7 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 2.5 s of simulated time, so those large acceleration snapshots never enter the file.
 
-The checkpoint section holds the world checkpoint format version (16) and the archive's initial and head hashes. It ends
+The checkpoint section holds the world checkpoint format version (17) and the archive's initial and head hashes. It ends
 with the generated payload of the checkpoint and its length. Each simulation inside carries the grid format version
 (12). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
 version history above lists the layout changes.
@@ -864,5 +903,5 @@ may be registered under the key as transient, the element type name or size may 
 (the chunk's voxel count for a per-voxel field, the registered length otherwise). Numos checks a length against the bytes left before it
 allocates anything, so a corrupt file cannot make the reader allocate more than it holds.
 
-Numos does not yet provide compression, network transport, replay of custom solver registration changes, restoration of
-detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.
+Numos does not yet provide compression, network transport, replay of custom solver registration changes, or certified
+bitwise compatibility across runtime and CPU architectures.

@@ -18,7 +18,19 @@ internal enum ExplicitTransportCapabilities : byte
 /// <summary>
 ///     Identifies one resolved endpoint for the duration of a world tick.
 /// </summary>
-internal readonly record struct ExplicitTransportEndpoint(AtmosChunk Chunk, ushort LocalVoxelIndex);
+/// <param name="Chunk">The chunk that holds the cell.</param>
+/// <param name="LocalVoxelIndex">The cell's index in the chunk.</param>
+/// <param name="CellVolume">
+///     The volume of a standalone mixture cell, or zero for a grid voxel, which has the configured voxel volume.
+/// </param>
+/// <remarks>
+///     The volume is part of the key that identifies a cell. A cell cannot change volume during a tick, so the same
+///     cell always produces the same key.
+/// </remarks>
+internal readonly record struct ExplicitTransportEndpoint(
+    AtmosChunk Chunk,
+    ushort LocalVoxelIndex,
+    CubicMetre CellVolume = 0f);
 
 /// <summary>
 ///     Describes one canonical, resolved sparse edge for the duration of a world tick.
@@ -53,6 +65,21 @@ internal readonly record struct ExplicitTransportEdge(
 ///         Conduction through <see cref="ExplicitTransportCapabilities.Thermal" /> is not scaled.
 ///         The existing conductance law is a heat-capacity-bounded relaxation and not an area-based flux.
 ///         Shrinking it with the opening is a separate modeling question.
+///     </para>
+///     <para>
+///         An endpoint can be a standalone mixture cell with its own volume.
+///         Each endpoint computes its pressure from its own <c>R / V</c>.
+///         Bulk flow between unequal volumes moves <c>coeff · ΔP / (R · T) · V_h</c> moles, where
+///         <c>V_h = 2 / (1 / V1 + 1 / V2)</c> is the harmonic mean of the two volumes.
+///         That count equalizes the pressures exactly when <c>coeff</c> is 0.5.
+///         A link between two grid voxels keeps the single-volume expression, because <c>2 / (2 / V)</c> does not
+///         round back to <c>V</c> in every case.
+///         Species diffusion keeps the configured voxel spacing.
+///         Its rate for a mixture cell scales by the ratio of the voxel volume to the cell volume, so unequal cells
+///         settle on equal concentration and not on equal moles.
+///         Both directions of such a link share one per-edge cap, so the cap cannot move that equilibrium.
+///         A link between two grid voxels keeps the separate cap per side.
+///         Thermal conductance has no volume term.
 ///     </para>
 /// </remarks>
 internal sealed class ExplicitAtmosTransportSolver
@@ -246,9 +273,17 @@ internal sealed class ExplicitAtmosTransportSolver
             Mole secondTotal = SumMoles(available, secondOffset, gasCount);
             Kelvin firstTemperature = config.GetValidatedTemp(first.Chunk.Temperature[first.LocalVoxelIndex]);
             Kelvin secondTemperature = config.GetValidatedTemp(second.Chunk.Temperature[second.LocalVoxelIndex]);
-            Pascal firstPressure = AtmosSolverMath.CalculatePressure(config, firstTotal, firstTemperature);
-            Pascal secondPressure = AtmosSolverMath.CalculatePressure(config, secondTotal, secondTemperature);
+            Pascal firstPressure = AtmosSolverMath.CalculatePressure(
+                config, firstTotal, firstTemperature, PressureCoefficient(config, first));
+
+            Pascal secondPressure = AtmosSolverMath.CalculatePressure(
+                config, secondTotal, secondTemperature, PressureCoefficient(config, second));
+
             Pascal pressureDelta = firstPressure - secondPressure;
+            PascalPerMoleKelvin bulkCoefficient = BulkPressureCoefficient(config, first, second);
+            bool mixtureLink = first.CellVolume > 0f || second.CellVolume > 0f;
+            Scalar firstVolumeScale = DiffusionVolumeScale(config, first);
+            Scalar secondVolumeScale = DiffusionVolumeScale(config, second);
 
             Mole firstBulkMoles = 0f;
             Mole secondBulkMoles = 0f;
@@ -257,14 +292,16 @@ internal sealed class ExplicitAtmosTransportSolver
                 firstBulkMoles = AtmosSolverMath.PressureToMoles(
                     config,
                     AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta),
-                    firstTemperature);
+                    firstTemperature,
+                    bulkCoefficient);
             }
             else if (pressureDelta < 0f && secondTotal > 0f)
             {
                 secondBulkMoles = AtmosSolverMath.PressureToMoles(
                     config,
                     AtmosSolverMath.CalculateBulkPressureTransfer(config, -pressureDelta),
-                    secondTemperature);
+                    secondTemperature,
+                    bulkCoefficient);
             }
 
             for (int gasId = 0; gasId < gasCount; gasId++)
@@ -274,23 +311,52 @@ internal sealed class ExplicitAtmosTransportSolver
                 Mole forward = firstTotal > 0f ? firstBulkMoles * (firstMoles / firstTotal) : 0f;
                 Mole reverse = secondTotal > 0f ? secondBulkMoles * (secondMoles / secondTotal) : 0f;
 
-                forward += CalculateDiffusionRequest(
-                    firstMoles,
-                    firstPressure,
-                    firstTemperature,
-                    config.GetDiffusionCoefficient(gasId),
-                    voxelEdge,
-                    config,
-                    deltaTime);
+                if (mixtureLink)
+                {
+                    Scalar firstFraction = CalculateDiffusionFraction(
+                        firstMoles,
+                        firstPressure,
+                        firstTemperature,
+                        config.GetDiffusionCoefficient(gasId),
+                        voxelEdge,
+                        firstVolumeScale,
+                        config,
+                        deltaTime);
 
-                reverse += CalculateDiffusionRequest(
-                    secondMoles,
-                    secondPressure,
-                    secondTemperature,
-                    config.GetDiffusionCoefficient(gasId),
-                    voxelEdge,
-                    config,
-                    deltaTime);
+                    Scalar secondFraction = CalculateDiffusionFraction(
+                        secondMoles,
+                        secondPressure,
+                        secondTemperature,
+                        config.GetDiffusionCoefficient(gasId),
+                        voxelEdge,
+                        secondVolumeScale,
+                        config,
+                        deltaTime);
+
+                    Scalar limiter = SharedDiffusionLimiter(firstFraction, secondFraction);
+                    forward += firstFraction * limiter * firstMoles;
+                    reverse += secondFraction * limiter * secondMoles;
+                }
+                else
+                {
+                    forward += CalculateDiffusionRequest(
+                        firstMoles,
+                        firstPressure,
+                        firstTemperature,
+                        config.GetDiffusionCoefficient(gasId),
+                        voxelEdge,
+                        config,
+                        deltaTime);
+
+                    reverse += CalculateDiffusionRequest(
+                        secondMoles,
+                        secondPressure,
+                        secondTemperature,
+                        config.GetDiffusionCoefficient(gasId),
+                        voxelEdge,
+                        config,
+                        deltaTime);
+                }
 
                 // Scale after the per-edge diffusion cap so a narrow link never asks for more than a full face would.
                 forward = MathF.Max(0f, forward) * areaFraction;
@@ -322,6 +388,54 @@ internal sealed class ExplicitAtmosTransportSolver
         // A cell may have any number of explicit neighbors.
         // The shared availability limiter below scales their combined requests again when they exceed the source.
         return SpeciesDiffusionKernel.TransferAmount(referenceDiffusivity, environmentFactor, sourceMoles, deltaTime);
+    }
+
+    /// <summary>
+    ///     Returns the uncapped fraction of one gas that a link endpoint would send through the link in one stage run.
+    /// </summary>
+    /// <remarks>
+    ///     The fraction is <see cref="SpeciesDiffusionKernel.TransferAmount" /> before its cap, divided by the source
+    ///     moles. <paramref name="volumeScale" /> turns the voxel rate into the rate of a cell with its own volume.
+    /// </remarks>
+    private static Scalar CalculateDiffusionFraction(
+        Mole sourceMoles,
+        Pascal sourcePressure,
+        Kelvin sourceTemperature,
+        SquareMetrePerSecond referenceDiffusivity,
+        Metre voxelEdge,
+        Scalar volumeScale,
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime)
+    {
+        if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
+            return 0f;
+
+        PerSquareMetre environmentFactor =
+            SpeciesDiffusionKernel.EnvironmentFactor(config, sourcePressure, sourceTemperature, voxelEdge) *
+            volumeScale;
+
+        PerSecond diffusionConstant = referenceDiffusivity * environmentFactor;
+        return diffusionConstant * deltaTime;
+    }
+
+    /// <summary>
+    ///     Returns the factor that keeps both diffusion fractions of a link within the per-edge cap of one seventh.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Both directions get the same factor, so the cap keeps their ratio. The net flow is then zero exactly
+    ///         when the two cells have equal concentration. A separate cap per side would clip only the small cell's
+    ///         outflow. A canister much smaller than a voxel would then settle at a higher pressure than the voxel.
+    ///     </para>
+    ///     <para>
+    ///         With the factor applied, each fraction is at most one seventh. One run then closes at most two sevenths
+    ///         of the concentration difference, so the pair relaxes without overshoot.
+    ///     </para>
+    /// </remarks>
+    private static Scalar SharedDiffusionLimiter(Scalar firstFraction, Scalar secondFraction)
+    {
+        Scalar largest = MathF.Max(firstFraction, secondFraction);
+        return largest * 7 > 1f ? 1f / (largest * 7) : 1f;
     }
 
     private static void CalculateThermalConductance(
@@ -525,14 +639,60 @@ internal sealed class ExplicitAtmosTransportSolver
             else
             {
                 chunk.Temperature[voxelIndex] = MathF.Max(0f, (Joule)(Math.Max(0d, energy) / newHeatCapacity));
-                chunk.TotalPressure[voxelIndex] =
-                    AtmosSolverMath.CalculatePressure(config, totalMoles, chunk.Temperature[voxelIndex]);
+                chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
+                    config, totalMoles, chunk.Temperature[voxelIndex], PressureCoefficient(config, endpoint));
 
                 chunk.IsVacuum[voxelIndex] = false;
             }
 
-            chunk.Wake();
+            // A pool page never sleeps, and waking it would rebuild its active index list once per cell.
+            if (endpoint.CellVolume > 0f)
+                chunk.MarkChanged();
+            else
+                chunk.Wake();
         }
+    }
+
+    /// <summary>
+    ///     Returns the factor that turns the voxel-based diffusion rate into the rate of a cell with another volume.
+    /// </summary>
+    /// <remarks>
+    ///     The diffusion rate comes from Fick's law on a voxel, where the source concentration is its moles over the
+    ///     voxel volume. A cell of volume <c>V</c> holds the same moles at <c>V_voxel / V</c> times the
+    ///     concentration, so its rate scales by that ratio. Without it, two cells of unequal volume would settle on
+    ///     equal moles and not on equal concentration. A grid voxel returns one.
+    /// </remarks>
+    private static Scalar DiffusionVolumeScale(AtmosSolverConfigSnapshot config, ExplicitTransportEndpoint endpoint)
+    {
+        return endpoint.CellVolume > 0f ? config.VoxelVolume / endpoint.CellVolume : 1f;
+    }
+
+    /// <summary>
+    ///     Returns the endpoint's own <c>R / V</c>.
+    /// </summary>
+    private static PascalPerMoleKelvin PressureCoefficient(AtmosSolverConfigSnapshot config, ExplicitTransportEndpoint endpoint)
+    {
+        return endpoint.CellVolume > 0f
+            ? AtmosPhysicalConstants.MolarGasConstant / endpoint.CellVolume
+            : config.PressurePerMoleKelvin;
+    }
+
+    /// <summary>
+    ///     Returns the <c>R / V_h</c> that turns a pressure difference into a bulk mole count.
+    /// </summary>
+    /// <remarks>
+    ///     <c>V_h = 2 / (1 / V1 + 1 / V2)</c> is the harmonic mean of the volumes, so <c>R / V_h</c> is the mean of the
+    ///     two <c>R / V</c>. A link between grid voxels returns the configured coefficient untouched.
+    /// </remarks>
+    private static PascalPerMoleKelvin BulkPressureCoefficient(
+        AtmosSolverConfigSnapshot config,
+        ExplicitTransportEndpoint first,
+        ExplicitTransportEndpoint second)
+    {
+        if (first.CellVolume <= 0f && second.CellVolume <= 0f)
+            return config.PressurePerMoleKelvin;
+
+        return (PressureCoefficient(config, first) + PressureCoefficient(config, second)) * 0.5f;
     }
 
     private static int FindGasChannel(AtmosChunk chunk, int gasId)

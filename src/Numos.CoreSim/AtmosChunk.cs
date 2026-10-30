@@ -764,6 +764,27 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Resets one voxel's element of every per-voxel field, whatever the field's clear options are.
+    /// </summary>
+    /// <param name="idx">Index of voxel</param>
+    /// <remarks>
+    ///     The mixture pool calls this when a cell changes owner, so one mixture never sees the data of another.
+    ///     Fixed-length fields belong to the whole chunk and keep their values.
+    /// </remarks>
+    internal void ClearVoxelFields(ushort idx)
+    {
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field.FixedLength: null })
+                storage.ClearElement(idx);
+        }
+    }
+
+    /// <summary>
     ///     Zeroes every momentum component of one voxel. Call it whenever a write leaves the voxel without gas, so
     ///     the "no gas, no momentum" invariant on <see cref="MomentumX" /> holds.
     /// </summary>

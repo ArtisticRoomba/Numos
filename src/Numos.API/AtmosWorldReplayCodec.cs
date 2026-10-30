@@ -85,6 +85,40 @@ internal static partial class AtmosWorldReplayCodec
         return (checkpoint, initialHash, headHash);
     }
 
+    private static void WriteSetGasMixtureOperation(BinaryWriter writer, SetGasMixtureOperation operation)
+    {
+        writer.Write(operation.Slot);
+        writer.Write(operation.Generation);
+        writer.Write(operation.Temperature);
+        writer.Write(operation.Pressure);
+        writer.Write(operation.HeatCapacity);
+        writer.Write(operation.Gases.Count);
+        foreach (var gas in operation.Gases)
+        {
+            writer.Write(gas.GasId);
+            writer.Write(gas.Moles);
+        }
+    }
+
+    private static SetGasMixtureOperation ReadSetGasMixtureOperation(BinaryReader reader)
+    {
+        int slot = reader.ReadInt32();
+        uint generation = reader.ReadUInt32();
+        float temperature = reader.ReadSingle();
+        float pressure = reader.ReadSingle();
+        float capacity = reader.ReadSingle();
+        int count = AtmosReplayCodec.ReadCount(reader, 1_000_000, "mixture gas");
+        var gases = new AtmosGasAmount[count];
+        for (int index = 0; index < count; index++)
+        {
+            int gasId = reader.ReadInt32();
+            float moles = reader.ReadSingle();
+            gases[index] = new AtmosGasAmount(gasId, moles);
+        }
+
+        return new SetGasMixtureOperation(slot, generation, temperature, pressure, capacity, gases);
+    }
+
     private static void WriteSetAtmosWorldSolverStateOperation(BinaryWriter writer, SetAtmosWorldSolverStateOperation operation)
     {
         AtmosReplayCodec.WriteString(writer, operation.Name);

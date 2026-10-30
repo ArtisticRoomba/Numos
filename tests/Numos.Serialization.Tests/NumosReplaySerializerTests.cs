@@ -91,7 +91,7 @@ public sealed class NumosReplaySerializerTests
         source.SleepChunk(chunk);
         world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.SetAtmosConfig(new AtmosConfig(world.Config) { SleepDelay = 0.4f });
-        var canister = source.CreateGasMixture(1f, 330f);
+        using var canister = world.CreateGasMixture(1f, 330f);
         canister.SetMoles(0, 1f);
         canister.TransferTo(source.GetVoxelGasMixture(chunk, 0), 0.5f);
         var removed = source.CreateAndRegisterChunk(new Int3(1, 0, 0));

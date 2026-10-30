@@ -29,7 +29,12 @@ internal sealed class PhaseChangeSolver
     ///     Below worker count, per-voxel parallelism here helps fill idle workers.
     ///     At or above it, the outer per-chunk dispatch already saturates the pool, so this runs sequentially.
     /// </param>
-    internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config, int awakeChunkCount)
+    /// <param name="cellVolumes">
+    ///     Optional volume of every voxel, indexed by local voxel index. Standalone mixture pages pass it so each
+    ///     cell condenses at its own <c>R / V</c>. Null uses the configured voxel volume for every voxel.
+    /// </param>
+    internal void Solve(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config, int awakeChunkCount, CubicMetre[]? cellVolumes = null)
     {
         if (config.CondensationRateFactor <= 0f || chunk.ActiveAirCount == 0)
             return;
@@ -65,7 +70,7 @@ internal sealed class PhaseChangeSolver
             // before ParallelPhase hands the items out.
             // It is a bijection over [0, ActiveAirCount), so every voxel is still visited exactly once.
             int stride = ChooseStride(chunk.ActiveAirCount);
-            var action = new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride);
+            var action = new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride, cellVolumes);
 
             // See the awakeChunkCount doc above.
             // Add per-voxel parallelism only when ThermodynamicsSolver's per-chunk dispatch leaves workers idle.
@@ -88,7 +93,8 @@ internal sealed class PhaseChangeSolver
 
     private static void ProcessVoxelForGas(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config, int gasIndex,
-        GasProperties properties, PerKelvin64 inverseBoilingPoint, ushort voxelIndex)
+        GasProperties properties, PerKelvin64 inverseBoilingPoint, ushort voxelIndex,
+        PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         Mole gasMoles = chunk.ActiveGases[gasIndex].Moles[voxelIndex];
         if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
@@ -96,7 +102,8 @@ internal sealed class PhaseChangeSolver
 
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         // Saturation amount from the Clausius-Clapeyron equation. Any vapor above it can condense.
-        Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
+        Mole64 saturationMoles = CalculateSaturationMoles(
+            config, properties, temperature, inverseBoilingPoint, pressurePerMoleKelvin);
         // At or below saturationMoles condensation is not possible. Special cases are ignored.
         if (gasMoles <= saturationMoles)
             return;
@@ -121,7 +128,8 @@ internal sealed class PhaseChangeSolver
             saturationMoles,
             molarInternalEnergyOfVaporization,
             properties,
-            inverseBoilingPoint);
+            inverseBoilingPoint,
+            pressurePerMoleKelvin);
 
         Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
         // The condensation factor gives an exponential decay of equilibriumCondensedMoles.
@@ -150,7 +158,8 @@ internal sealed class PhaseChangeSolver
             temperature,
             remainingMoles,
             molesToCondense,
-            molarInternalEnergyOfVaporization);
+            molarInternalEnergyOfVaporization,
+            pressurePerMoleKelvin);
     }
 
     /// <summary>
@@ -163,7 +172,7 @@ internal sealed class PhaseChangeSolver
         AtmosSolverConfigSnapshot config, int gasIndex, ushort voxelIndex, Mole64 gasMoles,
         Kelvin64 initialTemperature, Mole64 initialSaturationMoles,
         JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
-        PerKelvin64 inverseBoilingPoint)
+        PerKelvin64 inverseBoilingPoint, PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         // TODO PERF: this uses doubles for precision, so it cannot use previously cached values.
         // Check whether the precision is required.
@@ -201,6 +210,7 @@ internal sealed class PhaseChangeSolver
                 molarInternalEnergyOfVaporization,
                 properties,
                 inverseBoilingPoint,
+                pressurePerMoleKelvin,
                 candidate,
                 out PerMole64 residualDerivative);
 
@@ -225,6 +235,7 @@ internal sealed class PhaseChangeSolver
                     molarInternalEnergyOfVaporization,
                     properties,
                     inverseBoilingPoint,
+                    pressurePerMoleKelvin,
                     candidate,
                     out residualDerivative);
 
@@ -259,7 +270,8 @@ internal sealed class PhaseChangeSolver
         Mole64 gasMoles, Kelvin64 initialTemperature, JoulePerKelvin64 initialTotalHeatCapacity,
         JoulePerKelvin64 otherHeatCapacity, JoulePerMoleKelvin64 molarHeatCapacity,
         JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
-        PerKelvin64 inverseBoilingPoint, Mole64 remainingMoles, out PerMole64 residualDerivative)
+        PerKelvin64 inverseBoilingPoint, PascalPerMoleKelvin pressurePerMoleKelvin, Mole64 remainingMoles,
+        out PerMole64 residualDerivative)
     {
         JoulePerKelvin64 remainingHeatCapacity = otherHeatCapacity + remainingMoles * molarHeatCapacity;
         if (remainingHeatCapacity <= 0d || !double.IsFinite(remainingHeatCapacity))
@@ -281,7 +293,7 @@ internal sealed class PhaseChangeSolver
         }
 
         Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
-                                      Math.Log(config.PressurePerMoleKelvin) -
+                                      Math.Log(pressurePerMoleKelvin) -
                                       Math.Log(temperature) -
                                       properties.MolarEnthalpyOfVaporization /
                                       AtmosPhysicalConstants.MolarGasConstant *
@@ -325,7 +337,8 @@ internal sealed class PhaseChangeSolver
 
     private static Mole64 CalculateSaturationMoles(
         AtmosSolverConfigSnapshot config,
-        GasProperties properties, Kelvin64 temperature, PerKelvin64 inverseBoilingPoint)
+        GasProperties properties, Kelvin64 temperature, PerKelvin64 inverseBoilingPoint,
+        PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         // Clausius-Clapeyron equation for saturation vapor pressure:
         // P_2 = P_1 \exp{\frac{\Delta H_{vap}}{R}\left( \frac{1}{T_1} - \frac{1}{T_2} \right)}
@@ -337,7 +350,7 @@ internal sealed class PhaseChangeSolver
         // The code converts this equation to use moles instead of pressure.
         // TODO PERF
         Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
-                                      Math.Log(config.PressurePerMoleKelvin) -
+                                      Math.Log(pressurePerMoleKelvin) -
                                       Math.Log(temperature) -
                                       properties.MolarEnthalpyOfVaporization /
                                       AtmosPhysicalConstants.MolarGasConstant *
@@ -349,7 +362,8 @@ internal sealed class PhaseChangeSolver
     private static void ApplyCondensation(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         int gasIndex, ushort voxelIndex, Kelvin temperature, Mole remainingMoles,
-        Mole condensedMoles, JoulePerMole molarInternalEnergyOfVaporization)
+        Mole condensedMoles, JoulePerMole molarInternalEnergyOfVaporization,
+        PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         chunk.ActiveGases[gasIndex].Moles[voxelIndex] = remainingMoles;
 
@@ -365,7 +379,7 @@ internal sealed class PhaseChangeSolver
         }
 
         chunk.TotalPressure[voxelIndex] =
-            AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
+            AtmosSolverMath.CalculatePressureAtVoxel(config, pressurePerMoleKelvin, chunk, voxelIndex);
 
         // TODO: this temperature is wrong. The liquid should be at the equivalent condensation point.
         // Finding that point needs the Lambert W function to invert the saturation pressure equation.
@@ -420,16 +434,20 @@ internal sealed class PhaseChangeSolver
         AtmosSolverConfigSnapshot config,
         CondensingGas[] condensingGases,
         int condensingCount,
-        int stride) : IAction
+        int stride,
+        CubicMetre[]? cellVolumes) : IAction
     {
         public void Invoke(int activeIndex)
         {
             int permutedIndex = (int)((long)activeIndex * stride % chunk.ActiveAirCount);
             ushort voxelIndex = chunk.ActiveAirIndices[permutedIndex];
+            PascalPerMoleKelvin pressurePerMoleKelvin = cellVolumes == null
+                ? config.PressurePerMoleKelvin
+                : AtmosPhysicalConstants.MolarGasConstant / cellVolumes[voxelIndex];
             for (int i = 0; i < condensingCount; i++)
             {
                 CondensingGas gas = condensingGases[i];
-                ProcessVoxelForGas(chunk, config, gas.GasIndex, gas.Properties, gas.InverseBoilingPoint, voxelIndex);
+                ProcessVoxelForGas(chunk, config, gas.GasIndex, gas.Properties, gas.InverseBoilingPoint, voxelIndex, pressurePerMoleKelvin);
             }
         }
     }

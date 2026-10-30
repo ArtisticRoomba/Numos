@@ -35,9 +35,9 @@ public sealed partial class AtmosWorldCheckpoint
     ///     Version 14 adds the default and per-gas thermal conductivity, the ignition settings, the reaction ignition flag,
     ///     and the <c>SetIgnitionSource</c> operation. Version 15 adds the tick rate and each solver
     ///     stage's interval and schedule state. Version 16 adds the acoustic scaling settings to
-    ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />.
+    ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />. Version 17 adds the gas mixture pool.
     /// </remarks>
-    public const int CurrentFormatVersion = 16;
+    public const int CurrentFormatVersion = 17;
 
     // Immutable once captured or read, so the digest is computed once. See AtmosSimulationCheckpoint.
     [NumosIgnore]

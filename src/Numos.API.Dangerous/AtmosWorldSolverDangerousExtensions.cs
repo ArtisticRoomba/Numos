@@ -59,6 +59,44 @@ public static class AtmosWorldSolverDangerousExtensions
     {
         return new AtmosDangerousChunk(chunk.Chunk);
     }
+
+    /// <summary>
+    ///     Opens unchecked live storage for a gas mixture pool page.
+    /// </summary>
+    /// <param name="page">A view from <see cref="AtmosWorldSolverContext.GasMixtures" />.</param>
+    /// <returns>A live view of the same page, including built-in gas and temperature storage and cell volumes.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Like the chunk overload, this takes no lock and checks the tick once. Do not use the returned view after
+    ///         the callback returns.
+    ///     </para>
+    ///     <para>
+    ///         Writes are not recorded and stay replay-safe only when they are deterministic solver work. See
+    ///         <see cref="AtmosDangerousGasMixturePage" /> for the cache rules that mixtures add.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     <paramref name="page" /> is <see langword="default" /> or its tick has ended.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     // Reads raw temperature into a custom field. The write leaves gas, temperature, and the caches alone.
+    ///     foreach (var page in context.GasMixtures)
+    ///     {
+    ///         Span&lt;float&gt; temperature = page.Dangerous().Chunk.Temperature;
+    ///         Span&lt;float&gt; peak = page.Get(HeatData.PeakTemperature).AsSpan();
+    ///         for (ushort cell = 0; cell &lt; page.CellCount; cell++)
+    ///         {
+    ///             if (page.IsAllocated(cell))
+    ///                 peak[cell] = MathF.Max(peak[cell], temperature[cell]);
+    ///         }
+    ///     }
+    ///     </code>
+    /// </example>
+    public static AtmosDangerousGasMixturePage Dangerous(this AtmosSolverGasMixturePage page)
+    {
+        return new AtmosDangerousGasMixturePage(page.Chunk, page.Volumes);
+    }
 }
 
 /// <summary>
@@ -93,5 +131,25 @@ public readonly ref struct AtmosDangerousWorldSolverApi
             throw new ArgumentException("The cell does not identify a live chunk in this world.", nameof(cell));
 
         return chunk.Dangerous();
+    }
+
+    /// <summary>
+    ///     Returns the live pool page that holds a standalone gas mixture.
+    /// </summary>
+    /// <param name="cell">A mixture reference, such as <see cref="GasMixture.CellRef" />.</param>
+    /// <returns>The unchecked live page view.</returns>
+    /// <remarks>
+    ///     <see cref="GetChunk" /> only resolves grid cells. The returned view covers the whole page. Index it with
+    ///     <see cref="AtmosCellRef.LocalVoxelIndex" /> to reach the cell itself. Like
+    ///     <see cref="AtmosSolverGasMixtures.TryGetPage" />, this takes no lock.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The cell does not name a live mixture in this world.</exception>
+    /// <exception cref="InvalidOperationException">The callback's tick has ended.</exception>
+    public AtmosDangerousGasMixturePage GetGasMixturePage(AtmosCellRef cell)
+    {
+        if (!_context.GasMixtures.TryGetPage(cell, out var page))
+            throw new ArgumentException("The cell does not identify an allocated gas mixture in this world.", nameof(cell));
+
+        return page.Dangerous();
     }
 }
