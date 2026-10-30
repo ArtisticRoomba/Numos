@@ -26,6 +26,7 @@ public partial class SimulationViewer
             new Vector2(0.5f, 0.5f));
 
         using var window = ImGuiExtensions.BeginWindow(
+            "program-settings",
             Locale.GetString("common-configure"),
             ref _showProgramSettingsPanel,
             new Vector2(460, 120),
@@ -101,8 +102,7 @@ public partial class SimulationViewer
 
         ImGui.Checkbox(Locale.GetString("uncap-fps"), ref _uncappedFps);
 
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("uncap-fps-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("uncap-fps-tooltip"));
 
         if (_uncappedFps)
             ImGui.BeginDisabled();
@@ -114,8 +114,7 @@ public partial class SimulationViewer
             ImGui.EndDisabled();
 
         ImGui.Checkbox(Locale.GetString("limit-fps-when-unfocused"), ref _limitFpsWhenUnfocused);
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("limit-fps-when-unfocused-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("limit-fps-when-unfocused-tooltip"));
 
         if (!_limitFpsWhenUnfocused)
             ImGui.BeginDisabled();
@@ -138,20 +137,40 @@ public partial class SimulationViewer
         ImGuiExtensions.QuestionTooltip(Locale.GetString("vsync-tooltip"));
 
         ImGui.Checkbox(Locale.GetString("use-event-based-rendering"), ref _eventBasedRenderingEnabled);
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("event-based-rendering-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("event-based-rendering-tooltip"));
     }
 
     private void RenderInterfaceSettings()
     {
         ImGui.SeparatorText(Locale.GetString("interface"));
+
+        ImGui.SetNextItemWidth(220f);
+        if (ImGui.BeginCombo(
+                Locale.GetString("language"),
+                Locale.GetCultureDisplayName(Locale.CurrentCulture.Name)))
+        {
+            foreach (string culture in Locale.AvailableCultures)
+            {
+                bool isSelected = string.Equals(culture, Locale.CurrentCulture.Name, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(Locale.GetCultureDisplayName(culture) + "##culture", isSelected))
+                    _pendingCulture = culture;
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("language-tooltip"));
+        ImGui.Spacing();
+
         ImGui.Checkbox(Locale.GetString("show-fps-overlay"), ref _showPerformanceOverlay);
         ImGuiExtensions.QuestionTooltip(Locale.GetString("show-fps-overlay-tooltip"));
 
         ImGui.Spacing();
         ImGui.Checkbox(Locale.GetString("show-viewport-branding"), ref _showViewportBranding);
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("show-viewport-branding-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("show-viewport-branding-tooltip"));
 
         ImGui.SetNextItemWidth(220f);
         ImGui.SliderFloat(Locale.GetString("branding-opacity"), ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");

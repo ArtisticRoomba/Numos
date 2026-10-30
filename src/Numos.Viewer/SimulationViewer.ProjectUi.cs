@@ -12,6 +12,8 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
+    private readonly static AtmosTransportModel[] TransportModelValues =
+        [AtmosTransportModel.Legacy, AtmosTransportModel.Euler];
     private readonly Dictionary<string, string> _configFieldErrors = [];
 
     private readonly Dictionary<string, float> _configFloatDrafts = [];
@@ -24,16 +26,11 @@ public partial class SimulationViewer
     private string? _createProjectError;
     private bool _createProjectModalOpen;
     private FeedbackMessage? _gasRegistryFeedback;
-    private bool _includeDefaultGasesDraft = true;
 
     private bool _igniteOnCellClick;
     private float _ignitionTemperature = 2000f;
     private float _ignitionVolume = 1e-3f;
-
-    // The selection the ignition controls last saw, so only a change of selection counts as a click, and the
-    // frame they were last drawn on, so a selection that changed while they were hidden doesn't count either.
-    private (Int3 Chunk, int X, int Y, int Z)? _lastIgnitionSelection;
-    private int _lastIgnitionControlsFrame = -1;
+    private bool _includeDefaultGasesDraft = true;
 
     private Int3? _injectionChunkPosition;
     private FeedbackMessage? _injectionFeedback;
@@ -43,6 +40,11 @@ public partial class SimulationViewer
     private int _injectionX;
     private int _injectionY;
     private int _injectionZ;
+    private int _lastIgnitionControlsFrame = -1;
+
+    // The selection the ignition controls last saw, so only a change of selection counts as a click, and the
+    // frame they were last drawn on, so a selection that changed while they were hidden doesn't count either.
+    private (Int3 Chunk, int X, int Y, int Z)? _lastIgnitionSelection;
     private int _newChunkRoomId = 1;
 
     private int _newChunkX;
@@ -52,11 +54,11 @@ public partial class SimulationViewer
     private bool _newGasCondensationEnabled;
     private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
     private float _newGasEnthalpyOfVaporization;
-    private float _newGasMolarMass;
     private FeedbackMessage? _newGasFeedback;
     private int _newGasLiquidId = -1;
     private float _newGasMolarHeatCapacityAtConstantVolume =
         AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
+    private float _newGasMolarMass;
 
     private string _newGasName = "New Gas";
     private int _projectChunkDepthDraft = 1;
@@ -64,12 +66,12 @@ public partial class SimulationViewer
     private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
 
     private string _projectNameDraft = "Untitled Simulation";
+    private AtmosTransportModel _projectTransportModelDraft;
     private bool _removeChunkModalOpen;
     private bool _requestOpenCloseProject;
 
     private bool _requestOpenCreateProject;
     private bool _requestRemoveChunk;
-    private AtmosTransportModel _projectTransportModelDraft;
     private bool _requestResetConfiguration;
     private bool _resetConfigurationModalOpen;
 
@@ -86,7 +88,10 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _session.World == null ? Locale.GetString("common-untitled-simulation") : Locale.GetString("project-name-copy", ("projectName", _session.ProjectName));
+        _projectNameDraft = _session.World == null
+            ? Locale.GetString("common-untitled-simulation")
+            : Locale.GetString("project-name-copy", ("projectName", _session.ProjectName));
+
         _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
             ? _session.ChunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
@@ -137,8 +142,7 @@ public partial class SimulationViewer
         ImGui.InputText(Locale.GetString("project-name"), ref _projectNameDraft, 128);
         ImGui.Separator();
         ImGui.Text(Locale.GetString("chunk-dimensions"));
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("chunk-dimensions-description"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("chunk-dimensions-description"));
 
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt(Locale.GetString("width-project-chunk"), ref _projectChunkWidthDraft);
@@ -204,23 +208,20 @@ public partial class SimulationViewer
         }
     }
 
-    private static readonly AtmosTransportModel[] TransportModelValues =
-        [AtmosTransportModel.Legacy, AtmosTransportModel.Euler];
-
-    private static readonly string[] TransportModelLabels = [Locale.GetString("legacy-pressure-relaxation"), Locale.GetString("euler-compressible-flow")];
-
     /// <summary>
     ///     Picks the preset that fills the stage list of a new project. The Solver Pipeline panel changes the stages
     ///     afterwards.
     /// </summary>
     private void RenderTransportModelCombo()
     {
+        string[] labels =
+            [Locale.GetString("legacy-pressure-relaxation"), Locale.GetString("euler-compressible-flow")];
+
         int index = Array.IndexOf(TransportModelValues, _projectTransportModelDraft);
-        if (ImGui.Combo(Locale.GetString("transport-model"), ref index, TransportModelLabels, TransportModelLabels.Length) && index >= 0)
+        if (ImGui.Combo(Locale.GetString("transport-model"), ref index, labels, labels.Length) && index >= 0)
             _projectTransportModelDraft = TransportModelValues[index];
 
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("transport-model-description"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("transport-model-description"));
     }
 
     private void DrawCloseProjectModal()
@@ -289,8 +290,7 @@ public partial class SimulationViewer
             return;
         }
 
-        ImGui.TextWrapped(
-            Locale.GetString("remove-chunk-confirmation", ("chunkPosition", FormatChunkPosition(chunk.Position))));
+        ImGui.TextWrapped(Locale.GetString("remove-chunk-confirmation", ("chunkPosition", FormatChunkPosition(chunk.Position))));
 
         ImGui.Spacing();
         ImGui.BeginDisabled(_session.Timeline?.IsInspecting == true);
@@ -322,14 +322,19 @@ public partial class SimulationViewer
 
     private void DrawResetConfigurationModal()
     {
-        ImGuiExtensions.OpenPopupWhenRequested(Locale.GetString("reset-atmosphere-settings-configuration"), ref _requestResetConfiguration);
+        ImGuiExtensions.OpenPopupWhenRequested(
+            Locale.GetString("reset-atmosphere-settings-configuration"),
+            ref _requestResetConfiguration);
+
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(Locale.GetString("reset-atmosphere-settings-configuration"), ref _resetConfigurationModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal(
+            Locale.GetString("reset-atmosphere-settings-configuration"),
+            ref _resetConfigurationModalOpen);
+
         if (!modal.IsVisible)
             return;
 
-        ImGui.TextWrapped(
-            Locale.GetString("reset-atmosphere-settings-confirmation"));
+        ImGui.TextWrapped(Locale.GetString("reset-atmosphere-settings-confirmation"));
 
         ImGui.Spacing();
         ImGui.BeginDisabled(_session.Config == null || _session.Timeline?.IsInspecting == true);
@@ -360,8 +365,7 @@ public partial class SimulationViewer
         if (_session.Timeline is not { IsInspecting: true } timeline)
             return false;
 
-        ImGuiExtensions.ReadOnlyNotice(
-            Locale.GetString("read-only-inspection-notice", ("tick", timeline.Position.Tick)));
+        ImGuiExtensions.ReadOnlyNotice(Locale.GetString("read-only-inspection-notice", ("tick", timeline.Position.Tick)));
 
         return true;
     }
@@ -403,7 +407,10 @@ public partial class SimulationViewer
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField(Locale.GetString("active-simulation"), GetSimulationName(_simulation.Id));
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("common-simulations-heading"), (_session.World?.Simulations.Count ?? 0).ToString());
+            ImGuiExtensions.StatusField(
+                Locale.GetString("common-simulations-heading"),
+                (_session.World?.Simulations.Count ?? 0).ToString());
+
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField(Locale.GetString("common-chunks-heading"), _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
@@ -503,7 +510,12 @@ public partial class SimulationViewer
 
     private void RenderProjectChunkControls(bool inspecting)
     {
-        ImGui.TextDisabled(Locale.GetString("chunk-size", ("x", _session.ChunkDimensions.X), ("y", _session.ChunkDimensions.Y), ("z", _session.ChunkDimensions.Z)));
+        ImGui.TextDisabled(
+            Locale.GetString(
+                "chunk-size",
+                ("x", _session.ChunkDimensions.X),
+                ("y", _session.ChunkDimensions.Y),
+                ("z", _session.ChunkDimensions.Z)));
 
         if (_liveChunkHandles.Count == 0)
         {
@@ -730,22 +742,19 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         formChanged |= ImGui.InputInt(Locale.GetString("new-gas-liquid-id"), ref _newGasLiquidId);
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("new-gas-liquid-id-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-liquid-id-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
         formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-diffusion-coefficient"), ref _newGasDiffusionCoefficient);
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("new-gas-diffusion-coefficient-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-diffusion-coefficient-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
         formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-molar-mass"), ref _newGasMolarMass, 0f, 0f, "%.6f");
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("new-gas-molar-mass-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-molar-mass-tooltip"));
 
         if (formChanged)
             _newGasFeedback = null;
@@ -835,13 +844,14 @@ public partial class SimulationViewer
 
     private static string FormatGasDetails(GasProperties gas)
     {
-        return Locale.GetString("gas-details",
-                   ("name", gas.Name ?? string.Empty),
-                   ("condensation", Locale.GetString(gas.CondensationEnabled ? "enabled" : "disabled")),
-                   ("vaporization-enthalpy", QuantityFormat.Format(gas.MolarEnthalpyOfVaporization, "J/mol")),
-                   ("liquid-id", gas.LiquidId.ToString(CultureInfo.InvariantCulture)),
-                   ("diffusion-coefficient", QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)),
-                   ("molar-mass", QuantityFormat.Format(gas.MolarMass, "kg/mol", 6)));
+        return Locale.GetString(
+            "gas-details",
+            ("name", gas.Name ?? string.Empty),
+            ("condensation", Locale.GetString(gas.CondensationEnabled ? "enabled" : "disabled")),
+            ("vaporization-enthalpy", QuantityFormat.Format(gas.MolarEnthalpyOfVaporization, "J/mol")),
+            ("liquid-id", gas.LiquidId.ToString(CultureInfo.InvariantCulture)),
+            ("diffusion-coefficient", QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)),
+            ("molar-mass", QuantityFormat.Format(gas.MolarMass, "kg/mol", 6)));
     }
 
     private void RenderProjectInjectionControls(bool inspecting)

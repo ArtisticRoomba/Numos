@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
 using ImGuiNET;
-using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -10,6 +9,7 @@ using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;
 using Numos.Viewer.Ui;
+using Numos.Workbench;
 using Raylib_cs;
 using rlImGui_cs;
 
@@ -27,7 +27,6 @@ public partial class SimulationViewer : IDisposable
     private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
-    private readonly WorkbenchSession _session;
     private readonly List<VoxelGasSnapshot> _gasMakeupRows = [];
     private readonly List<VoxelHighlight> _highlights = [];
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
@@ -35,11 +34,18 @@ public partial class SimulationViewer : IDisposable
     private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
     private readonly HashSet<VoxelAddress> _paintedCells = [];
     private readonly HashSet<VoxelAddress> _selectedCells = [];
+    private readonly WorkbenchSession _session;
     private readonly Dictionary<Int3, AtmosChunkSnapshot> _snapshotCache = new();
     private readonly List<AtmosChunkSnapshotRequest> _snapshotRequests = [];
     private readonly List<Int3> _staleSnapshotKeys = [];
     private readonly Dictionary<VoxelAddress, VoxelDetailCacheEntry> _voxelDetailCache = new();
     private ulong _appliedLegendRangeRevision = ulong.MaxValue;
+
+    /// <summary>
+    ///     Snapshot fields the current frame was built from. Turning arrows on widens the request to include
+    ///     velocity, but the chunk revisions do not move, so the builder has to be told to remap.
+    /// </summary>
+    private AtmosChunkSnapshotFields _appliedSnapshotFields;
     private int _appliedTargetFps = -1;
     private Camera2D _camera2D = new()
     {
@@ -88,7 +94,14 @@ public partial class SimulationViewer : IDisposable
     private int _legendResolution = 32;
     private bool _legendResolutionEnabled;
     private bool _limitFpsWhenUnfocused = true;
+
+    /// <summary>
+    ///     Mesh cache of the surface being drawn. <see cref="RenderSimulationViewports" /> points it at each surface in
+    ///     turn, like <see cref="_drawData" />.
+    /// </summary>
+    private ChunkMeshCache? _meshCache;
     private bool _nextFrameRequested;
+    private string? _pendingCulture;
     private int _programSettingsTab;
     private bool _requestExit;
     private VoxelAddress? _selectedCell;
@@ -99,13 +112,6 @@ public partial class SimulationViewer : IDisposable
     private bool _show3DVelocityArrows;
     private bool _show3DViewport = true;
     private bool _show3DVoxelOutlines = true;
-    private float _velocityArrowScaleSeconds = VelocityArrows.DefaultScaleSeconds;
-
-    /// <summary>
-    ///     Snapshot fields the current frame was built from. Turning arrows on widens the request to include
-    ///     velocity, but the chunk revisions do not move, so the builder has to be told to remap.
-    /// </summary>
-    private AtmosChunkSnapshotFields _appliedSnapshotFields;
     private bool _showConfigurationPanel;
     private bool _showPerformanceOverlay;
     private bool _showProgramSettingsPanel;
@@ -117,24 +123,8 @@ public partial class SimulationViewer : IDisposable
     private bool _showViewPanel = true;
     private bool _showViewportBranding = true;
 
-    /// <summary>
-    ///     Mesh cache of the surface being drawn. <see cref="RenderSimulationViewports" /> points it at each surface in
-    ///     turn, like <see cref="_drawData" />.
-    /// </summary>
-    private ChunkMeshCache? _meshCache;
-
     private AtmosSimulation? _simulation;
-    private SimulationSliceDrawData? _sliceDrawData;
-    private SliceRenderer? _sliceRenderer;
-    private SimulationViewport? _sliceViewport;
-
-    /// <summary>
-    ///     Frame, axis, and index that <see cref="_sliceDrawData" /> was built from. The plane is rebuilt only when
-    ///     one of them changes, so a paused viewer does no slice work.
-    /// </summary>
-    private SimulationDrawData? _sliceSourceFrame;
-    private SliceAxis _sliceSourceAxis;
-    private int _sliceSourceIndex;
+    private Vector2 _sliceCameraCenter;
 
     /// <summary>
     ///     Slice camera. The camera follows the plane while <see cref="_sliceCameraFit" /> is set, and it keeps the
@@ -142,21 +132,32 @@ public partial class SimulationViewer : IDisposable
     ///     downward, so V maps to <c>Height - V</c>.
     /// </summary>
     private bool _sliceCameraFit = true;
-    private Vector2 _sliceCameraCenter;
-    private float _sliceCameraZoom = 1f;
-    private bool _sliceIsPanning;
     private (int Width, int Height, SliceAxis Axis) _sliceCameraPlane;
+    private float _sliceCameraZoom = 1f;
+    private SimulationSliceDrawData? _sliceDrawData;
 
     /// <summary>
     ///     Chunk that the slice camera should frame once a slice exists, set when the 3D view focuses a chunk.
     /// </summary>
     private Int3? _sliceFrameChunk;
+    private bool _sliceIsPanning;
+    private SliceRenderer? _sliceRenderer;
+    private SliceAxis _sliceSourceAxis;
+
+    /// <summary>
+    ///     Frame, axis, and index that <see cref="_sliceDrawData" /> was built from. The plane is rebuilt only when
+    ///     one of them changes, so a paused viewer does no slice work.
+    /// </summary>
+    private SimulationDrawData? _sliceSourceFrame;
+    private int _sliceSourceIndex;
+    private SimulationViewport? _sliceViewport;
     private int _snapshotSourceVersion;
     private int _targetFps = 144;
     private bool _transparent2DVoxels;
     private bool _transparent3DVoxels;
     private bool _uncappedFps;
     private int _unfocusedFps = 15;
+    private float _velocityArrowScaleSeconds = VelocityArrows.DefaultScaleSeconds;
 
     private SimulationViewport? _viewport;
     private Texture2D _viewportBranding;
@@ -202,10 +203,10 @@ public partial class SimulationViewer : IDisposable
     public void Run()
     {
         Locale.SetCulture();
-        
+
         _newGasName = Locale.GetString("simulation-new-gas-name");
         _projectNameDraft = Locale.GetString("common-untitled-simulation");
-        
+
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
             ConfigFlags.Msaa4xHint |
@@ -242,12 +243,12 @@ public partial class SimulationViewer : IDisposable
             var io = ImGui.GetIO();
             io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
             io.ConfigWindowsMoveFromTitleBarOnly = true;
-            string fontPath = Path.Combine(
-                AppContext.BaseDirectory,
-                "assets",
-                "ProggyClean.ttf");
-            
-            io.Fonts.AddFontFromFileTTF(fontPath, 13f, null, io.Fonts.GetGlyphRangesCyrillic());
+            var font = LoadFonts(io);
+            unsafe
+            {
+                io.NativePtr->FontDefault = font.NativePtr;
+            }
+
             rlImGui.ReloadFonts();
             ConfigureLayoutPersistence();
 
@@ -263,6 +264,13 @@ public partial class SimulationViewer : IDisposable
             while (!Raylib.WindowShouldClose() && !_requestExit)
             {
                 _nextFrameRequested = false;
+                if (_pendingCulture != null)
+                {
+                    Locale.SetCulture(_pendingCulture);
+                    _pendingCulture = null;
+                    RequestNextFrame();
+                }
+
                 float deltaTime = Raylib.GetFrameTime();
                 Update(deltaTime);
                 Draw(deltaTime);
@@ -468,6 +476,36 @@ public partial class SimulationViewer : IDisposable
         _hoveredSliceCell = null;
     }
 
+    private static ImFontPtr LoadFonts(ImGuiIOPtr io)
+    {
+        string assets = Path.Combine(AppContext.BaseDirectory, "assets");
+
+        var main = AddFont(io, Path.Combine(assets, "ProggyClean.ttf"), 13f, false);
+        AddFont(io, Path.Combine(assets, "TerminusTTF-4.49.3.ttf"), 14f, true);
+        return main;
+    }
+
+    private static unsafe ImFontPtr AddFont(ImGuiIOPtr io, string path, float size, bool merge)
+    {
+        ImFontConfig* config = ImGuiNative.ImFontConfig_ImFontConfig();
+        config->OversampleH = 1;
+        config->OversampleV = 1;
+        config->PixelSnapH = 1;
+        config->MergeMode = merge ? (byte)1 : (byte)0;
+        try
+        {
+            return io.Fonts.AddFontFromFileTTF(
+                path,
+                size,
+                new ImFontConfigPtr(config),
+                merge ? io.Fonts.GetGlyphRangesCyrillic() : IntPtr.Zero);
+        }
+        finally
+        {
+            ImGuiNative.ImFontConfig_destroy(config);
+        }
+    }
+
     private static int ClampSliceIndex(SimulationDrawData frame, SliceAxis axis, int index)
     {
         int minimum = frame.Bounds.GetMinimum(axis);
@@ -483,11 +521,12 @@ public partial class SimulationViewer : IDisposable
     {
         int length = SimulationFrameBuilder.GetSliceAxisLength(chunk.Dimensions, _currentSliceAxis);
         int first = _currentSliceAxis switch
-        {
-            SliceAxis.X => chunk.ChunkPosition.X,
-            SliceAxis.Y => chunk.ChunkPosition.Y,
-            _ => chunk.ChunkPosition.Z
-        } * length;
+                    {
+                        SliceAxis.X => chunk.ChunkPosition.X,
+                        SliceAxis.Y => chunk.ChunkPosition.Y,
+                        _ => chunk.ChunkPosition.Z
+                    } *
+                    length;
 
         _currentSliceIndex = Math.Clamp(_currentSliceIndex, first, first + length - 1);
         _sliceFrameChunk = chunk.ChunkPosition;

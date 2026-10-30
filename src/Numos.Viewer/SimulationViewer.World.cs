@@ -28,7 +28,8 @@ public partial class SimulationViewer
 
     private void ReconcileSimulationSurfaces()
     {
-        if (_session.World == null || !_session.World.TryGetSimulations(_knownSimulationRevision, out long revision, out AtmosSimulation[] simulations))
+        if (_session.World == null ||
+            !_session.World.TryGetSimulations(_knownSimulationRevision, out long revision, out AtmosSimulation[] simulations))
             return;
 
         _knownSimulationRevision = revision;
@@ -255,7 +256,8 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("common-world-topology") + "##world",
+            "world",
+            Locale.GetString("common-world-topology"),
             ref _showWorldPanel,
             new Vector2(580, 80),
             new Vector2(430, 620));
@@ -402,7 +404,8 @@ public partial class SimulationViewer
 
         string name = GetSimulationName(id);
         ImGui.TextWrapped(
-            Locale.GetString("simulation-remove-confirmation", ("name", name), ("chunk-count", simulation!.ChunkCount)) + " " +
+            Locale.GetString("simulation-remove-confirmation", ("name", name), ("chunk-count", simulation!.ChunkCount)) +
+            " " +
             Locale.GetString("simulation-remove-immediate-warning"));
 
         ImGui.Spacing();
@@ -419,7 +422,10 @@ public partial class SimulationViewer
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
-                SetSimulationFeedback(Locale.GetString("simulation-remove-failed-feedback", ("name", name), ("message", exception.Message)), true);
+                SetSimulationFeedback(
+                    Locale.GetString("simulation-remove-failed-feedback", ("name", name), ("message", exception.Message)),
+                    true);
+
                 _removeSimulationModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }

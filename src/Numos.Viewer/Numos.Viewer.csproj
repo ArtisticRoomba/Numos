@@ -58,11 +58,25 @@
             <PackagePath>contentFiles/any/any/assets/ProggyClean.ttf</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
+        <None Update="assets/TerminusTTF-4.49.3.ttf">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/TerminusTTF-4.49.3.ttf</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="assets/TerminusTTF-LICENSE.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/TerminusTTF-LICENSE.txt</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
         <None Update="locale/**/*.ftl">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
             <Pack>true</Pack>
-            <PackagePath>contentFiles/any/any/locale/any/*.ftl</PackagePath>
+            <PackagePath>contentFiles/any/any/%(Identity)</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
     </ItemGroup>

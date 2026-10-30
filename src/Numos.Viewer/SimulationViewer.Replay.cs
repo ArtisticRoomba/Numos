@@ -28,6 +28,7 @@ public partial class SimulationViewer
         (TimelineLegendMarker.Playhead, "Selected tick", 3),
         (TimelineLegendMarker.Divergence, "Divergent", 0)
     ];
+    private readonly TimelineOperationIndex _operationIndex = new();
 
     private bool _keepTimelinePlayheadCentered;
     private int? _pendingScrubTick;
@@ -38,7 +39,6 @@ public partial class SimulationViewer
     private string? _timelineError;
     private int _timelineFirstTick;
     private AtmosWorldRecordedOperation? _timelineOperation;
-    private readonly TimelineOperationIndex _operationIndex = new();
     private int _timelineVisibleTicks = 200;
 
     private void RenderTimelinePanel()
@@ -49,6 +49,7 @@ public partial class SimulationViewer
         var timeline = _session.Timeline;
         var viewport = ImGui.GetMainViewport();
         using var window = ImGuiExtensions.BeginWindow(
+            "replay",
             Locale.GetString("timeline-window"),
             ref _showTimelinePanel,
             viewport.WorkPos + new Vector2(320, Math.Max(0, viewport.WorkSize.Y - 430)),
@@ -128,8 +129,7 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
         ImGui.Checkbox(Locale.GetString("timeline-show-branch-history"), ref _showBranchHistory);
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("timeline-show-branch-history-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-show-branch-history-tooltip"));
 
         _operationIndex.Update(timeline.Operations);
 
@@ -229,8 +229,7 @@ public partial class SimulationViewer
         if (ImGui.Button(Locale.GetString("timeline-branch-from-tick"), new Vector2(132f, 0f)))
             CreateTimelineBranch();
 
-        ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("timeline-branch-from-tick-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-branch-from-tick-tooltip"));
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!branches.CanContinueSelectedBranch);
@@ -318,9 +317,12 @@ public partial class SimulationViewer
 
         (string state, string explanation, var stateColor) = timeline.IsVerified switch
         {
-            true => (Locale.GetString("timeline-verified"), Locale.GetString("timeline-replay-matches-reference-hash"), ViewerTheme.Running),
-            false => (Locale.GetString("timeline-divergent"), Locale.GetString("timeline-replay-does-not-match-reference-hash"), ViewerTheme.ReplayDivergence),
-            null => (Locale.GetString("timeline-unverified"), Locale.GetString("timeline-no-reference-hash-available"), ViewerTheme.SecondaryText)
+            true => (Locale.GetString("timeline-verified"), Locale.GetString("timeline-replay-matches-reference-hash"),
+                ViewerTheme.Running),
+            false => (Locale.GetString("timeline-divergent"), Locale.GetString("timeline-replay-does-not-match-reference-hash"),
+                ViewerTheme.ReplayDivergence),
+            null => (Locale.GetString("timeline-unverified"), Locale.GetString("timeline-no-reference-hash-available"),
+                ViewerTheme.SecondaryText)
         };
 
         ImGui.TextDisabled(Locale.GetString("timeline-verification"));
@@ -474,7 +476,9 @@ public partial class SimulationViewer
             .Select(static solver => new SolverStageRow(
                 solver.Name,
                 solver.Enabled,
-                solver.Kind == AtmosWorldSolverKind.BuiltIn ? Locale.GetString("timeline-built-in") : Locale.GetString("common-custom")))
+                solver.Kind == AtmosWorldSolverKind.BuiltIn
+                    ? Locale.GetString("timeline-built-in")
+                    : Locale.GetString("common-custom")))
             .ToArray();
 
         DrawSolverStageTable("InitialSolvers##replay", rows);
@@ -495,11 +499,6 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
-    /// </summary>
-    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
-
-        /// <summary>
     ///     Draws the numbered stage table. The Kind column appears when any row has a kind.
     /// </summary>
     private static void DrawSolverStageTable(string tableId, SolverStageRow[] rows)
@@ -743,7 +742,10 @@ public partial class SimulationViewer
                 mouse.Y <= origin.Y + plotBottom + 4f)
             {
                 ImGui.SetTooltip(
-                    Locale.GetString("replay-restorable-tick-range-tooltip", ("startTick", timeline.Start.Tick), ("endTick", timeline.Head.Tick)));
+                    Locale.GetString(
+                        "replay-restorable-tick-range-tooltip",
+                        ("startTick", timeline.Start.Tick),
+                        ("endTick", timeline.Head.Tick)));
             }
         }
 
@@ -815,7 +817,11 @@ public partial class SimulationViewer
                 ImGui.GetMousePos().Y < origin.Y + markerTop + 14f)
             {
                 string tooltip =
-                    Locale.GetString("replay-checkpoint-tooltip", ("tick", point.Hash.Position.Tick), ("operationSequence", point.Hash.Position.OperationSequence), ("digest", point.Hash.Digest.ToString("x16", CultureInfo.InvariantCulture)));
+                    Locale.GetString(
+                        "replay-checkpoint-tooltip",
+                        ("tick", point.Hash.Position.Tick),
+                        ("operationSequence", point.Hash.Position.OperationSequence),
+                        ("digest", point.Hash.Digest.ToString("x16", CultureInfo.InvariantCulture)));
 
                 if (divergent)
                     tooltip += "\n" + Locale.GetString("replay-divergent-checkpoint-tooltip");
@@ -1018,8 +1024,14 @@ public partial class SimulationViewer
             {
                 var hoveredBranch = branches[hoveredRow];
                 ImGui.SetTooltip(
-                    Locale.GetString("replay-branch-history-tooltip", ("name", hoveredBranch.Name), ("forkTick", hoveredBranch.Fork.Tick), ("headTick", hoveredBranch.Head.Tick)) +
-                    (hoveredBranch.IsSelected ? "\n" + Locale.GetString("replay-selected-branch-tooltip") : "\n" + Locale.GetString("replay-inspect-branch-tooltip")));
+                    Locale.GetString(
+                        "replay-branch-history-tooltip",
+                        ("name", hoveredBranch.Name),
+                        ("forkTick", hoveredBranch.Fork.Tick),
+                        ("headTick", hoveredBranch.Head.Tick)) +
+                    (hoveredBranch.IsSelected
+                        ? "\n" + Locale.GetString("replay-selected-branch-tooltip")
+                        : "\n" + Locale.GetString("replay-inspect-branch-tooltip")));
 
                 if (mouse.X >= graphLeft && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                 {
@@ -1391,6 +1403,11 @@ public partial class SimulationViewer
             _refreshingReplay = false;
         }
     }
+
+    /// <summary>
+    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
+    /// </summary>
+    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
 
     private enum TimelineLegendMarker
     {

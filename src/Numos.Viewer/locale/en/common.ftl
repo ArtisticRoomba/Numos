@@ -25,3 +25,4 @@ common-world-topology = World & Topology
 common-yes = Yes
 common-no = No
 common-none = None
+locale-name = English

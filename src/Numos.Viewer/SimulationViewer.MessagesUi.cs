@@ -3,8 +3,8 @@ using System.Numerics;
 using System.Text;
 using ImGuiNET;
 using Numos.Viewer.Ui;
-using Raylib_cs;
 using Numos.Workbench;
+using Raylib_cs;
 
 namespace Numos.Viewer;
 
@@ -60,7 +60,10 @@ public partial class SimulationViewer
         if (args.ExceptionObject is Exception exception)
             WriteFatalException(Locale.GetString("unhandled-exception"), exception);
         else
-            WriteMessage(WorkbenchLogLevel.Fatal, Locale.GetString("source-runtime"), Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject)));
+            WriteMessage(
+                WorkbenchLogLevel.Fatal,
+                Locale.GetString("source-runtime"),
+                Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject)));
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)
@@ -76,13 +79,23 @@ public partial class SimulationViewer
 
     private void WriteException(string context, Exception exception)
     {
-        _messages.Write(WorkbenchLogLevel.Error, "Exception", Locale.GetString("exception-message", ("context", context), ("message", exception.Message)), exception.ToString());
+        _messages.Write(
+            WorkbenchLogLevel.Error,
+            "Exception",
+            Locale.GetString("exception-message", ("context", context), ("message", exception.Message)),
+            exception.ToString());
+
         RequestNextFrame();
     }
 
     private void WriteFatalException(string context, Exception exception)
     {
-        _messages.Write(WorkbenchLogLevel.Fatal, "Exception", Locale.GetString("exception-message", ("context", context), ("message", exception.Message)), exception.ToString());
+        _messages.Write(
+            WorkbenchLogLevel.Fatal,
+            "Exception",
+            Locale.GetString("exception-message", ("context", context), ("message", exception.Message)),
+            exception.ToString());
+
         RequestNextFrame();
     }
 
@@ -154,6 +167,7 @@ public partial class SimulationViewer
         }
 
         using var window = ImGuiExtensions.BeginWindow(
+            "messages",
             Locale.GetString("common-messages-logs"),
             ref _showMessagesPanel,
             new Vector2(320, 650),
@@ -205,7 +219,7 @@ public partial class SimulationViewer
             ImGuiTableFlags.BordersInnerV |
             ImGuiTableFlags.BordersOuter |
             ImGuiTableFlags.Resizable;
-        
+
         if (!ImGui.BeginTable("MessageLog##messages", 5, flags))
             return;
 

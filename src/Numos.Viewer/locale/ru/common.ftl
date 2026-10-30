@@ -22,3 +22,4 @@ common-state-heading = СОСТОЯНИЕ
 common-tools = Инструменты
 common-untitled-simulation = Симуляция Без Названия
 common-world-topology = Мир и Топология
+locale-name = Русский

@@ -36,3 +36,5 @@ keep-resolution-prompt = Keep this resolution? The previous resolution will be r
 reverting-in-seconds = Reverting in {$seconds} seconds.
 keep-resolution = Keep Resolution
 revert = Revert
+language = Language
+language-tooltip = Changes the language of the viewer interface.
