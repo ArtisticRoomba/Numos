@@ -266,7 +266,7 @@ public partial class SimulationViewer
                 Locale.GetString("message-project-inject-gas",
                     ("moles", $"{moles:G}"),
                     ("name", _session.Config.GasRegistry[gasId].Name),
-                    ("x", x), ("y", y), ("z", z)),
+                    ("pos", new Int3(x, y, z).ToString())),
                 false);
         }
         catch (Exception exception) when (

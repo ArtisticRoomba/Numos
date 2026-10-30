@@ -60,7 +60,7 @@ public partial class SimulationViewer
         if (args.ExceptionObject is Exception exception)
             WriteFatalException(Locale.GetString("unhandled-exception"), exception);
         else
-            WriteMessage(WorkbenchLogLevel.Fatal, Locale.GetString("source-runtime"), Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject)));
+            WriteMessage(WorkbenchLogLevel.Fatal, Locale.GetString("source-runtime"), Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject.ToString())));
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)
