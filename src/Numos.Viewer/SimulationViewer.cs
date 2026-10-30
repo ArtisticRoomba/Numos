@@ -481,7 +481,9 @@ public partial class SimulationViewer : IDisposable
         string assets = Path.Combine(AppContext.BaseDirectory, "assets");
 
         var main = AddFont(io, Path.Combine(assets, "ProggyClean.ttf"), 13f, false);
-        AddFont(io, Path.Combine(assets, "TerminusTTF-4.49.3.ttf"), 14f, true);
+        // The Cyrillic font is misc-fixed 6x13 padded to ProggyClean's 7px advance (eng/fonts/build_fixed_cyrillic.py).
+        // At 13 px it lands on whole pixels like ProggyClean.
+        AddFont(io, Path.Combine(assets, "NumosFixedCyrillic-6x13.ttf"), 13f, true);
         return main;
     }
 
