@@ -28,6 +28,7 @@ public partial class SimulationViewer
         (TimelineLegendMarker.Playhead, "Selected tick", 3),
         (TimelineLegendMarker.Divergence, "Divergent", 0)
     ];
+    private readonly TimelineOperationIndex _operationIndex = new();
 
     private bool _keepTimelinePlayheadCentered;
     private int? _pendingScrubTick;
@@ -38,7 +39,6 @@ public partial class SimulationViewer
     private string? _timelineError;
     private int _timelineFirstTick;
     private AtmosWorldRecordedOperation? _timelineOperation;
-    private readonly TimelineOperationIndex _operationIndex = new();
     private int _timelineVisibleTicks = 200;
 
     private void RenderTimelinePanel()
@@ -49,7 +49,8 @@ public partial class SimulationViewer
         var timeline = _session.Timeline;
         var viewport = ImGui.GetMainViewport();
         using var window = ImGuiExtensions.BeginWindow(
-            "Timeline##replay",
+            "replay",
+            Locale.GetString("timeline-window"),
             ref _showTimelinePanel,
             viewport.WorkPos + new Vector2(320, Math.Max(0, viewport.WorkSize.Y - 430)),
             new Vector2(900, 420));
@@ -58,15 +59,15 @@ public partial class SimulationViewer
             return;
 
         DrawTimelinePositionReadout(timeline, _session.Branches.SelectedBranch);
-        ImGui.SeparatorText("Branches");
+        ImGui.SeparatorText(Locale.GetString("timeline-branches"));
         DrawTimelineBranchControls();
         timeline = _session.Timeline;
 
-        ImGui.SeparatorText("Transport");
+        ImGui.SeparatorText(Locale.GetString("timeline-transport"));
         DrawTimelineTransport(timeline);
         ImGuiExtensions.Feedback(_timelineError, true);
 
-        ImGui.SeparatorText("Range");
+        ImGui.SeparatorText(Locale.GetString("common-range"));
         int selectedTick = checked((int)timeline.Position.Tick);
         if (ImGui.BeginTable(
                 "TimelineRange##replay",
@@ -74,7 +75,7 @@ public partial class SimulationViewer
                 ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGui.TextDisabled("Selected tick");
+            ImGui.TextDisabled(Locale.GetString("timeline-selected-tick"));
             ImGui.SetNextItemWidth(-1f);
             if (ImGui.InputInt("##timeline-selected-tick", ref selectedTick, 1, 10))
             {
@@ -86,7 +87,7 @@ public partial class SimulationViewer
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextDisabled("Visible ticks");
+            ImGui.TextDisabled(Locale.GetString("timeline-visible-ticks"));
             ImGui.SetNextItemWidth(-1f);
             ImGui.SliderInt(
                 "##timeline-visible-ticks",
@@ -101,13 +102,13 @@ public partial class SimulationViewer
             ImGui.EndTable();
         }
 
-        ImGui.Checkbox("Keep playhead centered", ref _keepTimelinePlayheadCentered);
-        ImGuiExtensions.QuestionTooltip("Moves the visible tick range as the selected timeline position changes.");
+        ImGui.Checkbox(Locale.GetString("timeline-keep-playhead-centered"), ref _keepTimelinePlayheadCentered);
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-keep-playhead-centered-tooltip"));
 
         if (_keepTimelinePlayheadCentered)
             CenterTimelinePlayhead(timeline);
 
-        ImGui.TextDisabled("First visible tick");
+        ImGui.TextDisabled(Locale.GetString("timeline-first-visible-tick"));
         ImGui.SetNextItemWidth(-1f);
         ImGui.BeginDisabled(_keepTimelinePlayheadCentered);
         ImGui.SliderInt(
@@ -118,18 +119,17 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
 
-        if (ImGui.Checkbox("Simulate while scrubbing", ref _simulateWhileScrubbing))
+        if (ImGui.Checkbox(Locale.GetString("timeline-simulate-while-scrubbing"), ref _simulateWhileScrubbing))
             _pendingScrubTick = null;
 
         ImGuiExtensions.QuestionTooltip(
             _simulateWhileScrubbing
-                ? "The simulation updates whenever the scrubber crosses a tick."
-                : "The simulation updates when the scrubber is released.");
+                ? Locale.GetString("timeline-simulate-while-scrubbing-tooltip-active")
+                : Locale.GetString("timeline-simulate-while-scrubbing-tooltip-inactive"));
 
         ImGui.SameLine();
-        ImGui.Checkbox("Show branch history", ref _showBranchHistory);
-        ImGuiExtensions.QuestionTooltip(
-            "Shows every session branch as an aligned history lane. Operation and checkpoint detail remains on the selected branch.");
+        ImGui.Checkbox(Locale.GetString("timeline-show-branch-history"), ref _showBranchHistory);
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-show-branch-history-tooltip"));
 
         _operationIndex.Update(timeline.Operations);
 
@@ -163,25 +163,25 @@ public partial class SimulationViewer
         }
 
         ImGui.TableNextColumn();
-        ImGui.TextDisabled("BRANCH");
+        ImGui.TextDisabled(Locale.GetString("timeline-branch"));
         ImGui.TextUnformatted(branch.Name);
-        ImGui.TextDisabled($"Fork tick {branch.Fork.Tick}");
+        ImGui.TextDisabled(Locale.GetString("timeline-fork-tick", ("tick", branch.Fork.Tick)));
         ImGui.TableNextColumn();
-        DrawTimelinePositionField("START", timeline.Start);
+        DrawTimelinePositionField(Locale.GetString("timeline-start"), timeline.Start);
         ImGui.TableNextColumn();
-        DrawTimelinePositionField("HEAD", timeline.Head);
+        DrawTimelinePositionField(Locale.GetString("timeline-head"), timeline.Head);
         ImGui.TableNextColumn();
-        DrawTimelinePositionField("SELECTED", timeline.Position);
+        DrawTimelinePositionField(Locale.GetString("timeline-selected"), timeline.Position);
         ImGui.TableNextColumn();
-        ImGui.TextDisabled("MODE");
+        ImGui.TextDisabled(Locale.GetString("timeline-mode"));
         if (timeline.IsInspecting)
         {
-            ImGui.TextUnformatted("Inspecting history");
-            ImGui.TextDisabled("Read-only");
+            ImGui.TextUnformatted(Locale.GetString("common-inspecting-history"));
+            ImGui.TextDisabled(Locale.GetString("timeline-read-only"));
         }
         else
         {
-            ImGui.TextColored(ViewerTheme.Running, "Live recording");
+            ImGui.TextColored(ViewerTheme.Running, Locale.GetString("timeline-live-recording"));
         }
 
         ImGui.EndTable();
@@ -192,7 +192,7 @@ public partial class SimulationViewer
         var branches = _session.Branches!;
         var selected = branches.SelectedBranch;
         ImGui.SetNextItemWidth(190f);
-        if (ImGui.BeginCombo("Selected branch", selected.Name))
+        if (ImGui.BeginCombo(Locale.GetString("timeline-selected-branch"), selected.Name))
         {
             IReadOnlyList<ReplayBranchInfo> branchList = branches.Branches;
             float nameWidth = 0f;
@@ -216,7 +216,7 @@ public partial class SimulationViewer
                 ImGui.SameLine(forkX);
                 ImGui.TextDisabled(FormatForkTick(branch));
                 ImGui.SameLine(forkX + forkWidth + columnGap);
-                ImGui.TextDisabled($"Head tick {branch.Head.Tick}");
+                ImGui.TextDisabled(Locale.GetString("timeline-head-tick", ("tick", branch.Head.Tick)));
 
                 if (clicked)
                     SelectTimelineBranch(branch.Id);
@@ -226,31 +226,30 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Branch from Tick", new Vector2(132f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-branch-from-tick"), new Vector2(132f, 0f)))
             CreateTimelineBranch();
 
-        ImGuiExtensions.QuestionTooltip(
-            "Preserves this branch and starts a new branch before operations recorded at the selected tick.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-branch-from-tick-tooltip"));
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!branches.CanContinueSelectedBranch);
-        if (ImGui.Button("Continue Branch", new Vector2(130f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-continue-branch"), new Vector2(130f, 0f)))
             ContinueTimelineBranch();
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Resumes live recording at the selected branch head.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-continue-branch-tooltip"));
     }
 
     private static string FormatForkTick(ReplayBranchInfo branch)
     {
-        return $"Fork tick {branch.Fork.Tick}";
+        return Locale.GetString("timeline-fork-tick", ("tick", branch.Fork.Tick));
     }
 
     private static void DrawTimelinePositionField(string label, AtmosTimelinePosition position)
     {
         ImGui.TextDisabled(label);
-        ImGui.TextUnformatted($"Tick {position.Tick}");
-        ImGui.TextDisabled($"Through operation #{position.OperationSequence}");
+        ImGui.TextUnformatted(Locale.GetString("timeline-tick", ("tick", position.Tick)));
+        ImGui.TextDisabled(Locale.GetString("timeline-through-operation", ("sequence", position.OperationSequence)));
     }
 
     private void DrawTimelineTransport(AtmosWorldReplayTimeline timeline)
@@ -260,17 +259,17 @@ public partial class SimulationViewer
         bool isLive = !timeline.IsInspecting;
 
         ImGui.BeginDisabled(atStart);
-        if (ImGui.Button("Start", new Vector2(76f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-start-button"), new Vector2(76f, 0f)))
             SeekTimelineTick(timeline.Start.Tick);
 
         ImGui.SameLine();
-        if (ImGui.Button("Back", new Vector2(76f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-back-button"), new Vector2(76f, 0f)))
             SeekTimelineTick(timeline.Position.Tick - 1);
 
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button(_isPaused ? "Play" : "Pause", new Vector2(76f, 0f)))
+        if (ImGui.Button(_isPaused ? Locale.GetString("timeline-play-button") : Locale.GetString("common-pause"), new Vector2(76f, 0f)))
             _isPaused = !_isPaused;
 
         ImGui.SameLine();
@@ -278,7 +277,7 @@ public partial class SimulationViewer
         // Forward is disabled only while live playback is running. A paused live branch, or any inspected position
         // (including the head, where StepTimelineForward no-ops), can still be single-stepped.
         ImGui.BeginDisabled(isLive && !_isPaused);
-        if (ImGui.Button("Forward", new Vector2(76f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-forward-button"), new Vector2(76f, 0f)))
         {
             _isPaused = true;
             StepTimelineForward();
@@ -288,7 +287,7 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
         ImGui.BeginDisabled(isLive || atHead);
-        if (ImGui.Button("Return to Head", new Vector2(120f, 0f)))
+        if (ImGui.Button(Locale.GetString("timeline-return-to-head-button"), new Vector2(120f, 0f)))
             ReturnTimelineToHead();
 
         ImGui.EndDisabled();
@@ -304,10 +303,10 @@ public partial class SimulationViewer
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
-                DrawTimelinePositionField("CHECKPOINT", replay.Checkpoint);
+                DrawTimelinePositionField(Locale.GetString("timeline-checkpoint"), replay.Checkpoint);
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(
-                    "RE-SIMULATED",
+                    Locale.GetString("timeline-re-simulated"),
                     QuantityFormat.Ticks(checked((long)replay.SimulatedTicks)));
 
                 ImGui.TableNextColumn();
@@ -318,12 +317,15 @@ public partial class SimulationViewer
 
         (string state, string explanation, var stateColor) = timeline.IsVerified switch
         {
-            true => ("Verified", "Replay matches the reference hash.", ViewerTheme.Running),
-            false => ("Divergent", "Replay does not match the reference hash.", ViewerTheme.ReplayDivergence),
-            null => ("Unverified", "No reference hash is available.", ViewerTheme.SecondaryText)
+            true => (Locale.GetString("timeline-verified"), Locale.GetString("timeline-replay-matches-reference-hash"),
+                ViewerTheme.Running),
+            false => (Locale.GetString("timeline-divergent"), Locale.GetString("timeline-replay-does-not-match-reference-hash"),
+                ViewerTheme.ReplayDivergence),
+            null => (Locale.GetString("timeline-unverified"), Locale.GetString("timeline-no-reference-hash-available"),
+                ViewerTheme.SecondaryText)
         };
 
-        ImGui.TextDisabled("VERIFICATION");
+        ImGui.TextDisabled(Locale.GetString("timeline-verification"));
         ImGui.TextColored(stateColor, state);
         ImGui.TextDisabled(explanation);
     }
@@ -335,26 +337,26 @@ public partial class SimulationViewer
 
         DrawInitialSolverStages(timeline);
 
-        ImGui.SeparatorText($"Done in tick {timeline.Position.Tick} ({tickOperationCount})");
+        ImGui.SeparatorText(Locale.GetString("timeline-done-in-tick", ("tick", timeline.Position.Tick), ("count", tickOperationCount)));
         if (tickOperationCount == 0)
-            ImGui.TextDisabled("No external operations were recorded in this tick.");
+            ImGui.TextDisabled(Locale.GetString("timeline-no-external-operations-recorded"));
         else
             DrawTickOperationList(group, tickOperationCount);
 
         if (_timelineOperation is { } selected)
         {
-            ImGui.SeparatorText("Selected operation");
+            ImGui.SeparatorText(Locale.GetString("timeline-selected-operation"));
             if (ImGui.BeginTable(
                     "SelectedOperation##replay",
                     3,
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("OPERATION", DescribeOperation(selected));
+                ImGuiExtensions.StatusField(Locale.GetString("timeline-operation"), DescribeOperation(selected));
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("DONE IN TICK", selected.AfterTick.ToString());
+                ImGuiExtensions.StatusField(Locale.GetString("timeline-done-in-tick"), selected.AfterTick.ToString());
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("ORDER", _operationIndex.GetOrder(selected).ToString());
+                ImGuiExtensions.StatusField(Locale.GetString("timeline-order"), _operationIndex.GetOrder(selected).ToString());
                 ImGui.EndTable();
             }
 
@@ -368,7 +370,7 @@ public partial class SimulationViewer
             if (selected.Operation is SetAtmosWorldSolverLayoutOperation layout)
                 DrawRecordedSolverLayout(layout.Stages);
 
-            if (ImGui.Button("Inspect After Operation"))
+            if (ImGui.Button(Locale.GetString("timeline-inspect-after-operation")))
                 SeekTimelinePosition(selected.Position);
         }
     }
@@ -394,9 +396,9 @@ public partial class SimulationViewer
         }
 
         const float operationColumn = 72f;
-        ImGui.TextDisabled("ORDER");
+        ImGui.TextDisabled(Locale.GetString("timeline-order"));
         ImGui.SameLine(operationColumn);
-        ImGui.TextDisabled("OPERATION");
+        ImGui.TextDisabled(Locale.GetString("timeline-operation"));
         ImGui.Separator();
         float firstRowY = ImGui.GetCursorPosY();
 
@@ -427,7 +429,7 @@ public partial class SimulationViewer
     {
         if (mixture.Gases.Count == 0)
         {
-            ImGui.TextDisabled("The recorded mixture is empty.");
+            ImGui.TextDisabled(Locale.GetString("timeline-recorded-mixture-empty"));
             return;
         }
 
@@ -435,8 +437,8 @@ public partial class SimulationViewer
         if (!table.IsVisible)
             return;
 
-        ImGui.TableSetupColumn("Gas");
-        ImGui.TableSetupColumn("Amount");
+        ImGui.TableSetupColumn(Locale.GetString("common-gas"));
+        ImGui.TableSetupColumn(Locale.GetString("common-amount"));
         ImGui.TableHeadersRow();
         foreach (var gas in mixture.Gases)
         {
@@ -448,7 +450,7 @@ public partial class SimulationViewer
 
             // The cell is rounded for reading; replay compares the exact recorded value.
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
-                ImGui.SetTooltip($"Recorded amount {FormatRecordedFloat(gas.Moles)} mol");
+                ImGui.SetTooltip(Locale.GetString("timeline-recorded-amount", ("amount", FormatRecordedFloat(gas.Moles))));
         }
     }
 
@@ -458,7 +460,7 @@ public partial class SimulationViewer
     private static string DescribeOperation(AtmosWorldRecordedOperation operation)
     {
         return operation.Operation is SetAtmosWorldSolverLayoutOperation layout
-            ? $"SetSolverLayout ({layout.Stages.Count} stages)"
+            ? Locale.GetString("timeline-set-solver-layout", ("count", layout.Stages.Count))
             : operation.Code.ToString();
     }
 
@@ -467,14 +469,16 @@ public partial class SimulationViewer
     /// </summary>
     private static void DrawInitialSolverStages(AtmosWorldReplayTimeline timeline)
     {
-        if (timeline.Checkpoints.Count == 0 || !ImGui.TreeNode("Initial solver stages##replay"))
+        if (timeline.Checkpoints.Count == 0 || !ImGui.TreeNode(Locale.GetString("timeline-initial-solver-stages") + "##replay"))
             return;
 
         var rows = timeline.Checkpoints[0].Checkpoint.Solvers
             .Select(static solver => new SolverStageRow(
                 solver.Name,
                 solver.Enabled,
-                solver.Kind == AtmosWorldSolverKind.BuiltIn ? "Built-in" : "Custom"))
+                solver.Kind == AtmosWorldSolverKind.BuiltIn
+                    ? Locale.GetString("timeline-built-in")
+                    : Locale.GetString("common-custom")))
             .ToArray();
 
         DrawSolverStageTable("InitialSolvers##replay", rows);
@@ -486,18 +490,13 @@ public partial class SimulationViewer
     /// </summary>
     private static void DrawRecordedSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
     {
-        if (!ImGui.TreeNode("Requested solver layout##replay"))
+        if (!ImGui.TreeNode(Locale.GetString("timeline-requested-solver-layout") + "##replay"))
             return;
 
         var rows = stages.Select(static stage => new SolverStageRow(stage.Name, stage.Enabled)).ToArray();
         DrawSolverStageTable("RecordedLayout##replay", rows);
         ImGui.TreePop();
     }
-
-    /// <summary>
-    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
-    /// </summary>
-    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
 
     /// <summary>
     ///     Draws the numbered stage table. The Kind column appears when any row has a kind.
@@ -510,12 +509,12 @@ public partial class SimulationViewer
         if (!table.IsVisible)
             return;
 
-        ImGui.TableSetupColumn("#");
-        ImGui.TableSetupColumn("Stage");
+        ImGui.TableSetupColumn(Locale.GetString("replay-stage-table-column-index"));
+        ImGui.TableSetupColumn(Locale.GetString("replay-stage-table-column-stage"));
         if (showKind)
-            ImGui.TableSetupColumn("Kind");
+            ImGui.TableSetupColumn(Locale.GetString("replay-stage-table-column-kind"));
 
-        ImGui.TableSetupColumn("Enabled");
+        ImGui.TableSetupColumn(Locale.GetString("replay-stage-table-column-enabled"));
         ImGui.TableHeadersRow();
         for (int i = 0; i < rows.Length; i++)
         {
@@ -531,13 +530,13 @@ public partial class SimulationViewer
             }
 
             ImGui.TableSetColumnIndex(enabledColumn);
-            ImGui.TextUnformatted(rows[i].Enabled ? "Yes" : "No");
+            ImGui.TextUnformatted(rows[i].Enabled ? Locale.GetString("common-yes") : Locale.GetString("common-no"));
         }
     }
 
     private static void DrawRecordedConfiguration(AtmosConfigSnapshot config)
     {
-        if (!ImGui.TreeNode("Applied configuration")) return;
+        if (!ImGui.TreeNode(Locale.GetString("replay-applied-configuration"))) return;
 
         (AtmosConfigFieldInfo Field, string Value)[] settings =
         [
@@ -566,9 +565,9 @@ public partial class SimulationViewer
         {
             if (configTable.IsVisible)
             {
-                ImGui.TableSetupColumn("Setting");
-                ImGui.TableSetupColumn("Value");
-                ImGui.TableSetupColumn("Unit");
+                ImGui.TableSetupColumn(Locale.GetString("replay-configuration-column-setting"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-configuration-column-value"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-configuration-column-unit"));
                 ImGui.TableHeadersRow();
                 foreach ((var field, string value) in settings)
                 {
@@ -583,10 +582,10 @@ public partial class SimulationViewer
             }
         }
 
-        ImGui.TextDisabled("Gas registry");
+        ImGui.TextDisabled(Locale.GetString("replay-gas-registry"));
         if (config.GasRegistry.Count == 0)
         {
-            ImGui.TextDisabled("No gases are registered.");
+            ImGui.TextDisabled(Locale.GetString("replay-no-gases-registered"));
         }
         else
         {
@@ -597,14 +596,14 @@ public partial class SimulationViewer
 
             if (registryTable.IsVisible)
             {
-                ImGui.TableSetupColumn("ID");
-                ImGui.TableSetupColumn("Name");
-                ImGui.TableSetupColumn("Cv (J/(mol·K))");
-                ImGui.TableSetupColumn("Diffusion");
-                ImGui.TableSetupColumn("Boiling point (K)");
-                ImGui.TableSetupColumn("Condensation");
-                ImGui.TableSetupColumn("Latent heat (J/mol)");
-                ImGui.TableSetupColumn("Liquid ID");
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-id"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-name"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-heat-capacity"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-diffusion"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-boiling-point"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-condensation"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-latent-heat"));
+                ImGui.TableSetupColumn(Locale.GetString("replay-gas-column-liquid-id"));
                 ImGui.TableHeadersRow();
                 for (int id = 0; id < config.GasRegistry.Count; id++)
                 {
@@ -621,7 +620,7 @@ public partial class SimulationViewer
                     ImGui.TableSetColumnIndex(4);
                     ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.BoilingPoint));
                     ImGui.TableSetColumnIndex(5);
-                    ImGui.TextUnformatted(gas.CondensationEnabled ? "Yes" : "No");
+                    ImGui.TextUnformatted(gas.CondensationEnabled ? Locale.GetString("common-yes") : Locale.GetString("common-no"));
                     ImGui.TableSetColumnIndex(6);
                     ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.MolarEnthalpyOfVaporization));
                     ImGui.TableSetColumnIndex(7);
@@ -635,10 +634,10 @@ public partial class SimulationViewer
             if (solverTable.IsVisible)
             {
                 if (config.SolverConfigurations.Count == 0)
-                    ImGuiExtensions.DefinitionRow("Solver configurations", "None");
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("replay-solver-configurations"), Locale.GetString("common-none"));
 
                 foreach (var solverConfiguration in config.SolverConfigurations)
-                    ImGuiExtensions.DefinitionRow("Solver configuration", solverConfiguration.Key);
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("replay-solver-configuration"), solverConfiguration.Key);
             }
         }
 
@@ -690,7 +689,7 @@ public partial class SimulationViewer
             return origin.X + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * width);
         }
 
-        const string trackTitle = "TICK / SIMULATION TIME";
+        string trackTitle = Locale.GetString("replay-timeline-axis-title");
         draw.AddText(origin + new Vector2(8f, 4f), secondaryText, trackTitle);
         DrawTimelineLegend(
             draw,
@@ -743,7 +742,10 @@ public partial class SimulationViewer
                 mouse.Y <= origin.Y + plotBottom + 4f)
             {
                 ImGui.SetTooltip(
-                    $"Ticks {timeline.Start.Tick} through {timeline.Head.Tick} have recorded states that can be restored.");
+                    Locale.GetString(
+                        "replay-restorable-tick-range-tooltip",
+                        ("startTick", timeline.Start.Tick),
+                        ("endTick", timeline.Head.Tick)));
             }
         }
 
@@ -781,8 +783,8 @@ public partial class SimulationViewer
                 var first = _operationIndex.GetFirstOperation(visibleGroup);
                 ImGui.SetTooltip(
                     operationCount == 1
-                        ? $"{first.Code}\nDone in tick {operationTick}\nOrder 1"
-                        : $"{operationCount} operations in tick {operationTick}");
+                        ? Locale.GetString("replay-single-operation-tooltip", ("code", first.Code), ("tick", operationTick))
+                        : Locale.GetString("replay-multiple-operations-tooltip", ("count", operationCount), ("tick", operationTick)));
 
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _timelineOperation = first;
             }
@@ -815,10 +817,14 @@ public partial class SimulationViewer
                 ImGui.GetMousePos().Y < origin.Y + markerTop + 14f)
             {
                 string tooltip =
-                    $"Checkpoint at tick {point.Hash.Position.Tick}, after operation #{point.Hash.Position.OperationSequence}\nReference hash {point.Hash.Digest:x16}";
+                    Locale.GetString(
+                        "replay-checkpoint-tooltip",
+                        ("tick", point.Hash.Position.Tick),
+                        ("operationSequence", point.Hash.Position.OperationSequence),
+                        ("digest", point.Hash.Digest.ToString("x16", CultureInfo.InvariantCulture)));
 
                 if (divergent)
-                    tooltip += "\nDivergent: the replayed state does not match this reference hash.";
+                    tooltip += "\n" + Locale.GetString("replay-divergent-checkpoint-tooltip");
 
                 ImGui.SetTooltip(tooltip);
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) checkpointTarget = point.Hash.Position;
@@ -886,8 +892,8 @@ public partial class SimulationViewer
             return graphLeft + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * graphWidth);
         }
 
-        const string trackTitle = "TICK / SIMULATION TIME";
-        draw.AddText(origin + new Vector2(6f, 4f), secondaryText, "SESSION BRANCHES");
+        string trackTitle = Locale.GetString("replay-timeline-axis-title");
+        draw.AddText(origin + new Vector2(6f, 4f), secondaryText, Locale.GetString("replay-session-branches-title"));
         draw.AddText(new Vector2(graphLeft + 4f, origin.Y + 4f), secondaryText, trackTitle);
         DrawTimelineLegend(
             draw,
@@ -1018,8 +1024,14 @@ public partial class SimulationViewer
             {
                 var hoveredBranch = branches[hoveredRow];
                 ImGui.SetTooltip(
-                    $"{hoveredBranch.Name}\nFork tick {hoveredBranch.Fork.Tick}\nHead tick {hoveredBranch.Head.Tick}" +
-                    (hoveredBranch.IsSelected ? "\nSelected branch" : "\nClick to inspect this tick"));
+                    Locale.GetString(
+                        "replay-branch-history-tooltip",
+                        ("name", hoveredBranch.Name),
+                        ("forkTick", hoveredBranch.Fork.Tick),
+                        ("headTick", hoveredBranch.Head.Tick)) +
+                    (hoveredBranch.IsSelected
+                        ? "\n" + Locale.GetString("replay-selected-branch-tooltip")
+                        : "\n" + Locale.GetString("replay-inspect-branch-tooltip")));
 
                 if (mouse.X >= graphLeft && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                 {
@@ -1253,7 +1265,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError("Could not create the replay branch", exception);
+            SetTimelineError(Locale.GetString("timeline-error-create-branch"), exception);
         }
 
         RefreshReplayPresentation();
@@ -1271,7 +1283,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError("Could not select the replay branch", exception);
+            SetTimelineError(Locale.GetString("timeline-error-select-branch"), exception);
         }
 
         RefreshReplayPresentation();
@@ -1287,7 +1299,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError("Could not continue the replay branch", exception);
+            SetTimelineError(Locale.GetString("timeline-error-continue-branch"), exception);
         }
 
         RefreshReplayPresentation();
@@ -1303,7 +1315,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError($"Could not seek the replay to tick {tick}", exception);
+            SetTimelineError(Locale.GetString("timeline-error-seek-tick", ("tick", tick)), exception);
         }
 
         RefreshReplayPresentation();
@@ -1319,7 +1331,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError("Could not seek the replay", exception);
+            SetTimelineError(Locale.GetString("timeline-error-seek-position"), exception);
         }
 
         RefreshReplayPresentation();
@@ -1335,7 +1347,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetTimelineError("Could not return the replay to its head", exception);
+            SetTimelineError(Locale.GetString("timeline-error-return-to-head"), exception);
         }
 
         RefreshReplayPresentation();
@@ -1391,6 +1403,11 @@ public partial class SimulationViewer
             _refreshingReplay = false;
         }
     }
+
+    /// <summary>
+    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
+    /// </summary>
+    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
 
     private enum TimelineLegendMarker
     {

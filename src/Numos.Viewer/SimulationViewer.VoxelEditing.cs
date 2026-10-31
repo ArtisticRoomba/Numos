@@ -12,7 +12,6 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private const string VoxelContextPopupId = "Voxel Actions##voxel-context";
     private float _contextInjectionMoles = 1f;
 
     private void Update3DPicking()
@@ -42,7 +41,7 @@ public partial class SimulationViewer
         }
 
         ImGui.BeginTooltip();
-        ImGui.Text("3D Voxel");
+        ImGui.Text(Locale.GetString("three-d-voxel"));
         ImGui.Separator();
         DrawCellSelectionDetails(_hovered3DCell.Value);
         ImGui.EndTooltip();
@@ -115,7 +114,7 @@ public partial class SimulationViewer
             if (!_selectedCells.Contains(hovered.Value))
                 SetSingleVoxelSelection(hovered.Value);
 
-            ImGui.OpenPopup(VoxelContextPopupId);
+            ImGui.OpenPopup("Voxel Actions##voxel-context");
         }
 
         if (viewport.IsHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -409,10 +408,10 @@ public partial class SimulationViewer
 
     private void RenderVoxelContextMenu()
     {
-        if (!ImGui.BeginPopup(VoxelContextPopupId))
+        if (!ImGui.BeginPopup("Voxel Actions##voxel-context"))
             return;
 
-        ImGui.TextDisabled($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
+        ImGui.TextDisabled(Locale.GetString("selected-voxel-count", ("count", _selectedCells.Count)));
         if (_session.Timeline?.IsInspecting == true)
             ImGui.BeginDisabled();
 
@@ -420,37 +419,37 @@ public partial class SimulationViewer
 
         RenderContextPortalMenu();
 
-        if (ImGui.MenuItem("Clear Gas"))
+        if (ImGui.MenuItem(Locale.GetString("common-clear-gas")))
             ApplyClearGas(_selectedCells);
 
-        if (ImGui.MenuItem("Clear Cell"))
+        if (ImGui.MenuItem(Locale.GetString("clear-cell")))
             ApplyClearCell(_selectedCells);
 
-        if (ImGui.BeginMenu("Set Classification"))
+        if (ImGui.BeginMenu(Locale.GetString("common-set-classification")))
         {
-            if (ImGui.MenuItem("Unassigned (0)"))
+            if (ImGui.MenuItem(Locale.GetString("unassigned-classification")))
                 ApplyClassification(_selectedCells, VoxelClassification.RoomUnassigned);
 
-            if (ImGui.MenuItem("Solid (-2)"))
+            if (ImGui.MenuItem(Locale.GetString("solid-classification")))
                 ApplyClassification(_selectedCells, VoxelClassification.RoomSolid);
 
-            if (ImGui.MenuItem("Void (-1)"))
+            if (ImGui.MenuItem(Locale.GetString("void-classification")))
                 ApplyClassification(_selectedCells, VoxelClassification.RoomVoid);
 
-            if (ImGui.MenuItem($"Draft ({_voxelClassificationDraft})"))
+            if (ImGui.MenuItem(Locale.GetString("draft-classification", ("classification", _voxelClassificationDraft))))
                 ApplyClassification(_selectedCells, _voxelClassificationDraft);
 
             ImGui.EndMenu();
         }
 
-        if (ImGui.MenuItem($"Set Temperature to {_injectionTemperature:F1} K"))
+        if (ImGui.MenuItem(Locale.GetString("set-temperature", ("temperature", _injectionTemperature.ToString("F1")))))
             ApplyTemperature(_selectedCells, _injectionTemperature);
 
         if (_session.Timeline?.IsInspecting == true)
             ImGui.EndDisabled();
 
         ImGui.Separator();
-        if (ImGui.MenuItem("Frame Voxel") &&
+        if (ImGui.MenuItem(Locale.GetString("frame-voxel")) &&
             _selectedCell.HasValue &&
             _drawData != null &&
             _drawData.Chunks.TryGetValue(_selectedCell.Value.Chunk.Position, out var chunk))
@@ -465,10 +464,10 @@ public partial class SimulationViewer
     private void RenderContextPortalMenu()
     {
         AtmosCellRef? selected = GetSelectedAtmosCell();
-        if (!selected.HasValue || !ImGui.BeginMenu("Portal"))
+        if (!selected.HasValue || !ImGui.BeginMenu(Locale.GetString("portal")))
             return;
 
-        if (ImGui.MenuItem("Start Portal Here"))
+        if (ImGui.MenuItem(Locale.GetString("start-portal-here")))
         {
             _portalFirst = selected;
             _portalSecond = null;
@@ -477,7 +476,7 @@ public partial class SimulationViewer
 
         bool canCreate = _portalFirst.HasValue && GetTopologyFlags() != ExplicitLinkFlags.None;
         ImGui.BeginDisabled(!canCreate);
-        if (ImGui.MenuItem("Create Portal to Here"))
+        if (ImGui.MenuItem(Locale.GetString("create-portal-to-here")))
         {
             _portalSecond = selected;
             CreatePortalFromCapturedEndpoints();
@@ -487,24 +486,24 @@ public partial class SimulationViewer
 
         ImGui.Separator();
         if (_portalFirst.HasValue)
-            ImGui.TextDisabled($"From: {FormatCell(_portalFirst.Value).Replace('\n', ' ')}");
+            ImGui.TextDisabled(Locale.GetString("portal-first-endpoint", ("cell", FormatCell(_portalFirst.Value).Replace('\n', ' '))));
         else
-            ImGui.TextDisabled("Start a portal at its first endpoint.");
+            ImGui.TextDisabled(Locale.GetString("portal-first-endpoint-instruction"));
 
         if (GetTopologyFlags() == ExplicitLinkFlags.None)
-            ImGui.TextDisabled("Enable a transport mode in World & Topology.");
+            ImGui.TextDisabled(Locale.GetString("enable-transport-mode-in-world-topology"));
 
         ImGui.EndMenu();
     }
 
     private void RenderContextInjectionMenu()
     {
-        if (!ImGui.BeginMenu("Inject"))
+        if (!ImGui.BeginMenu(Locale.GetString("inject")))
             return;
 
         if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
         {
-            ImGui.TextDisabled("No gases registered");
+            ImGui.TextDisabled(Locale.GetString("no-gases-registered"));
             ImGui.EndMenu();
             return;
         }
@@ -516,15 +515,15 @@ public partial class SimulationViewer
             {
                 ImGui.SetNextItemWidth(180f);
                 ImGui.SliderFloat(
-                    "Moles##context-injection",
+                    Locale.GetString("moles-context-injection"),
                     ref _contextInjectionMoles,
                     0.01f,
                     100f,
                     "%.2f mol",
                     ImGuiSliderFlags.Logarithmic);
 
-                ImGui.TextDisabled($"Temperature: {_injectionTemperature:F1} K");
-                if (ImGui.Button("Inject##context-confirm", new Vector2(140f, 0f)))
+                ImGui.TextDisabled(Locale.GetString("temperature-kelvin", ("temperature", _injectionTemperature.ToString("F1"))));
+                if (ImGui.Button(Locale.GetString("inject-context-confirm"), new Vector2(140f, 0f)))
                 {
                     ApplyGasInjection(
                         _selectedCells,
@@ -548,7 +547,7 @@ public partial class SimulationViewer
     {
         ApplyVoxelMutation(
             addresses,
-            $"Set classification {classification}",
+            Locale.GetString("set-classification-action", ("classification", classification)),
             cells => _session.SetVoxelClassification(cells, classification));
     }
 
@@ -556,7 +555,7 @@ public partial class SimulationViewer
     {
         if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
         {
-            _voxelFeedback = Report("Register a gas before injecting voxels.", true);
+            _voxelFeedback = Report(Locale.GetString("register-gas-before-injecting-voxels"), true);
             return;
         }
 
@@ -572,25 +571,25 @@ public partial class SimulationViewer
     {
         ApplyVoxelMutation(
             addresses,
-            $"Injected {moles:G4} mol {FormatGas(gasId)} into",
+            Locale.GetString("injected-gas-into", ("moles", moles.ToString("G4")), ("gas", FormatGas(gasId))),
             cells => _session.AddVoxelGas(cells, gasId, moles, temperature));
     }
 
     private void ApplyClearGas(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(addresses, "Cleared gas from", cells => _session.ClearVoxelGas(cells));
+        ApplyVoxelMutation(addresses, Locale.GetString("cleared-gas-from"), cells => _session.ClearVoxelGas(cells));
     }
 
     private void ApplyClearCell(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(addresses, "Cleared", cells => _session.ClearVoxelCells(cells));
+        ApplyVoxelMutation(addresses, Locale.GetString("cleared-cells"), cells => _session.ClearVoxelCells(cells));
     }
 
     private void ApplyTemperature(IEnumerable<VoxelAddress> addresses, float temperature)
     {
         ApplyVoxelMutation(
             addresses,
-            $"Set temperature to {temperature:F1} K for",
+            Locale.GetString("set-temperature-for", ("temperature", temperature.ToString("F1"))),
             cells => _session.SetVoxelTemperature(cells, temperature));
     }
 
@@ -607,7 +606,7 @@ public partial class SimulationViewer
         {
             int edited = mutation(targets);
             _voxelFeedback = new FeedbackMessage(
-                $"{action} {edited} voxel{(edited == 1 ? string.Empty : "s")}.",
+                Locale.GetString("voxel-mutation-feedback", ("action", action), ("edited", edited)),
                 false);
         }
         catch (Exception exception) when (

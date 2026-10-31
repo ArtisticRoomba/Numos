@@ -30,6 +30,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="Linguini.Bundle" Version="0.11.0" />
         <PackageReference Include="NativeFileDialogNET" Version="2.0.2"/>
         <PackageReference Include="Raylib-cs" Version="7.0.2"/>
         <PackageReference Include="rlImgui-cs" Version="3.2.0"/>
@@ -48,6 +49,34 @@
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
             <Pack>true</Pack>
             <PackagePath>contentFiles/any/any/assets/imgui-default.ini</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="assets/ProggyClean.ttf">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/ProggyClean.ttf</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="assets/TerminusTTF-4.49.3.ttf">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/TerminusTTF-4.49.3.ttf</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="assets/TerminusTTF-LICENSE.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/TerminusTTF-LICENSE.txt</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="locale/**/*.ftl">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/%(Identity)</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
     </ItemGroup>

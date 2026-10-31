@@ -3,8 +3,8 @@ using System.Numerics;
 using System.Text;
 using ImGuiNET;
 using Numos.Viewer.Ui;
-using Raylib_cs;
 using Numos.Workbench;
+using Raylib_cs;
 
 namespace Numos.Viewer;
 
@@ -58,14 +58,17 @@ public partial class SimulationViewer
     private void HandleUnhandledException(object sender, UnhandledExceptionEventArgs args)
     {
         if (args.ExceptionObject is Exception exception)
-            WriteFatalException("Unhandled exception", exception);
+            WriteFatalException(Locale.GetString("unhandled-exception"), exception);
         else
-            WriteMessage(WorkbenchLogLevel.Fatal, "Runtime", $"Unhandled exception: {args.ExceptionObject}");
+            WriteMessage(
+                WorkbenchLogLevel.Fatal,
+                Locale.GetString("source-runtime"),
+                Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject.ToString())));
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)
     {
-        WriteException("Unobserved task exception", args.Exception);
+        WriteException(Locale.GetString("unobserved-task-exception"), args.Exception);
     }
 
     private void WriteMessage(WorkbenchLogLevel level, string source, string message)
@@ -76,13 +79,23 @@ public partial class SimulationViewer
 
     private void WriteException(string context, Exception exception)
     {
-        _messages.Write(WorkbenchLogLevel.Error, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(
+            WorkbenchLogLevel.Error,
+            "Exception",
+            Locale.GetString("exception-message", ("context", context), ("message", exception.Message)),
+            exception.ToString());
+
         RequestNextFrame();
     }
 
     private void WriteFatalException(string context, Exception exception)
     {
-        _messages.Write(WorkbenchLogLevel.Fatal, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(
+            WorkbenchLogLevel.Fatal,
+            "Exception",
+            Locale.GetString("exception-message", ("context", context), ("message", exception.Message)),
+            exception.ToString());
+
         RequestNextFrame();
     }
 
@@ -127,7 +140,7 @@ public partial class SimulationViewer
         ImGui.PopStyleColor();
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
-            ImGui.SetTooltip("Open Messages / Logs.");
+            ImGui.SetTooltip(Locale.GetString("open-messages-logs"));
 
         if (clicked)
             ShowMessagesPanel();
@@ -136,7 +149,9 @@ public partial class SimulationViewer
     private static string FormatCount(int count, string noun)
     {
         string number = count.ToString(CultureInfo.InvariantCulture);
-        return count == 1 ? $"{number} {noun}" : $"{number} {noun}s";
+        return count == 1
+            ? Locale.GetString("count-singular", ("number", number), ("noun", noun))
+            : Locale.GetString("count-plural", ("number", number), ("noun", noun));
     }
 
     private void RenderMessagesPanel()
@@ -152,7 +167,8 @@ public partial class SimulationViewer
         }
 
         using var window = ImGuiExtensions.BeginWindow(
-            "Messages / Logs##messages",
+            "messages",
+            Locale.GetString("common-messages-logs"),
             ref _showMessagesPanel,
             new Vector2(320, 650),
             new Vector2(900, 240));
@@ -165,20 +181,20 @@ public partial class SimulationViewer
 
         WorkbenchLogEntry[] entries = _messages.Snapshot();
         ImGui.SetNextItemWidth(230f);
-        ImGui.InputTextWithHint("##message-filter", "Filter messages...", ref _messageFilter, 256);
+        ImGui.InputTextWithHint("##message-filter", Locale.GetString("filter-messages"), ref _messageFilter, 256);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(120f);
         ImGui.Combo("##message-level", ref _messageMinimumLevel, "DEBG\0INFO\0WARN\0ERR\0FATL\0");
         ImGui.SameLine();
-        ImGui.Checkbox("Auto-scroll", ref _messageAutoScroll);
+        ImGui.Checkbox(Locale.GetString("auto-scroll"), ref _messageAutoScroll);
         ImGui.SameLine();
 
         WorkbenchLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
-        if (ImGui.Button("Copy"))
+        if (ImGui.Button(Locale.GetString("copy")))
             Raylib.SetClipboardText(FormatMessages(visibleEntries));
 
         ImGui.SameLine();
-        if (ImGui.Button("Clear"))
+        if (ImGui.Button(Locale.GetString("clear")))
         {
             _messages.Clear();
             entries = [];
@@ -187,7 +203,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        ImGui.TextDisabled($"{visibleEntries.Length} shown / {entries.Length} total");
+        ImGui.TextDisabled(Locale.GetString("messages-count-summary", ("shown", visibleEntries.Length), ("total", entries.Length)));
 
         long lastSequence = entries.Length == 0 ? 0 : entries[^1].Sequence;
         RenderMessageTable(visibleEntries, _messageAutoScroll && lastSequence != _messagesLastRenderedSequence);
@@ -208,11 +224,11 @@ public partial class SimulationViewer
             return;
 
         ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Tick", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Source", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn(Locale.GetString("time"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("tick"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("level"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("source"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("message"), ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableHeadersRow();
 
         foreach (var entry in entries)

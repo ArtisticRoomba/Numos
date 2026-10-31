@@ -11,23 +11,10 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private const string AddStageTooltip =
-        "Adds the stage enabled, at its canonical position. It goes before the first built-in stage that " +
-        "normally runs after it, or last when none does. Custom stages never change the position.";
-
     private FeedbackMessage? _solverFeedback;
     private string? _solverAddDraft;
     private string? _selectedSolverStage;
 
-    /// <summary>
-    ///     Draws the Solver Pipeline section of the configuration panel.
-    /// </summary>
-    /// <remarks>
-    ///     Each click calls the session once, so the timeline records one operation per user action. The table
-    ///     collects the click and applies it after <c>EndTable</c>, because an edit republishes the stage list.
-    ///     The table stays compact. Clicking a row selects the stage, and the selected stage's description and
-    ///     settings draw below the table at the full panel width.
-    /// </remarks>
     private void RenderSolverPipelineSection(bool inspecting)
     {
         var steps = _session.GetSolverSteps();
@@ -74,7 +61,8 @@ public partial class SimulationViewer
 
                     ImGui.TableSetColumnIndex(1);
                     var rowStart = ImGui.GetCursorPos();
-                    if (ImGui.Selectable("##select", step.Name == _selectedSolverStage, ImGuiSelectableFlags.AllowOverlap))
+                    if (ImGui.Selectable("##select", step.Name == _selectedSolverStage,
+                            ImGuiSelectableFlags.AllowOverlap))
                         _selectedSolverStage = step.Name;
 
                     bool nameHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip);
@@ -87,7 +75,7 @@ public partial class SimulationViewer
                     if (!builtIn)
                     {
                         ImGui.SameLine(0f, 6f);
-                        ImGui.TextDisabled("custom");
+                        ImGui.TextDisabled(Locale.GetString("common-custom"));
                     }
 
                     if (nameHovered)
@@ -100,14 +88,14 @@ public partial class SimulationViewer
                         pendingLayout = SolverPipelineEditor.MoveUp(steps, index);
 
                     ImGui.EndDisabled();
-                    ImGuiExtensions.ItemTooltip("Move up");
+                    ImGuiExtensions.ItemTooltip(Locale.GetString("move-up"));
                     ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || index == steps.Count - 1);
                     if (ImGui.ArrowButton("##down", ImGuiDir.Down))
                         pendingLayout = SolverPipelineEditor.MoveDown(steps, index);
 
                     ImGui.EndDisabled();
-                    ImGuiExtensions.ItemTooltip("Move down");
+                    ImGuiExtensions.ItemTooltip(Locale.GetString("move-down"));
                     ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || !builtIn);
                     if (ImGui.Button("x", buttonBox))
@@ -115,7 +103,9 @@ public partial class SimulationViewer
 
                     ImGui.EndDisabled();
                     ImGuiExtensions.ItemTooltip(
-                        builtIn ? "Remove stage" : "The host owns custom stages. The viewer cannot remove them.");
+                        builtIn
+                            ? Locale.GetString("remove-stage")
+                            : Locale.GetString("custom-stage-removal-unavailable"));
                     ImGui.PopStyleVar();
 
                     ImGui.PopID();
@@ -152,7 +142,7 @@ public partial class SimulationViewer
         ImGui.Separator();
         if (_selectedSolverStage is not { } name)
         {
-            ImGui.TextDisabled("Select a stage to see its description and settings.");
+            ImGui.TextDisabled(Locale.GetString("select-stage-description-settings"));
             return;
         }
 
@@ -170,7 +160,8 @@ public partial class SimulationViewer
             case AtmosBuiltInSolvers.GasReactions:
                 var reactions = AtmosConfigSettings.GetSolverConfiguration<GasReactionConfig>(_session.Config!);
                 int count = reactions == null ? 0 : reactions.LinearReactions.Count + reactions.StandardReactions.Count;
-                ImGui.TextUnformatted($"Configured reactions: {count.ToString(CultureInfo.InvariantCulture)}");
+                ImGui.TextUnformatted(Locale.GetString("configured-reactions",
+                    ("count", count.ToString(CultureInfo.InvariantCulture))));
                 break;
         }
 
@@ -185,18 +176,19 @@ public partial class SimulationViewer
 
         if (addable.Count == 0)
         {
-            ImGui.TextDisabled("Every built-in stage is in the pipeline.");
+            ImGui.TextDisabled(Locale.GetString("all-built-in-stages-in-pipeline"));
             return;
         }
 
         var style = ImGui.GetStyle();
-        float addWidth = ImGui.CalcTextSize("Add").X + style.FramePadding.X * 2f;
+        float addWidth = ImGui.CalcTextSize(Locale.GetString("common-add")).X + style.FramePadding.X * 2f;
         float markerWidth = ImGui.CalcTextSize("(?)").X + style.ItemSpacing.X * 3f;
-        float comboWidth = MathF.Max(80f, ImGui.GetContentRegionAvail().X - addWidth - markerWidth - style.ItemSpacing.X);
+        float comboWidth = MathF.Max(80f,
+            ImGui.GetContentRegionAvail().X - addWidth - markerWidth - style.ItemSpacing.X);
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(comboWidth);
-        if (ImGui.BeginCombo("##solver-add-stage", _solverAddDraft ?? "Add stage..."))
+        if (ImGui.BeginCombo("##solver-add-stage", _solverAddDraft ?? Locale.GetString("add-stage-placeholder")))
         {
             foreach (string name in addable)
             {
@@ -212,7 +204,7 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
         ImGui.BeginDisabled(_solverAddDraft == null);
-        if (ImGui.Button("Add##solver-add") && _solverAddDraft != null)
+        if (ImGui.Button(Locale.GetString("common-add")) && _solverAddDraft != null)
         {
             var layout = SolverPipelineEditor.Add(steps, _solverAddDraft);
             _solverAddDraft = null;
@@ -222,7 +214,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(AddStageTooltip);
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("add-stage-help"));
     }
 
     private void RenderSolverPresets(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
@@ -231,26 +223,23 @@ public partial class SimulationViewer
         var style = ImGui.GetStyle();
         ImGui.Spacing();
         ImGui.AlignTextToFramePadding();
-        ImGui.TextDisabled("Transport:");
+        ImGui.TextDisabled(Locale.GetString("transport"));
 
         ImGui.BeginDisabled(inspecting);
-        SameLineOrWrap("Euler", style);
+        SameLineOrWrap(Locale.GetString("euler"), style);
         if (RenderPresetButton("Euler##solver-preset-euler", current == AtmosTransportModel.Euler))
             RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Euler));
 
-        SameLineOrWrap("Legacy", style);
+        SameLineOrWrap(Locale.GetString("legacy"), style);
         if (RenderPresetButton("Legacy##solver-preset-legacy", current == AtmosTransportModel.Legacy))
             RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Legacy));
 
-        SameLineOrWrap("Reset to defaults", style);
-        if (ImGui.Button("Reset to defaults##solver-reset"))
+        SameLineOrWrap(Locale.GetString("common-reset-to-defaults"), style);
+        if (ImGui.Button(Locale.GetString("common-reset-to-defaults")))
             RunSolverEdit(() => _session.ResetSolvers());
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(
-            "Euler and Legacy swap the stages that move gas and keep every other stage. " +
-            "Reset to defaults restores the built-in order for the current model and enables every stage. " +
-            "It cannot discard custom stages.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("transport-presets-help"));
     }
 
     /// <summary>
