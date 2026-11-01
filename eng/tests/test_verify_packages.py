@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 ENG = Path(__file__).resolve().parents[1]
@@ -61,6 +62,43 @@ class DependencyAssetTests(unittest.TestCase):
         for dependency_id in ("Numos.API.Generators", "Numos.Replay.Generators"):
             with self.subTest(dependency=dependency_id), self.assertRaisesRegex(ValueError, "unpublished"):
                 self.check({dependency_id: {}})
+
+
+class ViewerAssetTests(unittest.TestCase):
+    CONTENT = "contentFiles/any/any"
+    BASE = {
+        f"{CONTENT}/assets/icon.png",
+        f"{CONTENT}/assets/imgui-default.ini",
+        f"{CONTENT}/assets/ProggyClean.ttf",
+        f"{CONTENT}/assets/NumosFixedCyrillic-6x13.ttf",
+        f"{CONTENT}/locale/en/common.ftl",
+    }
+
+    def check(self, names: set[str], cultures: dict[str, list[str]] | None = None) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for culture, files in (cultures or {}).items():
+                (root / culture).mkdir()
+                for file in files:
+                    (root / culture / file).write_text("")
+            verify_packages.check_viewer_assets("Numos.Viewer.nupkg", names, root)
+
+    def test_accepts_complete_package(self) -> None:
+        names = self.BASE | {f"{self.CONTENT}/locale/ru/common.ftl"}
+        self.check(names, {"en": ["common.ftl"], "ru": ["common.ftl"]})
+
+    def test_rejects_missing_font(self) -> None:
+        for font in ("ProggyClean.ttf", "NumosFixedCyrillic-6x13.ttf"):
+            with self.subTest(font=font), self.assertRaisesRegex(ValueError, font):
+                self.check(self.BASE - {f"{self.CONTENT}/assets/{font}"})
+
+    def test_rejects_missing_english_locale(self) -> None:
+        with self.assertRaisesRegex(ValueError, "English locale"):
+            self.check(self.BASE - {f"{self.CONTENT}/locale/en/common.ftl"})
+
+    def test_rejects_missing_culture_present_in_source(self) -> None:
+        with self.assertRaisesRegex(ValueError, "locale/ru/common.ftl"):
+            self.check(self.BASE, {"en": ["common.ftl"], "ru": ["common.ftl"]})
 
 
 if __name__ == "__main__":

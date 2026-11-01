@@ -39,6 +39,27 @@ def check_analyzers(package_name: str, package_id: str, names: set[str]) -> None
             raise ValueError(f"{package_name}: missing analyzer {path}")
 
 
+def check_viewer_assets(package_name: str, names: set[str], locale_directory: Path) -> None:
+    content = "contentFiles/any/any"
+    for asset in (
+            f"{content}/assets/icon.png",
+            f"{content}/assets/imgui-default.ini",
+            f"{content}/assets/ProggyClean.ttf",
+            f"{content}/assets/NumosFixedCyrillic-6x13.ttf",
+    ):
+        if asset not in names:
+            raise ValueError(f"{package_name}: missing runtime asset {asset}")
+
+    if not any(name.startswith(f"{content}/locale/en/") and name.endswith(".ftl") for name in names):
+        raise ValueError(f"{package_name}: missing English locale files under {content}/locale/en/")
+
+    if locale_directory.is_dir():
+        for file in sorted(locale_directory.glob("*/*.ftl")):
+            asset = f"{content}/locale/{file.parent.name}/{file.name}"
+            if asset not in names:
+                raise ValueError(f"{package_name}: missing locale file {asset}")
+
+
 def flows_analyzers(dependency: dict[str, str]) -> bool:
     def assets(name: str) -> set[str] | None:
         value = dependency.get(name)
@@ -127,12 +148,7 @@ def validate_package(root: Path, directory: Path, package_id: str) -> None:
         check_analyzers(package.name, package_id, names)
 
         if package_id == "Numos.Viewer":
-            for asset in (
-                "contentFiles/any/any/assets/icon.png",
-                "contentFiles/any/any/assets/imgui-default.ini",
-            ):
-                if asset not in names:
-                    raise ValueError(f"{package.name}: missing runtime asset {asset}")
+            check_viewer_assets(package.name, names, root / "src" / "Numos.Viewer" / "locale")
 
     with ZipFile(symbols) as archive:
         if not any(name.endswith(f"/{package_id}.pdb") for name in archive.namelist()):
