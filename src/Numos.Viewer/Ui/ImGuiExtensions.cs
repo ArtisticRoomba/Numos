@@ -17,6 +17,26 @@ internal static class ImGuiExtensions
         ImGuiTableFlags.BordersInnerH |
         ImGuiTableFlags.NoSavedSettings;
 
+    /// <summary>
+    ///     Begins a window whose ImGui ID comes from <paramref name="id" /> alone.
+    /// </summary>
+    /// <param name="id">The stable window ID. It must match the ID in the default layout file.</param>
+    /// <param name="title">The visible, possibly localized title.</param>
+    /// <param name="isOpen">The open state shown by the close button.</param>
+    /// <param name="firstUsePosition">The position used when no saved layout exists.</param>
+    /// <param name="firstUseSize">The size used when no saved layout exists.</param>
+    /// <param name="flags">The window flags.</param>
+    public static WindowScope BeginWindow(
+        string id,
+        string title,
+        ref bool isOpen,
+        Vector2 firstUsePosition,
+        Vector2 firstUseSize,
+        ImGuiWindowFlags flags = ImGuiWindowFlags.None)
+    {
+        return BeginWindow($"{title}###{id}", ref isOpen, firstUsePosition, firstUseSize, flags);
+    }
+
     public static WindowScope BeginWindow(
         string title,
         ref bool isOpen,
@@ -152,7 +172,7 @@ internal static class ImGuiExtensions
     ///     Begins a table with text wrapping turned off until the scope is disposed.
     /// </summary>
     /// <remarks>
-    ///     <see cref="BeginWindow" /> wraps text at the content edge, which inside a table is the cell edge. Auto-fit
+    ///     <see cref="BeginWindow(string, ref bool, Vector2, Vector2, ImGuiWindowFlags)" /> wraps text at the content edge, which inside a table is the cell edge. Auto-fit
     ///     columns measure their wrapped content, so they would shrink to their widest word. A cell that should wrap can
     ///     push its own wrap position.
     /// </remarks>

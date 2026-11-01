@@ -1,0 +1,13 @@
+﻿move-up = Move up
+move-down = Move down
+remove-stage = Remove stage
+custom-stage-removal-unavailable = The host owns custom stages. The viewer cannot remove them.
+select-stage-description-settings = Select a stage to see its description and settings.
+configured-reactions = Configured reactions: { $count }
+all-built-in-stages-in-pipeline = Every built-in stage is in the pipeline.
+add-stage-placeholder = Add stage...
+add-stage-help = Adds the stage enabled, at its canonical position. It goes before the first built-in stage that normally runs after it, or last when none does. Custom stages never change the position.
+transport = Transport:
+euler = Euler
+legacy = Legacy
+transport-presets-help = Euler and Legacy swap the stages that move gas and keep every other stage. Reset to defaults restores the built-in order for the current model and enables every stage. It cannot discard custom stages.

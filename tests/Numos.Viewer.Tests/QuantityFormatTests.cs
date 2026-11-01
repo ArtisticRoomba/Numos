@@ -68,6 +68,9 @@ public sealed class QuantityFormatTests
         });
     }
 
+    [OneTimeSetUp]
+    public void UseEnglish() => Locale.SetCulture();
+
     [TestCase(0L, "0 ticks")]
     [TestCase(1L, "1 tick")]
     [TestCase(8192L, "8192 ticks")]

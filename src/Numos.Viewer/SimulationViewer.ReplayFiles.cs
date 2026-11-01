@@ -45,7 +45,7 @@ public partial class SimulationViewer
         {
             using var dialog = new NativeFileDialog()
                 .SelectFile()
-                .AddFilter("Numos replay", "numos");
+                .AddFilter(Locale.GetString("replay-file-filter-name"), "numos");
 
             string? initialDirectory = GetReplayOpenDirectory();
             var result = dialog.Open(out string? path, initialDirectory);
@@ -54,14 +54,14 @@ public partial class SimulationViewer
 
             if (result == DialogResult.Error || string.IsNullOrWhiteSpace(path))
             {
-                SetReplayFileError("The operating system file dialog could not select a replay.");
+                SetReplayFileError(Locale.GetString("replay-file-open-dialog-select-error"));
                 _requestOpenReplayModal = true;
                 return;
             }
 
             if (!string.Equals(Path.GetExtension(path), ReplayExtension, StringComparison.OrdinalIgnoreCase))
             {
-                SetReplayFileError("Select a .numos replay file.");
+                SetReplayFileError(Locale.GetString("replay-file-invalid-extension-error"));
                 _requestOpenReplayModal = true;
                 return;
             }
@@ -70,7 +70,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetReplayFileError("The operating system file dialog could not be opened.", exception);
+            SetReplayFileError(Locale.GetString("replay-file-open-dialog-error"), exception);
             _requestOpenReplayModal = true;
         }
     }
@@ -100,7 +100,7 @@ public partial class SimulationViewer
         {
             using var dialog = new NativeFileDialog()
                 .SaveFile()
-                .AddFilter("Numos replay", "numos");
+                .AddFilter(Locale.GetString("replay-file-filter-name"), "numos");
 
             string fullPath = Path.GetFullPath(_replaySavePath);
             string? initialDirectory = Path.GetDirectoryName(fullPath);
@@ -111,7 +111,7 @@ public partial class SimulationViewer
 
             if (result == DialogResult.Error || string.IsNullOrWhiteSpace(path))
             {
-                SetReplayFileError("The operating system file dialog could not select a save location.");
+                SetReplayFileError(Locale.GetString("replay-file-save-dialog-select-error"));
                 _requestSaveReplayModal = true;
                 return;
             }
@@ -122,7 +122,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            SetReplayFileError("The operating system file dialog could not be opened.", exception);
+            SetReplayFileError(Locale.GetString("replay-file-open-dialog-error"), exception);
             _requestSaveReplayModal = true;
         }
     }
@@ -143,23 +143,23 @@ public partial class SimulationViewer
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref open);
         if (!modal.IsVisible) return;
 
-        ImGui.TextWrapped("Open a .numos replay. Numos verifies it before replacing the current project.");
+        ImGui.TextWrapped(Locale.GetString("replay-file-open-description"));
         ImGui.SetNextItemWidth(460f);
-        ImGui.InputText("Path", ref _replayOpenPath, 4096);
+        ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replayOpenPath, 4096);
         ImGui.SameLine();
-        if (ImGui.Button("Browse...")) PickReplayFile();
+        if (ImGui.Button(Locale.GetString("common-browse"))) PickReplayFile();
         if (_session.World != null)
         {
             ImGui.TextColored(
                 ViewerTheme.Caution,
                 _session.Branches?.BranchCount > 1
-                    ? $"Loading successfully will discard all {_session.Branches.BranchCount} in-memory branches."
-                    : "Loading successfully will close the current in-memory project.");
+                    ? Locale.GetString("replay-file-load-discard-branches-warning", ("branchCount", _session.Branches.BranchCount))
+                    : Locale.GetString("replay-file-load-close-project-warning"));
         }
 
         DrawReplayFileError();
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replayOpenPath) || _replayLoadTask != null);
-        if (ImGui.Button(_simulation == null ? "Open" : "Load and Replace", new Vector2(150f, 0f)))
+        if (ImGui.Button(_simulation == null ? Locale.GetString("replay-file-open-button") : Locale.GetString("replay-file-load-replace-button"), new Vector2(150f, 0f)))
         {
             StartReplayLoad(_replayOpenPath);
             ImGui.CloseCurrentPopup();
@@ -167,7 +167,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
         ImGui.SetItemDefaultFocus();
     }
 
@@ -181,35 +181,35 @@ public partial class SimulationViewer
         if (!modal.IsVisible || _session.Timeline == null) return;
 
         ImGui.SetNextItemWidth(460f);
-        ImGui.InputText("Path", ref _replaySavePath, 4096);
+        ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replaySavePath, 4096);
         ImGui.SameLine();
-        if (ImGui.Button("Browse...##save-replay")) PickReplaySaveFile();
+        if (ImGui.Button(Locale.GetString("common-browse") + "##save-replay")) PickReplaySaveFile();
         if (_session.Timeline.IsInspecting)
         {
-            ImGui.RadioButton("Save full selected branch", ref _replaySaveRange, 0);
-            ImGui.RadioButton("Save selected branch up to here", ref _replaySaveRange, 1);
+            ImGui.RadioButton(Locale.GetString("replay-file-save-full-branch-option"), ref _replaySaveRange, 0);
+            ImGui.RadioButton(Locale.GetString("replay-file-save-branch-until-here-option"), ref _replaySaveRange, 1);
         }
         else
         {
             _replaySaveRange = 0;
-            ImGui.TextDisabled("The selected live branch will be saved through its current head.");
+            ImGui.TextDisabled(Locale.GetString("replay-file-save-live-branch-description"));
         }
 
         if (_session.Branches?.BranchCount > 1)
         {
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                $"Only '{_session.Branches.SelectedBranch.Name}' will be saved. Other session branches remain in memory.");
+                Locale.GetString("replay-file-save-selected-branch-warning", ("branchName", _session.Branches.SelectedBranch.Name)));
         }
 
         string normalized = ReplayPaths.Normalize(_replaySavePath);
         bool overwrite = File.Exists(normalized);
         if (overwrite)
-            ImGui.TextColored(ViewerTheme.Caution, "The existing file will be replaced.");
+            ImGui.TextColored(ViewerTheme.Caution, Locale.GetString("replay-file-overwrite-warning"));
 
         DrawReplayFileError();
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replaySavePath) || _replaySaveTask != null);
-        if (ImGui.Button(overwrite ? "Overwrite" : "Save", new Vector2(120f, 0f)))
+        if (ImGui.Button(overwrite ? Locale.GetString("replay-file-overwrite-button") : Locale.GetString("replay-file-save-button"), new Vector2(120f, 0f)))
         {
             StartReplaySave(normalized, overwrite);
             ImGui.CloseCurrentPopup();
@@ -217,7 +217,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
         ImGui.SetItemDefaultFocus();
     }
 
@@ -233,13 +233,13 @@ public partial class SimulationViewer
 
         if (_replayLoadTask != null)
         {
-            ImGui.TextUnformatted("Loading, verifying, and indexing replay...");
+            ImGui.TextUnformatted(Locale.GetString("replay-file-loading-progress"));
             ImGui.ProgressBar(Math.Clamp(_replayFileProgress, 0f, 1f), new Vector2(420f, 0f));
-            if (ImGui.Button("Cancel", new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
+            if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
         }
         else
         {
-            ImGui.TextUnformatted("Saving replay...");
+            ImGui.TextUnformatted(Locale.GetString("replay-file-saving-progress"));
             ImGui.ProgressBar(-1f * (float)ImGui.GetTime(), new Vector2(420f, 0f));
         }
     }
@@ -289,7 +289,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            _replayFileError = $"Could not prepare the replay for saving. {exception.Message}";
+            _replayFileError = Locale.GetString("replay-file-prepare-save-error", ("message", exception.Message));
             _requestSaveReplayModal = true;
         }
     }
@@ -309,13 +309,13 @@ public partial class SimulationViewer
             }
             catch (OperationCanceledException)
             {
-                _replayFileError = "Replay loading was cancelled.";
+                _replayFileError = Locale.GetString("replay-file-loading-cancelled-error");
                 RequestNextFrame();
             }
             catch (Exception exception)
             {
                 // The session already logged the failure.
-                _replayFileError = $"Could not load the replay. {exception.Message}";
+                _replayFileError = Locale.GetString("replay-file-load-error", ("message", exception.Message));
                 _requestOpenReplayModal = true;
                 RequestNextFrame();
             }
@@ -340,7 +340,7 @@ public partial class SimulationViewer
             catch (Exception exception)
             {
                 // The session already logged the failure.
-                _replayFileError = $"Could not save the replay. {exception.Message}";
+                _replayFileError = Locale.GetString("replay-file-save-error", ("message", exception.Message));
                 _requestSaveReplayModal = true;
                 RequestNextFrame();
             }
@@ -379,7 +379,7 @@ public partial class SimulationViewer
             RequestOpenReplay(paths[0]);
         else
         {
-            SetReplayFileError("Drop exactly one .numos replay file.");
+            SetReplayFileError(Locale.GetString("replay-file-drop-single-file-error"));
             _requestOpenReplayModal = true;
         }
     }

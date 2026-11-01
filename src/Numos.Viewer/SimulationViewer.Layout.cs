@@ -1,5 +1,4 @@
 using ImGuiNET;
-using Numos.Viewer.Ui;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
@@ -39,25 +38,32 @@ public partial class SimulationViewer
             File.Copy(packagedLayoutPath, _userLayoutPath);
 
         if (File.Exists(_userLayoutPath))
+        {
+            string saved = File.ReadAllText(_userLayoutPath);
+            string migrated = LayoutMigration.Migrate(saved);
+            if (!ReferenceEquals(saved, migrated))
+                File.WriteAllText(_userLayoutPath, migrated);
+
             ImGui.LoadIniSettingsFromDisk(_userLayoutPath);
+        }
     }
 
     private void SaveCurrentLayout()
     {
         if (_userLayoutPath == null)
         {
-            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", Locale.GetString("imgui-layout-not-initialized-error"));
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", Locale.GetString("imgui-layout-saved"));
         }
         catch (Exception ex)
         {
-            WriteException("Could not save the layout", ex);
+            WriteException(Locale.GetString("imgui-layout-save-error"), ex);
         }
     }
 
@@ -70,18 +76,18 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", Locale.GetString("imgui-layout-not-initialized-error"));
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", Locale.GetString("imgui-layout-saved-packaged"));
         }
         catch (Exception ex)
         {
-            WriteException("Could not save the packaged default layout", ex);
+            WriteException(Locale.GetString("imgui-layout-save-error-packaged"), ex);
         }
     }
 
