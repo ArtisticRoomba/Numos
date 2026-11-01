@@ -354,7 +354,7 @@ public partial class SimulationViewer
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(Locale.GetString("timeline-operation"), DescribeOperation(selected));
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField(Locale.GetString("timeline-done-in-tick"), selected.AfterTick.ToString());
+                ImGuiExtensions.StatusField(Locale.GetString("timeline-done-in-tick-label"), selected.AfterTick.ToString());
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(Locale.GetString("timeline-order"), _operationIndex.GetOrder(selected).ToString());
                 ImGui.EndTable();
