@@ -38,7 +38,14 @@ public partial class SimulationViewer
             File.Copy(packagedLayoutPath, _userLayoutPath);
 
         if (File.Exists(_userLayoutPath))
+        {
+            string saved = File.ReadAllText(_userLayoutPath);
+            string migrated = LayoutMigration.Migrate(saved);
+            if (!ReferenceEquals(saved, migrated))
+                File.WriteAllText(_userLayoutPath, migrated);
+
             ImGui.LoadIniSettingsFromDisk(_userLayoutPath);
+        }
     }
 
     private void SaveCurrentLayout()
