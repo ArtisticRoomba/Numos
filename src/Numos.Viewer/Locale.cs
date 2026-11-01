@@ -20,7 +20,10 @@ public static partial class Locale
     private static readonly FrozenDictionary<string, IFluentType> EmptyCache =
         FrozenDictionary.ToFrozenDictionary<string, IFluentType>([]);
     
-    private static readonly Dictionary<string, IFluentType> ArgumentCache = new();
+    // GetString also runs on the finalizer thread through the unobserved-task handler, so each thread
+    // needs its own argument dictionary.
+    [ThreadStatic]
+    private static Dictionary<string, IFluentType>? _argumentCache;
 
     private static LocaleState? _current;
 
@@ -155,6 +158,13 @@ public static partial class Locale
         }
 
         return new LocaleState(culture, bundle);
+    }
+
+    private static Dictionary<string, IFluentType> GetArgumentCache()
+    {
+        var cache = _argumentCache ??= new Dictionary<string, IFluentType>();
+        cache.Clear();
+        return cache;
     }
 
     private static LocaleState GetState() =>
