@@ -178,6 +178,11 @@ public partial class SimulationViewer : IDisposable
     /// </summary>
     public SimulationViewer(Action<VisualizationRegistry>? configureVisualizations = null)
     {
+        Locale.SetCulture();
+
+        _newGasName = Locale.GetString("simulation-new-gas-name");
+        _projectNameDraft = Locale.GetString("common-untitled-simulation");
+
         _configureVisualizations = configureVisualizations;
         _session = new WorkbenchSession(
             _messages,
@@ -202,11 +207,6 @@ public partial class SimulationViewer : IDisposable
     /// </remarks>
     public void Run()
     {
-        Locale.SetCulture();
-
-        _newGasName = Locale.GetString("simulation-new-gas-name");
-        _projectNameDraft = Locale.GetString("common-untitled-simulation");
-
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
             ConfigFlags.Msaa4xHint |

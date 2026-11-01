@@ -1,6 +1,7 @@
 ﻿unhandled-exception = Unhandled exception
 unhandled-exception-message = Unhandled exception: { $exception }
 unobserved-task-exception = Unobserved task exception
+source-runtime = Runtime
 exception-message = { $context }: { $message }
 
 open-messages-logs = Open Messages / Logs.
