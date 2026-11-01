@@ -2,7 +2,7 @@
 
 namespace Numos.Viewer;
 
-public static partial class Locale
+internal static partial class Locale
 {
     /// <summary>
     /// Gets a raw fluent string without any arguments.
@@ -20,6 +20,14 @@ public static partial class Locale
                    nameof(key));
     }
     
+    /// <summary>
+    ///     Gets a localized string with one argument.
+    /// </summary>
+    /// <param name="key">The message key.</param>
+    /// <typeparam name="T1">The type of the value of argument 1.</typeparam>
+    /// <param name="arg1">The name and value of argument 1.</param>
+    /// <returns>The localized string.</returns>
+    /// <exception cref="ArgumentException">The message formats to a null value.</exception>
     public static string GetString<T1>(
         string key,
         (string, T1?) arg1)
@@ -35,6 +43,16 @@ public static partial class Locale
             nameof(key));
     }
     
+    /// <summary>
+    ///     Gets a localized string with two arguments.
+    /// </summary>
+    /// <param name="key">The message key.</param>
+    /// <typeparam name="T1">The type of the value of argument 1.</typeparam>
+    /// <typeparam name="T2">The type of the value of argument 2.</typeparam>
+    /// <param name="arg1">The name and value of argument 1.</param>
+    /// <param name="arg2">The name and value of argument 2.</param>
+    /// <returns>The localized string.</returns>
+    /// <exception cref="ArgumentException">The message formats to a null value.</exception>
     public static string GetString<T1, T2>(
         string key,
         (string, T1?) arg1,
@@ -52,6 +70,18 @@ public static partial class Locale
             nameof(key));
     }
     
+    /// <summary>
+    ///     Gets a localized string with three arguments.
+    /// </summary>
+    /// <param name="key">The message key.</param>
+    /// <typeparam name="T1">The type of the value of argument 1.</typeparam>
+    /// <typeparam name="T2">The type of the value of argument 2.</typeparam>
+    /// <typeparam name="T3">The type of the value of argument 3.</typeparam>
+    /// <param name="arg1">The name and value of argument 1.</param>
+    /// <param name="arg2">The name and value of argument 2.</param>
+    /// <param name="arg3">The name and value of argument 3.</param>
+    /// <returns>The localized string.</returns>
+    /// <exception cref="ArgumentException">The message formats to a null value.</exception>
     public static string GetString<T1, T2, T3>(
         string key,
         (string, T1?) arg1,
@@ -71,6 +101,17 @@ public static partial class Locale
             nameof(key));
     }
     
+    /// <summary>
+    ///     Gets a localized string with any number of named arguments.
+    /// </summary>
+    /// <param name="key">The message key.</param>
+    /// <param name="args">The argument names and values.</param>
+    /// <returns>The localized string.</returns>
+    /// <remarks>
+    ///     This overload allocates the <paramref name="args" /> array. Prefer the fixed-arity overloads for up to three
+    ///     arguments.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The message formats to a null value.</exception>
     public static string GetString(
         string key,
         params (string, object?)[] args)

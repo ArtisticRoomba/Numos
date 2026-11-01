@@ -9,8 +9,11 @@ using Linguini.Syntax.Parser;
 
 namespace Numos.Viewer;
 
-public static partial class Locale
+internal static partial class Locale
 {
+    /// <summary>
+    ///     The directory that holds one subdirectory of <c>.ftl</c> files per culture.
+    /// </summary>
     public static readonly string LocaleDirectory =
         Path.Combine(AppContext.BaseDirectory, "locale");
 
@@ -30,6 +33,10 @@ public static partial class Locale
     private readonly static Lazy<IReadOnlyList<string>> AvailableCulturesLazy =
         new(FindAvailableCultures, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    /// <summary>
+    ///     Gets the active culture.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><see cref="SetCulture" /> has not been called.</exception>
     public static CultureInfo CurrentCulture => GetState().Culture;
 
     /// <summary>
