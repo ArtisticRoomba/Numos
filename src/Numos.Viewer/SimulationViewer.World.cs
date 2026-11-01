@@ -390,7 +390,7 @@ public partial class SimulationViewer
             !_session.World.TryGetSimulation(id, out var simulation))
         {
             ImGui.TextWrapped(Locale.GetString("simulation-no-longer-exists"));
-            if (ImGui.Button(Locale.GetString("close-button"), new Vector2(120, 0)))
+            if (ImGui.Button(Locale.GetString("common-close"), new Vector2(120, 0)))
             {
                 _removeSimulationModalOpen = false;
                 _simulationPendingRemoval = null;
