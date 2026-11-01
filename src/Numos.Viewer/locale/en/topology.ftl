@@ -41,7 +41,11 @@ topology-no-chunks = No chunks
 endpoint-chunk = {$label} chunk
 endpoint-face = {$label} face
 selected-connection-no-longer-exists = The selected connection no longer exists.
-remove-connection-confirmation = Remove this {$kind} and its {$count} link{$pluralSuffix}? It will stop transporting at the next world tick.
+remove-connection-confirmation =
+    Remove this {$kind} and { $count ->
+        [one] its { $count } link
+       *[other] its { $count } links
+    }? It will stop transporting at the next world tick.
 remove-connection = Remove Connection
 queued-connection-removal = Queued the connection for removal on the next world tick.
 could-not-remove-connection = Could not remove the connection: {$message}

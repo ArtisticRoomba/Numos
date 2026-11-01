@@ -1,6 +1,12 @@
 ﻿three-d-voxel = 3D Воксель
 
-selected-voxel-count = { $count } вокселей выбрано
+selected-voxel-count =
+    { $count ->
+        [one] { $count } воксель выбран
+        [few] { $count } вокселя выбрано
+        [many] { $count } вокселей выбрано
+       *[other] { $count } вокселя выбрано
+    }
 
 clear-cell = Очистить Клетку
 unassigned-classification = Не назначен (0)

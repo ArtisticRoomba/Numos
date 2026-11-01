@@ -1215,7 +1215,7 @@ public partial class SimulationViewer
         {
             ImGui.Text(
                 Locale.GetString(
-                    _selectedCells.Count == 1 ? "selected-voxel-count-singular" : "selected-voxel-count-plural",
+                    "voxels-selected",
                     ("count", _selectedCells.Count)));
 
             DrawCellSelectionDetails(_selectedCell.Value);
@@ -1747,9 +1747,7 @@ public partial class SimulationViewer
 
         draw.AddRect(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine));
         string overlay = totalMoles > 0f
-            ? summary.GasCount == 1
-                ? Locale.GetString("gas-count-singular")
-                : Locale.GetString("gas-count-plural", ("count", summary.GasCount))
+            ? Locale.GetString("gas-count", ("count", summary.GasCount))
             : summary.InvalidCount > 0
                 ? Locale.GetString("no-valid-amounts")
                 : Locale.GetString("vacuum");

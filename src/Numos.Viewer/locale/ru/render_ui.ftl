@@ -90,8 +90,13 @@ temperature-k-label = Температура (K)
 
 selection-section = Выделение
 no-voxels-selected = Воксели не выбраны.
-selected-voxel-count-singular = {$count} воксель выбран
-selected-voxel-count-plural = {$count} вокселей выбрано
+voxels-selected =
+    { $count ->
+        [one] Выбран { $count } воксель
+        [few] Выбрано { $count } вокселя
+        [many] Выбрано { $count } вокселей
+       *[other] Выбрано { $count } вокселя
+    }
 clear-selection-button = Очистить Выделение
 
 no-chunks-available = Нет доступных чанковю
@@ -142,8 +147,13 @@ selected-voxel-chunk-missing = Выбранный воксель/чанк не �
 details-unavailable-revision = Детали недоступны для данной ревизии.
 
 gas-makeup = Состав Газа
-gas-count-singular = 1 газ
-gas-count-plural = { $count } газов
+gas-count =
+    { $count ->
+        [one] { $count } газ
+        [few] { $count } газа
+        [many] { $count } газов
+       *[other] { $count } газа
+    }
 no-valid-amounts = Нет валидных значений
 vacuum = Вакуум
 

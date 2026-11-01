@@ -349,8 +349,7 @@ public partial class SimulationViewer
             Locale.GetString(
                 "remove-connection-confirmation",
                 ("kind", FormatLinkSetKind(selected.Kind).ToLowerInvariant()),
-                ("count", selected.Links.Count),
-                ("pluralSuffix", selected.Links.Count == 1 ? string.Empty : "s")));
+                ("count", selected.Links.Count)));
 
         ImGui.Spacing();
         if (ImGui.Button(Locale.GetString("remove-connection"), new Vector2(160, 0)))

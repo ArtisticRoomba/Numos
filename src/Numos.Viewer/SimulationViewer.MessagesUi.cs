@@ -124,10 +124,10 @@ public partial class SimulationViewer
             return;
 
         string label = errors > 0 && warnings > 0
-            ? $"{FormatCount(errors, "error")}, {FormatCount(warnings, "warning")}"
+            ? $"{Locale.GetString("error-count", ("count", errors))}, {Locale.GetString("warning-count", ("count", warnings))}"
             : errors > 0
-                ? FormatCount(errors, "error")
-                : FormatCount(warnings, "warning");
+                ? Locale.GetString("error-count", ("count", errors))
+                : Locale.GetString("warning-count", ("count", warnings));
 
         // A menu-bar MenuItem is as wide as its label plus one item spacing on either side.
         float itemWidth = ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemSpacing.X * 2f;
@@ -144,14 +144,6 @@ public partial class SimulationViewer
 
         if (clicked)
             ShowMessagesPanel();
-    }
-
-    private static string FormatCount(int count, string noun)
-    {
-        string number = count.ToString(CultureInfo.InvariantCulture);
-        return count == 1
-            ? Locale.GetString("count-singular", ("number", number), ("noun", noun))
-            : Locale.GetString("count-plural", ("number", number), ("noun", noun));
     }
 
     private void RenderMessagesPanel()

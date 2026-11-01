@@ -90,8 +90,11 @@ temperature-k-label = Temperature (K)
 
 selection-section = Selection
 no-voxels-selected = No voxels selected.
-selected-voxel-count-singular = {$count} voxel selected
-selected-voxel-count-plural = {$count} voxels selected
+voxels-selected =
+    { $count ->
+        [one] { $count } voxel selected
+       *[other] { $count } voxels selected
+    }
 clear-selection-button = Clear Selection
 
 no-chunks-available = No chunks available.
@@ -142,8 +145,11 @@ selected-voxel-chunk-missing = Selected voxel/chunk does not exist at this timel
 details-unavailable-revision = Details are unavailable for this presented revision.
 
 gas-makeup = Gas makeup
-gas-count-singular = 1 gas
-gas-count-plural = { $count } gases
+gas-count =
+    { $count ->
+        [one] { $count } gas
+       *[other] { $count } gases
+    }
 no-valid-amounts = No valid amounts
 vacuum = Vacuum
 

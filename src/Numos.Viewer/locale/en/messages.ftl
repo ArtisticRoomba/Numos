@@ -6,8 +6,16 @@ exception-message = { $context }: { $message }
 
 open-messages-logs = Open Messages / Logs.
 
-count-singular = { $number } { $noun }
-count-plural = { $number } { $noun }s
+error-count =
+    { $count ->
+        [one] { $count } error
+       *[other] { $count } errors
+    }
+warning-count =
+    { $count ->
+        [one] { $count } warning
+       *[other] { $count } warnings
+    }
 
 filter-messages = Filter messages...
 auto-scroll = Auto-scroll

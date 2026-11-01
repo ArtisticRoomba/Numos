@@ -25,4 +25,9 @@ common-world-topology = World & Topology
 common-yes = Yes
 common-no = No
 common-none = None
+tick-count =
+    { $count ->
+        [one] { $count } tick
+       *[other] { $count } ticks
+    }
 locale-name = English

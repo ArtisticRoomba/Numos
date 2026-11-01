@@ -25,4 +25,11 @@ common-world-topology = Мир и Топология
 common-yes = Да
 common-no = Нет
 common-none = Нет
+tick-count =
+    { $count ->
+        [one] { $count } тик
+        [few] { $count } тика
+        [many] { $count } тиков
+       *[other] { $count } тика
+    }
 locale-name = Русский

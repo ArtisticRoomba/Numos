@@ -93,7 +93,6 @@ internal static class QuantityFormat
 
     public static string Ticks(long ticks)
     {
-        string count = ticks.ToString(CultureInfo.InvariantCulture);
-        return ticks == 1 ? count + " tick" : count + " ticks";
+        return Locale.GetString("tick-count", ("count", ticks));
     }
 }

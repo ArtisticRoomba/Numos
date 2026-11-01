@@ -1,6 +1,10 @@
 ﻿three-d-voxel = 3D Voxel
 
-selected-voxel-count = { $count } voxels
+selected-voxel-count =
+    { $count ->
+        [one] { $count } voxel
+       *[other] { $count } voxels
+    }
 
 clear-cell = Clear Cell
 unassigned-classification = Unassigned (0)

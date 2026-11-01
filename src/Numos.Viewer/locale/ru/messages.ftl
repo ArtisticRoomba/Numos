@@ -6,8 +6,20 @@ exception-message = { $context }: { $message }
 
 open-messages-logs = Открыть Сообщения / Логи.
 
-count-singular = { $number } { $noun }
-count-plural = { $number } { $noun }
+error-count =
+    { $count ->
+        [one] { $count } ошибка
+        [few] { $count } ошибки
+        [many] { $count } ошибок
+       *[other] { $count } ошибки
+    }
+warning-count =
+    { $count ->
+        [one] { $count } предупреждение
+        [few] { $count } предупреждения
+        [many] { $count } предупреждений
+       *[other] { $count } предупреждения
+    }
 
 filter-messages = Отфильтровать сообщения...
 auto-scroll = Авто-скролл

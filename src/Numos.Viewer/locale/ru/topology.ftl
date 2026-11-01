@@ -41,7 +41,13 @@ topology-no-chunks = Нет чанков
 endpoint-chunk = {$label} чанк
 endpoint-face = {$label} лицо
 selected-connection-no-longer-exists = Выбранное соединение больше не существует.
-remove-connection-confirmation = Убрать этот {$kind} и его {$count} связь? Он перестанет работать на следующем мировом тике.
+remove-connection-confirmation =
+    Убрать этот {$kind} и { $count ->
+        [one] его { $count } связь
+        [few] его { $count } связи
+        [many] его { $count } связей
+       *[other] его { $count } связи
+    }? Он перестанет работать на следующем мировом тике.
 remove-connection = Убрать соединение
 queued-connection-removal = Соединение добавлено в очередь на удаление на следующем мировом тике.
 could-not-remove-connection = Не удалось убрать соединение: {$message}
