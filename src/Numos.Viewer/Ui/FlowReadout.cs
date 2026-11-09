@@ -12,8 +12,8 @@ namespace Numos.Viewer.Ui;
 internal readonly record struct FlowReadoutRow(string Label, string Value, bool IsWarning);
 
 /// <summary>
-///     Turns <see cref="AtmosFlowDiagnostics" /> into labelled rows for the simulation panel, kept out of the ImGui
-///     code so the formatting and the warning rules can be tested.
+///     Turns <see cref="AtmosFlowDiagnostics" /> into labelled rows for the Simulation properties. It stays out of the
+///     ImGui code so the formatting and the warning rules can be tested.
 /// </summary>
 internal static class FlowReadout
 {

@@ -34,6 +34,18 @@ public readonly record struct DockDefinition(
     ExplicitLinkFlags Flags,
     float? AreaFraction = null);
 
+/// <summary>
+///     What a solver pipeline edit did, with the message the session wrote to its log.
+/// </summary>
+/// <param name="Applied">
+///     The edit's yes-or-no outcome. Each <see cref="WorkbenchSession" /> solver method documents what it means.
+/// </param>
+/// <param name="Message">The log message, which a front end can show beside the control that made the edit.</param>
+/// <param name="Level">
+///     The log level of the message. <see cref="WorkbenchLogLevel.Warn" /> marks a partial or failed edit.
+/// </param>
+public readonly record struct SolverEditResult(bool Applied, string Message, WorkbenchLogLevel Level);
+
 public sealed partial class WorkbenchSession
 {
     /// <summary>
@@ -163,8 +175,11 @@ public sealed partial class WorkbenchSession
     /// <summary>
     ///     Enables or disables a solver stage by name.
     /// </summary>
-    /// <returns><see langword="true" /> when the stage exists.</returns>
-    public bool SetSolverEnabled(string name, bool enabled)
+    /// <returns>
+    ///     The logged message. <see cref="SolverEditResult.Applied" /> is <see langword="true" /> when the stage
+    ///     exists.
+    /// </returns>
+    public SolverEditResult SetSolverEnabled(string name, bool enabled)
     {
         return Guard(
             $"Could not change solver '{name}'",
@@ -172,13 +187,9 @@ public sealed partial class WorkbenchSession
             {
                 var world = RequireWorld();
                 ThrowIfInspecting();
-                bool found = world.Solvers.SetEnabled(name, enabled);
-                if (found)
-                    Info($"{(enabled ? "Enabled" : "Disabled")} solver '{name}'.");
-                else
-                    Warn($"Solver '{name}' does not exist.");
-
-                return found;
+                return world.Solvers.SetEnabled(name, enabled)
+                    ? SolverEdited(true, $"{(enabled ? "Enabled" : "Disabled")} solver '{name}'.")
+                    : SolverEdited(false, $"Solver '{name}' does not exist.", WorkbenchLogLevel.Warn);
             });
     }
 
@@ -187,14 +198,17 @@ public sealed partial class WorkbenchSession
     /// </summary>
     /// <param name="name">The stage name.</param>
     /// <param name="interval">Ticks between runs. Must be at least 1.</param>
-    /// <returns><see langword="true" /> when the stage exists.</returns>
+    /// <returns>
+    ///     The logged message. <see cref="SolverEditResult.Applied" /> is <see langword="true" /> when the stage
+    ///     exists.
+    /// </returns>
     /// <remarks>
     ///     The world records an actual change. Keep the interval of <c>advection</c> equal to that of
     ///     <c>boundary-flow</c>, and <c>thermodynamics</c> equal to <c>thermal-boundary</c>.
     ///     <see cref="SolverPipelineEditor.GetWarnings" /> reports a mismatch.
     /// </remarks>
     /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
-    public bool SetSolverInterval(string name, int interval)
+    public SolverEditResult SetSolverInterval(string name, int interval)
     {
         return Guard(
             $"Could not change the interval of solver '{name}'",
@@ -202,13 +216,9 @@ public sealed partial class WorkbenchSession
             {
                 var world = RequireWorld();
                 ThrowIfInspecting();
-                bool found = world.Solvers.SetInterval(name, interval);
-                if (found)
-                    Info($"Set solver '{name}' to run every {interval} ticks.");
-                else
-                    Warn($"Solver '{name}' does not exist.");
-
-                return found;
+                return world.Solvers.SetInterval(name, interval)
+                    ? SolverEdited(true, $"Set solver '{name}' to run every {interval} ticks.")
+                    : SolverEdited(false, $"Solver '{name}' does not exist.", WorkbenchLogLevel.Warn);
             });
     }
 
@@ -216,7 +226,10 @@ public sealed partial class WorkbenchSession
     ///     Replaces the order and enabled flags of the solver stages.
     /// </summary>
     /// <param name="stages">Every stage in the new order. See <see cref="AtmosWorldSolverPipeline.SetLayout" />.</param>
-    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
+    /// <returns>
+    ///     The logged message. <see cref="SolverEditResult.Applied" /> is <see langword="true" /> when the layout
+    ///     changed and <see langword="false" /> when it already matched.
+    /// </returns>
     /// <remarks>
     ///     The world records an actual change, so it replays at the same position.
     /// </remarks>
@@ -224,7 +237,7 @@ public sealed partial class WorkbenchSession
     ///     The world rejected the layout. The pipeline stays unchanged and the log holds the reason.
     /// </exception>
     /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
-    public bool SetSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    public SolverEditResult SetSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
     {
         ArgumentNullException.ThrowIfNull(stages);
         return Guard("Could not change the solver layout", () => ApplySolverLayout(stages));
@@ -234,7 +247,10 @@ public sealed partial class WorkbenchSession
     ///     Switches the transport stages to one model and keeps every other stage as it is.
     /// </summary>
     /// <param name="model">The transport model to run.</param>
-    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
+    /// <returns>
+    ///     The logged message. <see cref="SolverEditResult.Applied" /> is <see langword="true" /> when the layout
+    ///     changed and <see langword="false" /> when it already matched.
+    /// </returns>
     /// <remarks>
     ///     See <see cref="AtmosWorldSolverPipeline.ConvertTransportModel" /> for how the stages move.
     /// </remarks>
@@ -242,7 +258,7 @@ public sealed partial class WorkbenchSession
     ///     <paramref name="model" /> is not a defined model, or the world rejected the resulting layout.
     /// </exception>
     /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
-    public bool ApplyTransportPreset(AtmosTransportModel model)
+    public SolverEditResult ApplyTransportPreset(AtmosTransportModel model)
     {
         return Guard(
             "Could not apply the transport preset",
@@ -258,8 +274,8 @@ public sealed partial class WorkbenchSession
     ///     Restores the built-in solver stages, order, and enabled flags.
     /// </summary>
     /// <returns>
-    ///     <see langword="true" /> when the pipeline is back to its defaults. <see langword="false" /> when only the
-    ///     enabled flags could be restored.
+    ///     The logged message. <see cref="SolverEditResult.Applied" /> is <see langword="true" /> when the pipeline
+    ///     is back to its defaults and <see langword="false" /> when only the enabled flags could be restored.
     /// </returns>
     /// <param name="transportModel">
     ///     The built-in transport stages to install, or <see langword="null" /> to keep the model the stage list runs now.
@@ -270,7 +286,7 @@ public sealed partial class WorkbenchSession
     ///     timeline always records. In that case the session enables every stage and leaves the order and the custom
     ///     stages alone.
     /// </remarks>
-    public bool ResetSolvers(AtmosTransportModel? transportModel = null)
+    public SolverEditResult ResetSolvers(AtmosTransportModel? transportModel = null)
     {
         return Guard(
             "Could not reset the solvers",
@@ -287,15 +303,13 @@ public sealed partial class WorkbenchSession
                         .Select(static name => new AtmosWorldSolverLayoutEntry(name, true))
                         .ToArray());
 
-                    Info("Reset the solver pipeline to its defaults.");
-                    return true;
+                    return SolverEdited(true, "Reset the solver pipeline to its defaults.");
                 }
 
                 try
                 {
                     world.Solvers.ResetToDefaults(model);
-                    Info("Reset the solver pipeline to its defaults.");
-                    return true;
+                    return SolverEdited(true, "Reset the solver pipeline to its defaults.");
                 }
                 catch (InvalidOperationException)
                 {
@@ -305,18 +319,29 @@ public sealed partial class WorkbenchSession
                             world.Solvers.SetEnabled(step.Name, true);
                     }
 
-                    Warn("The world records, so the session enabled every solver stage and kept the stage order.");
-                    return false;
+                    return SolverEdited(
+                        false,
+                        "The world records, so the session enabled every solver stage and kept the stage order.",
+                        WorkbenchLogLevel.Warn);
                 }
             });
     }
 
-    private bool ApplySolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    private SolverEditResult ApplySolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
     {
         var world = RequireWorld();
         ThrowIfInspecting();
         bool changed = world.Solvers.SetLayout(stages);
-        Info(changed ? "Changed the solver layout." : "The solver layout already matches.");
-        return changed;
+        return SolverEdited(changed, changed ? "Changed the solver layout." : "The solver layout already matches.");
+    }
+
+    private SolverEditResult SolverEdited(
+        bool applied,
+        string message,
+        WorkbenchLogLevel level = WorkbenchLogLevel.Info)
+    {
+        DefinitionRevision++;
+        Log.Write(level, LogSource, message, null, World?.TickCount);
+        return new SolverEditResult(applied, message, level);
     }
 }

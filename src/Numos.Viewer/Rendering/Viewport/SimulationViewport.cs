@@ -81,17 +81,27 @@ public sealed class SimulationViewport : IDisposable
     /// <param name="firstUsePosition">Initial window position when no saved layout exists.</param>
     /// <param name="firstUseSize">Initial window size when no saved layout exists.</param>
     /// <param name="handleInteraction">Optional callback invoked while the image remains the current ImGui item.</param>
+    /// <param name="firstUseDockId">
+    ///     Dock node the window joins as a tab when no saved layout places it, or 0 to float at
+    ///     <paramref name="firstUsePosition" />.
+    /// </param>
     public void Draw(
         string title,
         Action renderScene,
         Vector2 firstUsePosition,
         Vector2 firstUseSize,
-        Action? handleInteraction = null)
+        Action? handleInteraction = null,
+        uint firstUseDockId = 0)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(renderScene);
 
-        ImGui.SetNextWindowPos(firstUsePosition, ImGuiCond.FirstUseEver);
+        // A first-use position undocks the window on its first frame, so a window that docks must not set one.
+        if (firstUseDockId != 0)
+            ImGui.SetNextWindowDockID(firstUseDockId, ImGuiCond.FirstUseEver);
+        else
+            ImGui.SetNextWindowPos(firstUsePosition, ImGuiCond.FirstUseEver);
+
         ImGui.SetNextWindowSize(firstUseSize, ImGuiCond.FirstUseEver);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
         const ImGuiWindowFlags windowFlags =

@@ -9,6 +9,8 @@ internal static class ImGuiExtensions
         ImGuiWindowFlags.AlwaysAutoResize |
         ImGuiWindowFlags.NoSavedSettings;
 
+    private const string ShortcutGap = "        ";
+
     /// <summary>
     ///     Flags for compact readout tables: columns fit their content and rows are separated by light rules.
     /// </summary>
@@ -18,9 +20,22 @@ internal static class ImGuiExtensions
         ImGuiTableFlags.NoSavedSettings;
 
     /// <summary>
+    ///     Draws a menu item with a shortcut hint and a clear gap between the label and the hint.
+    /// </summary>
+    /// <param name="label">The item label.</param>
+    /// <param name="shortcut">The shortcut text, such as <c>Ctrl+S</c>.</param>
+    /// <returns>True when the item was clicked.</returns>
+    public static bool MenuItemWithShortcut(string label, string shortcut)
+    {
+        // ImGui sizes the menu columns from ItemSpacing when the popup begins, so the gap cannot be changed
+        // per item without also changing the menu bar headers. Leading spaces widen the shortcut column instead.
+        return ImGui.MenuItem(label, ShortcutGap + shortcut);
+    }
+
+    /// <summary>
     ///     Begins a window whose ImGui ID comes from <paramref name="id" /> alone.
     /// </summary>
-    /// <param name="id">The stable window ID. It must match the ID in the default layout file.</param>
+    /// <param name="id">The stable window ID. Saved layouts refer to it, so it must not change.</param>
     /// <param name="title">The visible, possibly localized title.</param>
     /// <param name="isOpen">The open state shown by the close button.</param>
     /// <param name="firstUsePosition">The position used when no saved layout exists.</param>
@@ -75,7 +90,7 @@ internal static class ImGuiExtensions
         Action<string>? renderText = null)
     {
         float textWidth = ImGui.CalcTextSize(text).X;
-        float centeredX = (ImGui.GetWindowSize().X - textWidth) * 0.5f;
+        float centeredX = ImGui.GetCursorPosX() + Math.Max(0f, (ImGui.GetContentRegionAvail().X - textWidth) * 0.5f);
 
         ImGui.SetCursorPosX(centeredX);
         (renderText ?? ImGui.TextUnformatted)(text);
@@ -201,6 +216,33 @@ internal static class ImGuiExtensions
         if (table.IsVisible)
         {
             ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        }
+
+        return table;
+    }
+
+    /// <summary>
+    ///     Begins a two-column label/value table for a docked pane that can be narrow. The label column takes at most
+    ///     45% of the width and 12 font sizes, and the value column takes the rest. Text in both columns wraps at the
+    ///     cell edge, so a long label or value adds lines instead of being clipped. Fill it with
+    ///     <see cref="DefinitionRow(string, string)" />.
+    /// </summary>
+    /// <remarks>
+    ///     The widths come from the space left in the window, so do not use it in a tooltip or another window that
+    ///     sizes itself to its content. <see cref="BeginDefinitionTable" /> is the one for those.
+    /// </remarks>
+    /// <param name="id">Table ID, unique within the current window.</param>
+    public static TableScope BeginWrappedDefinitionTable(string id)
+    {
+        float labelWidth = Math.Min(ImGui.GetContentRegionAvail().X * 0.45f, ImGui.GetFontSize() * 12f);
+
+        // Wrap position 0 wraps at the right edge of the current table cell.
+        ImGui.PushTextWrapPos(0f);
+        var table = new TableScope(ImGui.BeginTable(id, 2, ReadoutTableFlags));
+        if (table.IsVisible)
+        {
+            ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, Math.Max(labelWidth, 1f));
             ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
         }
 

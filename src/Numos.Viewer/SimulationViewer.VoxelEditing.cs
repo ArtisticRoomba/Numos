@@ -6,6 +6,7 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering.Viewport;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Raylib_cs;
 
 namespace Numos.Viewer;
@@ -23,10 +24,19 @@ public partial class SimulationViewer
             return;
         }
 
-        if (_viewport.IsHovered)
-            _hovered3DCell = Pick3DVoxel(_viewport);
+        var previousPlanes = ApplyClipPlanes();
+        try
+        {
+            if (_viewport.IsHovered)
+                _hovered3DCell = Pick3DVoxel(_viewport);
 
-        HandleVoxelPointer(_viewport, _hovered3DCell, 3);
+            HandleVoxelPointer(_viewport, _hovered3DCell, 3);
+        }
+        finally
+        {
+            RestoreClipPlanes(previousPlanes);
+        }
+
         RebuildHighlights();
     }
 
@@ -106,15 +116,35 @@ public partial class SimulationViewer
                (!_focusedChunk.HasValue || chunk.Identity == _focusedChunk.Value);
     }
 
+    /// <summary>
+    ///     Handles the mouse over a viewport: the portal endpoint pick, the right-click voxel menu, and the active
+    ///     voxel tool.
+    /// </summary>
+    /// <param name="viewport">The viewport under the pointer.</param>
+    /// <param name="hovered">The voxel under the pointer, if any.</param>
+    /// <param name="viewportKind">3 for a 3D viewport, 2 for the slice view. A drag stays with the view it began in.</param>
     private void HandleVoxelPointer(SimulationViewport viewport, VoxelAddress? hovered, int viewportKind)
     {
-        bool canEdit = _session.Timeline?.IsInspecting != true;
+        var action = VoxelTools.GetPointerAction(_document.PortalCapture.IsArmed, _voxelEditTool);
+        if (action == VoxelPointerAction.PortalPick)
+        {
+            HandlePortalEndpointPick(viewport, hovered, viewportKind);
+            return;
+        }
+
+        bool canEdit = !IsEditingBlocked;
         if (viewport.IsHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right) && hovered.HasValue)
         {
             if (!_selectedCells.Contains(hovered.Value))
                 SetSingleVoxelSelection(hovered.Value);
 
             ImGui.OpenPopup("Voxel Actions##voxel-context");
+        }
+
+        if (action == VoxelPointerAction.Ignite)
+        {
+            HandleIgnitePointer(viewport, hovered, viewportKind, canEdit);
+            return;
         }
 
         if (viewport.IsHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -150,6 +180,54 @@ public partial class SimulationViewer
         _voxelDragViewport = 0;
         _paintedCells.Clear();
         _lastPaintedCell = null;
+    }
+
+    /// <summary>
+    ///     Ignites the voxel under the pointer when a left click presses and releases on the same voxel. A drag
+    ///     ignites nothing, so a camera drag cannot start a fire by accident.
+    /// </summary>
+    private void HandleIgnitePointer(SimulationViewport viewport, VoxelAddress? hovered, int viewportKind, bool canEdit)
+    {
+        if (viewport.IsHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            _voxelDragAnchor = hovered;
+            _voxelDragViewport = viewportKind;
+        }
+
+        if (_voxelDragViewport != viewportKind || !ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            return;
+
+        if (canEdit && hovered is { } address && address == _voxelDragAnchor)
+            IgniteVoxel(address);
+
+        _voxelDragAnchor = null;
+        _voxelDragViewport = 0;
+    }
+
+    /// <summary>
+    ///     Ignites one voxel of the active simulation with the toolbar's ignition temperature and volume.
+    /// </summary>
+    private void IgniteVoxel(VoxelAddress address)
+    {
+        if (!(_ignitionTemperature > 0f) || !(_ignitionVolume > 0f))
+        {
+            _document.VoxelFeedback = Report(Locale.GetString("ignition-positive-temperature-volume-required"), true);
+            return;
+        }
+
+        if (_drawData == null ||
+            !_drawData.Chunks.TryGetValue(address.Chunk.Position, out var chunk) ||
+            chunk.Identity != address.Chunk)
+            return;
+
+        var coordinates = chunk.GetCoordinates(address.LocalIndex);
+        IgniteProjectSource(
+            new AtmosChunkHandle(chunk.ChunkPosition),
+            coordinates.X,
+            coordinates.Y,
+            coordinates.Z,
+            _ignitionTemperature,
+            _ignitionVolume);
     }
 
     private void DrawSelectionRectangle(SimulationViewport viewport)
@@ -308,7 +386,10 @@ public partial class SimulationViewer
                 : _selectedCells.Cast<VoxelAddress?>().FirstOrDefault();
 
             if (_selectedCell.HasValue)
+            {
                 SyncVoxelDraft(_selectedCell.Value);
+                SelectChunk(_selectedCell.Value.Chunk.Position);
+            }
 
             RebuildHighlights();
             return;
@@ -323,6 +404,7 @@ public partial class SimulationViewer
         _selectedCells.Add(address);
         _selectedCell = address;
         SyncVoxelDraft(address);
+        SelectChunk(address.Chunk.Position);
         RebuildHighlights();
     }
 
@@ -339,7 +421,10 @@ public partial class SimulationViewer
             : _selectedCells.Cast<VoxelAddress?>().FirstOrDefault();
 
         if (_selectedCell.HasValue)
+        {
             SyncVoxelDraft(_selectedCell.Value);
+            SelectChunk(_selectedCell.Value.Chunk.Position);
+        }
 
         RebuildHighlights();
     }
@@ -412,7 +497,8 @@ public partial class SimulationViewer
             return;
 
         ImGui.TextDisabled(Locale.GetString("selected-voxel-count", ("count", _selectedCells.Count)));
-        if (_session.Timeline?.IsInspecting == true)
+        bool editingBlocked = IsEditingBlocked;
+        if (editingBlocked)
             ImGui.BeginDisabled();
 
         RenderContextInjectionMenu();
@@ -445,7 +531,7 @@ public partial class SimulationViewer
         if (ImGui.MenuItem(Locale.GetString("set-temperature", ("temperature", _injectionTemperature.ToString("F1")))))
             ApplyTemperature(_selectedCells, _injectionTemperature);
 
-        if (_session.Timeline?.IsInspecting == true)
+        if (editingBlocked)
             ImGui.EndDisabled();
 
         ImGui.Separator();
@@ -469,29 +555,29 @@ public partial class SimulationViewer
 
         if (ImGui.MenuItem(Locale.GetString("start-portal-here")))
         {
-            _portalFirst = selected;
-            _portalSecond = null;
-            _topologyFeedback = null;
+            _document.Topology.PortalFirst = selected;
+            _document.Topology.PortalSecond = null;
+            _document.TopologyFeedback = null;
         }
 
-        bool canCreate = _portalFirst.HasValue && GetTopologyFlags() != ExplicitLinkFlags.None;
+        bool canCreate = _document.Topology.PortalFirst.HasValue && GetTopologyFlags() != ExplicitLinkFlags.None;
         ImGui.BeginDisabled(!canCreate);
         if (ImGui.MenuItem(Locale.GetString("create-portal-to-here")))
         {
-            _portalSecond = selected;
+            _document.Topology.PortalSecond = selected;
             CreatePortalFromCapturedEndpoints();
         }
 
         ImGui.EndDisabled();
 
         ImGui.Separator();
-        if (_portalFirst.HasValue)
-            ImGui.TextDisabled(Locale.GetString("portal-first-endpoint", ("cell", FormatCell(_portalFirst.Value).Replace('\n', ' '))));
+        if (_document.Topology.PortalFirst.HasValue)
+            ImGui.TextDisabled(Locale.GetString("portal-first-endpoint", ("cell", FormatCell(_document.Topology.PortalFirst.Value).Replace('\n', ' '))));
         else
             ImGui.TextDisabled(Locale.GetString("portal-first-endpoint-instruction"));
 
         if (GetTopologyFlags() == ExplicitLinkFlags.None)
-            ImGui.TextDisabled(Locale.GetString("enable-transport-mode-in-world-topology"));
+            ImGui.TextDisabled(Locale.GetString("enable-transport-mode-in-topology"));
 
         ImGui.EndMenu();
     }
@@ -501,14 +587,14 @@ public partial class SimulationViewer
         if (!ImGui.BeginMenu(Locale.GetString("inject")))
             return;
 
-        if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
+        if (Gases.Count == 0)
         {
             ImGui.TextDisabled(Locale.GetString("no-gases-registered"));
             ImGui.EndMenu();
             return;
         }
 
-        for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
+        for (int gasId = 0; gasId < Gases.Count; gasId++)
         {
             ImGui.PushID(gasId);
             if (ImGui.BeginMenu(FormatGas(gasId)))
@@ -548,18 +634,18 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             Locale.GetString("set-classification-action", ("classification", classification)),
-            cells => _session.SetVoxelClassification(cells, classification));
+            (session, cells, id) => session.SetVoxelClassification(cells, classification, id));
     }
 
     private void ApplyGasInjection(IEnumerable<VoxelAddress> addresses)
     {
-        if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
+        if (Gases.Count == 0)
         {
-            _voxelFeedback = Report(Locale.GetString("register-gas-before-injecting-voxels"), true);
+            _document.VoxelFeedback = Report(Locale.GetString("register-gas-before-injecting-voxels"), true);
             return;
         }
 
-        _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
+        _injectionGasId = Math.Clamp(_injectionGasId, 0, Gases.Count - 1);
         ApplyGasInjection(addresses, _injectionGasId, _injectionMoles, _injectionTemperature);
     }
 
@@ -572,17 +658,23 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             Locale.GetString("injected-gas-into", ("moles", moles.ToString("G4")), ("gas", FormatGas(gasId))),
-            cells => _session.AddVoxelGas(cells, gasId, moles, temperature));
+            (session, cells, id) => session.AddVoxelGas(cells, gasId, moles, temperature, id));
     }
 
     private void ApplyClearGas(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(addresses, Locale.GetString("cleared-gas-from"), cells => _session.ClearVoxelGas(cells));
+        ApplyVoxelMutation(
+            addresses,
+            Locale.GetString("cleared-gas-from"),
+            static (session, cells, id) => session.ClearVoxelGas(cells, id));
     }
 
     private void ApplyClearCell(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(addresses, Locale.GetString("cleared-cells"), cells => _session.ClearVoxelCells(cells));
+        ApplyVoxelMutation(
+            addresses,
+            Locale.GetString("cleared-cells"),
+            static (session, cells, id) => session.ClearVoxelCells(cells, id));
     }
 
     private void ApplyTemperature(IEnumerable<VoxelAddress> addresses, float temperature)
@@ -590,29 +682,39 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             Locale.GetString("set-temperature-for", ("temperature", temperature.ToString("F1"))),
-            cells => _session.SetVoxelTemperature(cells, temperature));
+            (session, cells, id) => session.SetVoxelTemperature(cells, temperature, id));
     }
 
+    /// <summary>
+    ///     Sends a voxel edit for the active simulation.
+    /// </summary>
+    /// <param name="addresses">The voxels. The cells are copied before the command is queued.</param>
+    /// <param name="action">The localized action for the feedback line.</param>
+    /// <param name="mutation">
+    ///     Runs on the host thread with the cells and the simulation id, and returns how many voxels it edited. It must
+    ///     capture only copied values.
+    /// </param>
     private void ApplyVoxelMutation(
         IEnumerable<VoxelAddress> addresses,
         string action,
-        Func<IReadOnlyCollection<VoxelCell>, int> mutation)
+        Func<WorkbenchSession, IReadOnlyCollection<VoxelCell>, AtmosSimulationId, int> mutation)
     {
         VoxelCell[] targets = addresses.Select(VoxelCell.From).Distinct().ToArray();
-        if (targets.Length == 0 || _simulation == null || _session.IsInspecting)
+        if (targets.Length == 0 || _simulation is not { } simulation || IsEditingBlocked)
             return;
 
-        try
-        {
-            int edited = mutation(targets);
-            _voxelFeedback = new FeedbackMessage(
-                Locale.GetString("voxel-mutation-feedback", ("action", action), ("edited", edited)),
-                false);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            // The session already logged the failure.
-        }
+        var id = simulation.Id;
+        Send(
+            session => mutation(session, targets, id),
+            result =>
+            {
+                // A failure is already in the log.
+                if (result.Succeeded)
+                {
+                    _document.VoxelFeedback = new FeedbackMessage(
+                        Locale.GetString("voxel-mutation-feedback", ("action", action), ("edited", result.Value)),
+                        false);
+                }
+            });
     }
 }

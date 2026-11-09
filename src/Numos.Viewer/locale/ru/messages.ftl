@@ -1,6 +1,7 @@
 ﻿unhandled-exception = Необработанное исключение
 unhandled-exception-message = Необработанное исключение: { $exception }
 unobserved-task-exception = Исключение ненаблюдаемой задачи
+draw-data-build-failed = Не удалось построить данные отрисовки
 source-runtime = Среда выполнения
 exception-message = { $context }: { $message }
 
@@ -32,3 +33,6 @@ tick = Тик
 level = Уровень
 source = Источник
 message = Сообщение
+icon-sheet-error = Не удалось загрузить лист значков { $path }: { $reason }. Значки скрыты.
+icon-sheet-missing = файл не существует
+icon-sheet-size = ожидалось не менее { $width } x { $height } пикселей, найдено { $actualWidth } x { $actualHeight }

@@ -203,13 +203,10 @@ public partial class SimulationViewer
 
         ImGuiExtensions.QuestionTooltip(Locale.GetString("save-current-layout-tooltip"));
 
-#if DEBUG || TOOLS
-        ImGui.Spacing();
-        if (ImGui.Button(Locale.GetString("save-as-default-preset")))
-            SavePackagedDefaultLayout();
+        if (ImGui.Button(Locale.GetString("layout-reset-menu")))
+            RequestLayoutReset();
 
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("save-as-default-preset-tooltip"));
-#endif
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("layout-reset-tooltip"));
     }
 
     private static (int Width, int Height)[] GetTargetResolutions()

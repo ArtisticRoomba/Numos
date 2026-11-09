@@ -21,7 +21,7 @@ start-portal-here = Начать Портал здесь
 create-portal-to-here = Создать Портал сюда
 portal-first-endpoint = От: { $cell }
 portal-first-endpoint-instruction = Начать портал от его первого края.
-enable-transport-mode-in-world-topology = Включить режим передвижения в Мире и Топологии.
+enable-transport-mode-in-topology = Включите режим передачи в свойствах топологии.
 
 inject = Впрыснуть
 no-gases-registered = Нет зарегистрированных газов

@@ -1,56 +1,40 @@
+using System.Diagnostics;
 using ImGuiNET;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private const string LayoutFileName = "imgui.ini";
-    private const string PackageDefaultLayoutFileName = "imgui-default.ini";
-#if DEBUG || TOOLS
-    private string? _packagedDefaultLayoutPath;
-#endif
-
-    private string? _userLayoutPath;
+    private readonly LayoutAutosave _layoutAutosave = new(TimeSpan.FromSeconds(2));
+    private LayoutStore? _layoutStore;
 
     /// <summary>
-    ///     Loads the per-user ImGui layout, first copying the packaged default into place when the user has no saved
-    ///     layout yet.
+    ///     Loads the per-user layout. Call it after <see cref="ImGuiIOPtr.IniFilename" /> is cleared and before the
+    ///     first frame. Without a saved layout, the workspace builds the default one on the first frame.
     /// </summary>
     private void ConfigureLayoutPersistence()
     {
-        string settingsDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Numos");
+        _layoutStore = LayoutStore.CreateForCurrentUser();
 
-        Directory.CreateDirectory(settingsDirectory);
-
-        _userLayoutPath = Path.Combine(settingsDirectory, LayoutFileName);
-        string packagedLayoutPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "assets",
-            PackageDefaultLayoutFileName);
-#if DEBUG || TOOLS
-        _packagedDefaultLayoutPath = FindPackagedDefaultLayoutSourcePath();
-#endif
-
-        if (!File.Exists(_userLayoutPath) && File.Exists(packagedLayoutPath))
-            File.Copy(packagedLayoutPath, _userLayoutPath);
-
-        if (File.Exists(_userLayoutPath))
+        // ImGui counts its save delay in frame time, which stops while the viewer waits for events. The smallest
+        // positive rate makes it report a change on the next frame, and LayoutAutosave applies the delay instead.
+        ImGui.GetIO().IniSavingRate = float.Epsilon;
+        try
         {
-            string saved = File.ReadAllText(_userLayoutPath);
-            string migrated = LayoutMigration.Migrate(saved);
-            if (!ReferenceEquals(saved, migrated))
-                File.WriteAllText(_userLayoutPath, migrated);
-
-            ImGui.LoadIniSettingsFromDisk(_userLayoutPath);
+            if (_layoutStore.Load() is { } ini)
+                ImGui.LoadIniSettingsFromMemory(ini);
+        }
+        catch (Exception ex)
+        {
+            WriteException(Locale.GetString("imgui-layout-load-error"), ex);
         }
     }
 
     private void SaveCurrentLayout()
     {
-        if (_userLayoutPath == null)
+        if (_layoutStore == null)
         {
             WriteMessage(WorkbenchLogLevel.Error, "Layout", Locale.GetString("imgui-layout-not-initialized-error"));
             return;
@@ -58,7 +42,7 @@ public partial class SimulationViewer
 
         try
         {
-            ImGui.SaveIniSettingsToDisk(_userLayoutPath);
+            WriteLayout(_layoutStore);
             WriteMessage(WorkbenchLogLevel.Info, "Layout", Locale.GetString("imgui-layout-saved"));
         }
         catch (Exception ex)
@@ -67,48 +51,48 @@ public partial class SimulationViewer
         }
     }
 
-#if DEBUG || TOOLS
     /// <summary>
-    ///     Saves the active arrangement as the source layout included with future publishes.
-    ///     New users receive this layout only when they do not yet have a saved layout.
+    ///     Saves the layout a short time after ImGui reports a change, such as a window that moved or docked. Call it
+    ///     after the frame ends and before the frame pacing is applied.
     /// </summary>
-    private void SavePackagedDefaultLayout()
+    /// <remarks>
+    ///     ImGui sets <see cref="ImGuiIOPtr.WantSaveIniSettings" /> instead of writing a file because
+    ///     <see cref="ImGuiIOPtr.IniFilename" /> is null. It does not clear the flag itself. While a save is pending,
+    ///     this requests frames, so a viewer that waits for events still writes the file.
+    /// </remarks>
+    private void AutosaveLayout()
     {
-        if (_packagedDefaultLayoutPath == null)
+        if (_layoutStore == null)
+            return;
+
+        var io = ImGui.GetIO();
+        TimeSpan now = Stopwatch.GetElapsedTime(0);
+        if (io.WantSaveIniSettings)
         {
-            WriteMessage(WorkbenchLogLevel.Error, "Layout", Locale.GetString("imgui-layout-not-initialized-error"));
+            io.WantSaveIniSettings = false;
+            _layoutAutosave.MarkChanged(now);
+        }
+
+        if (!_layoutAutosave.TryTakeDueSave(now))
+        {
+            if (_layoutAutosave.IsPending)
+                RequestNextFrame();
+
             return;
         }
 
         try
         {
-            ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(WorkbenchLogLevel.Info, "Layout", Locale.GetString("imgui-layout-saved-packaged"));
+            WriteLayout(_layoutStore);
         }
         catch (Exception ex)
         {
-            WriteException(Locale.GetString("imgui-layout-save-error-packaged"), ex);
+            WriteException(Locale.GetString("imgui-layout-save-error"), ex);
         }
     }
 
-    private static string? FindPackagedDefaultLayoutSourcePath()
+    private static void WriteLayout(LayoutStore store)
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            string projectFilePath = Path.Combine(directory.FullName, "Numos.Viewer.csproj");
-            string layoutFilePath = Path.Combine(
-                directory.FullName,
-                "assets",
-                PackageDefaultLayoutFileName);
-
-            if (File.Exists(projectFilePath) && File.Exists(layoutFilePath))
-                return layoutFilePath;
-
-            directory = directory.Parent;
-        }
-
-        return null;
+        store.Save(ImGui.SaveIniSettingsToMemory());
     }
-#endif
 }

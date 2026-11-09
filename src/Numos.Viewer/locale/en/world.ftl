@@ -1,9 +1,4 @@
-﻿active-label =  (Active)
-active-links-label = ACTIVE LINKS
-topology-version-label = TOPOLOGY VERSION
-simulation-label = SIMULATION
-chunk-size-label = CHUNK SIZE
-world-no-simulations = This world has no simulations.
+﻿active-links-label = ACTIVE LINKS
 remove-simulation-button = Remove Simulation
 remove-simulation-tooltip = Removes the selected simulation, its chunks, and every link connected to it.
 chunk-width-label = Chunk width

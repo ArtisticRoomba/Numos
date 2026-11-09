@@ -2,7 +2,6 @@
 viewer-description-line-two = pseudo-realistic, voxel-based atmospherics simulation library.
 viewer-description = An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.
 no-simulation-loaded = No simulation is currently loaded.
-create-workspace-instruction = Choose File > New Simulation to create a workspace.
 
 about = About
 authors = Authors
@@ -34,17 +33,12 @@ save-replay = Save Replay...
 exit = Exit
 
 view = View
-solution = Solution
 three-d-viewport = 3D Viewport
-two-d-slice-viewport = 2D Slice Viewport
 
 settings = Settings
 help = Help
 
 visualization = Visualization
-rendering-style = Rendering style
-three-d-focus = 3D focus
-two-d-slice = 2D slice
 show-slice-viewport = Show slice viewport
 
 three-dimensional = 3D
@@ -61,14 +55,9 @@ velocity-arrows-tooltip = Draws at most { $max-arrows } arrows. A larger scene s
 arrow-scale = Arrow scale
 velocity-arrow-scale-tooltip = Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. Arrows longer than { $max-length } voxels are capped and keep only their direction.
 
-solver-pipeline = Solver Pipeline
-project-section = Project
-tick-rate-display = Tick rate: { $rate } Hz
 tick-rate-description = Ticks per second of simulated time. The rate is set when the project is created.
 tick-rate-error = The tick rate must be a multiple of 20 from 20 to 100000.
 atmos-config = AtmosConfig
-configuration-apply-instructions = Values apply on Enter, when a field loses focus, or when a slider is released.
-gas-registry = Gas Registry
 
 reset-configuration-success = Reset every AtmosConfig setting to the library defaults.
 reset-configuration-failure = Could not reset the settings: { $reason }
@@ -77,22 +66,15 @@ config-value-minimum-error = {$field} must be 0 or more. The previous value is s
 config-field-set-feedback = {$field} set to {$value}.
 config-field-apply-error = Could not apply {$field}: {$error}
 
-viewing = Viewing
-editing = Editing
-simulation-inspection-status = {$mode} {$simulation}
-chunks-section = Chunks
-voxel-tools-section = Voxel Tools
-
-viewport-tool-label = Viewport tool
 select-box-tool = Select / Box
 paint-room-tool = Paint Room
 paint-gas-tool = Paint Gas
 erase-gas-tool = Erase Gas
 classification-label = Classification
+toolbar-room-id-label = Room ID
 amount-mol-label = Amount (mol)
 temperature-k-label = Temperature (K)
 
-selection-section = Selection
 no-voxels-selected = No voxels selected.
 voxels-selected =
     { $count ->
@@ -169,8 +151,6 @@ none = none
 gas-name-id = { $name } ({ $id })
 gas-id = Gas { $id }
 
-simulation-state = Simulation State
-no-chunks-in-simulation = No chunks in this simulation.
 waiting-for-chunk-snapshot = Waiting for a chunk snapshot.
 dimensions = Dimensions
 voxel-dimensions = { $x } × { $y } × { $z } voxels

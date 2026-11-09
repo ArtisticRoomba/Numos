@@ -16,6 +16,7 @@ public sealed partial class WorkbenchSession
         var world = RequireWorld();
         ThrowIfInspecting();
         world.SetAtmosConfig(Config!);
+        DefinitionRevision++;
     }
 
     /// <summary>
@@ -29,9 +30,44 @@ public sealed partial class WorkbenchSession
     /// </remarks>
     public bool TryApplyConfiguration(out string? error)
     {
+        return TryApply(ApplyConfiguration, out error);
+    }
+
+    /// <summary>
+    ///     Applies a candidate configuration to the world and copies the applied values into <see cref="Config" />.
+    /// </summary>
+    /// <param name="candidate">
+    ///     The configuration to apply. The world takes a snapshot of it, so the caller can keep editing it afterwards.
+    /// </param>
+    /// <param name="error">Why the world rejected the configuration, or <see langword="null" /> on success.</param>
+    /// <returns><see langword="true" /> when the world accepted the configuration.</returns>
+    /// <remarks>
+    ///     A front end edits a copy made with <see cref="AtmosConfig(AtmosConfigSnapshot)" /> and passes it here.
+    ///     On failure the world and <see cref="Config" /> both keep their previous values, so nothing needs undoing.
+    ///     On success <see cref="Config" /> holds the values the world normalized, and any edit made to it in place
+    ///     is gone.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="candidate" /> is <see langword="null" />.</exception>
+    public bool TryApplyConfiguration(AtmosConfig candidate, out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        return TryApply(
+            () =>
+            {
+                var world = RequireWorld();
+                ThrowIfInspecting();
+                world.SetAtmosConfig(candidate);
+                DefinitionRevision++;
+                SyncConfigFromWorld();
+            },
+            out error);
+    }
+
+    private bool TryApply(Action apply, out string? error)
+    {
         try
         {
-            ApplyConfiguration();
+            apply();
             error = null;
             Info("Applied the atmosphere configuration.");
             return true;

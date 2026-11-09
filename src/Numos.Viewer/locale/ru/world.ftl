@@ -1,9 +1,4 @@
-﻿active-label =  (Активная)
-active-links-label = АКТИВНЫЕ ССЫЛКИ
-topology-version-label = ВЕРСИЯ ТОПОЛОГИИ
-simulation-label = СИМУЛЯЦИЯ
-chunk-size-label = РАЗМЕР ЧАНКА
-world-no-simulations = У этого мира нет симуляций.
+﻿active-links-label = АКТИВНЫЕ ССЫЛКИ
 remove-simulation-button = Удалить Симуляцию
 remove-simulation-tooltip = Удаляет выбранную симуляцию, её чанки, и все ссылки соединённые с ней.
 chunk-width-label = Ширина чанка

@@ -5,6 +5,7 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
@@ -28,47 +29,49 @@ public partial class SimulationViewer
         (TimelineLegendMarker.Playhead, "Selected tick", 3),
         (TimelineLegendMarker.Divergence, "Divergent", 0)
     ];
+    /// <summary>
+    ///     How long the viewer keeps drawing after a scrub seek. A longer seek shows up as busy before then, and the
+    ///     busy state keeps the viewer drawing.
+    /// </summary>
+    private readonly static TimeSpan ScrubSeekRenderDuration = TimeSpan.FromSeconds(1);
+
     private readonly TimelineOperationIndex _operationIndex = new();
 
     private bool _keepTimelinePlayheadCentered;
-    private long? _pendingScrubTick;
-    private bool _refreshingReplay;
     private bool _showBranchHistory;
     private bool _showTimelinePanel = true;
     private bool _simulateWhileScrubbing = true;
-    private string? _timelineError;
-    private long _timelineFirstTick;
-    private AtmosWorldRecordedOperation? _timelineOperation;
     private long _timelineVisibleTicks = TimelineTiming.MinimumVisibleTicks;
     private float _timelineVisibleSeconds = TimelineTiming.DefaultVisibleSeconds;
     private int _timelineStepMilliseconds = TimelineTiming.DefaultStepMilliseconds;
 
     private void RenderTimelinePanel()
     {
-        if (!_showTimelinePanel || _session.Timeline == null || _session.Branches == null)
+        if (!_showTimelinePanel)
             return;
 
-        var timeline = _session.Timeline;
-        UpdateTimelineWindow();
+        if (_frame.Timeline != null)
+            UpdateTimelineWindow();
+
         var viewport = ImGui.GetMainViewport();
-        using var window = ImGuiExtensions.BeginWindow(
-            "replay",
-            Locale.GetString("timeline-window"),
+        PrepareTimelineTabSelection();
+        using var window = BeginPane(
+            WorkspacePanels.Timeline,
             ref _showTimelinePanel,
             viewport.WorkPos + new Vector2(320, Math.Max(0, viewport.WorkSize.Y - 430)),
             new Vector2(900, 420));
 
-        if (!window.IsVisible)
+        FinishTimelineTabSelection(window.IsVisible);
+        if (!window.IsVisible || DrawPanePlaceholder() || _frame.Timeline is not { } timeline)
             return;
 
-        DrawTimelinePositionReadout(timeline, _session.Branches.SelectedBranch);
+        DrawTimelinePositionReadout(timeline, GetSelectedBranch());
         ImGui.SeparatorText(Locale.GetString("timeline-branches"));
-        DrawTimelineBranchControls();
-        timeline = _session.Timeline;
+        DrawTimelineBranchControls(timeline);
 
         ImGui.SeparatorText(Locale.GetString("timeline-transport"));
         DrawTimelineTransport(timeline);
-        ImGuiExtensions.Feedback(_timelineError, true);
+        ImGuiExtensions.Feedback(_document.TimelineError, true);
 
         ImGui.SeparatorText(Locale.GetString("common-range"));
         long selectedTick = checked((long)timeline.Position.Tick);
@@ -94,7 +97,7 @@ public partial class SimulationViewer
             ImGui.SetNextItemWidth(-1f);
             float maximumSeconds = MathF.Max(
                 TimelineTiming.DefaultVisibleSeconds,
-                (float)GetTimelineTime(_session.Branches.MaximumHeadTick));
+                (float)GetTimelineTime(timeline.MaximumHeadTick));
             _timelineVisibleSeconds = Math.Clamp(_timelineVisibleSeconds, 0.01f, maximumSeconds);
             ImGui.SliderFloat(
                 "##timeline-visible-seconds",
@@ -118,14 +121,14 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(_keepTimelinePlayheadCentered);
         SliderTick(
             "##timeline-first-visible-tick",
-            ref _timelineFirstTick,
+            ref _document.TimelineFirstTick,
             checked((long)timeline.Start.Tick),
-            Math.Max(checked((long)timeline.Start.Tick), checked((long)_session.Branches.MaximumHeadTick)));
+            Math.Max(checked((long)timeline.Start.Tick), checked((long)timeline.MaximumHeadTick)));
 
         ImGui.EndDisabled();
 
         if (ImGui.Checkbox(Locale.GetString("timeline-simulate-while-scrubbing"), ref _simulateWhileScrubbing))
-            _pendingScrubTick = null;
+            _document.PendingScrubTick = null;
 
         ImGuiExtensions.QuestionTooltip(
             _simulateWhileScrubbing
@@ -143,12 +146,12 @@ public partial class SimulationViewer
         else
             DrawTimelineTrack(timeline);
 
-        if (_pendingScrubTick.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        if (_document.PendingScrubTick.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
             if (!_simulateWhileScrubbing)
-                SeekTimelineTick((ulong)_pendingScrubTick.Value);
+                SeekTimelineTick((ulong)_document.PendingScrubTick.Value);
 
-            _pendingScrubTick = null;
+            _document.PendingScrubTick = null;
         }
 
         DrawReplayStatus(timeline);
@@ -156,9 +159,12 @@ public partial class SimulationViewer
     }
 
     private static void DrawTimelinePositionReadout(
-        AtmosWorldReplayTimeline timeline,
-        ReplayBranchInfo branch)
+        WorkbenchTimelineFrame timeline,
+        ReplayBranchInfo? selectedBranch)
     {
+        if (selectedBranch is not { } branch)
+            return;
+
         if (!ImGui.BeginTable(
                 "TimelinePositions##replay",
                 5,
@@ -192,14 +198,14 @@ public partial class SimulationViewer
         ImGui.EndTable();
     }
 
-    private void DrawTimelineBranchControls()
+    private void DrawTimelineBranchControls(WorkbenchTimelineFrame timeline)
     {
-        var branches = _session.Branches!;
-        var selected = branches.SelectedBranch;
+        string selectedName = GetSelectedBranch()?.Name ?? string.Empty;
+        ImGui.BeginDisabled(IsBusy);
         ImGui.SetNextItemWidth(190f);
-        if (ImGui.BeginCombo(Locale.GetString("timeline-selected-branch"), selected.Name))
+        if (ImGui.BeginCombo(Locale.GetString("timeline-selected-branch"), selectedName))
         {
-            IReadOnlyList<ReplayBranchInfo> branchList = branches.Branches;
+            IReadOnlyList<ReplayBranchInfo> branchList = timeline.Branches;
             float nameWidth = 0f;
             float forkWidth = 0f;
             foreach (var branch in branchList)
@@ -237,10 +243,11 @@ public partial class SimulationViewer
         ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-branch-from-tick-tooltip"));
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(!branches.CanContinueSelectedBranch);
+        ImGui.BeginDisabled(!timeline.CanContinueSelectedBranch);
         if (ImGui.Button(Locale.GetString("timeline-continue-branch"), new Vector2(130f, 0f)))
             ContinueTimelineBranch();
 
+        ImGui.EndDisabled();
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("timeline-continue-branch-tooltip"));
     }
@@ -257,13 +264,14 @@ public partial class SimulationViewer
         ImGui.TextDisabled(Locale.GetString("timeline-through-operation", ("sequence", position.OperationSequence)));
     }
 
-    private void DrawTimelineTransport(AtmosWorldReplayTimeline timeline)
+    private void DrawTimelineTransport(WorkbenchTimelineFrame timeline)
     {
         bool atStart = timeline.Position.Tick <= timeline.Start.Tick;
         bool atHead = timeline.Position == timeline.Head;
         bool isLive = !timeline.IsInspecting;
+        bool busy = IsBusy;
 
-        ImGui.BeginDisabled(atStart);
+        ImGui.BeginDisabled(atStart || busy);
         if (ImGui.Button(Locale.GetString("timeline-start-button"), new Vector2(76f, 0f)))
             SeekTimelineTick(timeline.Start.Tick);
 
@@ -277,19 +285,23 @@ public partial class SimulationViewer
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button(_isPaused ? Locale.GetString("timeline-play-button") : Locale.GetString("common-pause"), new Vector2(76f, 0f)))
-            _isPaused = !_isPaused;
+        // A busy host shows Pause, so a long step can be stopped from here.
+        bool paused = _frame.RunState == WorkbenchRunState.Paused;
+        if (ImGui.Button(paused ? Locale.GetString("timeline-play-button") : Locale.GetString("common-pause"), new Vector2(76f, 0f)))
+        {
+            if (paused)
+                RunHost();
+            else
+                PauseHost();
+        }
 
         ImGui.SameLine();
 
         // Forward is disabled only while live playback is running. A paused live branch, or any inspected position
-        // (including the head, where StepTimelineForward no-ops), can still be single-stepped.
-        ImGui.BeginDisabled(isLive && !_isPaused);
+        // (including the head, where the step does nothing), can still be single-stepped.
+        ImGui.BeginDisabled(isLive && !IsPaused || busy);
         if (ImGui.Button(Locale.GetString("timeline-forward-button"), new Vector2(76f, 0f)))
-        {
-            _isPaused = true;
             StepTimelineForward(GetTimelineStepTicks());
-        }
 
         ImGui.EndDisabled();
 
@@ -301,14 +313,14 @@ public partial class SimulationViewer
             Locale.GetString("timeline-step-description", ("ticks", QuantityFormat.Ticks(GetTimelineStepTicks()))));
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(isLive || atHead);
+        ImGui.BeginDisabled(isLive || atHead || busy);
         if (ImGui.Button(Locale.GetString("timeline-return-to-head-button"), new Vector2(120f, 0f)))
             ReturnTimelineToHead();
 
         ImGui.EndDisabled();
     }
 
-    private void DrawReplayStatus(AtmosWorldReplayTimeline timeline)
+    private void DrawReplayStatus(WorkbenchTimelineFrame timeline)
     {
         if (timeline.LastReplay is { } replay)
         {
@@ -345,7 +357,7 @@ public partial class SimulationViewer
         ImGui.TextDisabled(explanation);
     }
 
-    private void DrawTimelineOperations(AtmosWorldReplayTimeline timeline)
+    private void DrawTimelineOperations(WorkbenchTimelineFrame timeline)
     {
         int group = _operationIndex.FindGroup(timeline.Position.Tick);
         int tickOperationCount = group < 0 ? 0 : _operationIndex.GetCount(group);
@@ -358,7 +370,7 @@ public partial class SimulationViewer
         else
             DrawTickOperationList(group, tickOperationCount);
 
-        if (_timelineOperation is { } selected)
+        if (_document.TimelineOperation is { } selected)
         {
             ImGui.SeparatorText(Locale.GetString("timeline-selected-operation"));
             if (ImGui.BeginTable(
@@ -429,9 +441,9 @@ public partial class SimulationViewer
             ImGui.SameLine(operationColumn);
             if (ImGui.Selectable(
                     $"{DescribeOperation(operation)}##operation-{operation.Sequence}",
-                    _timelineOperation is { } current && current.Sequence == operation.Sequence))
+                    _document.TimelineOperation is { } current && current.Sequence == operation.Sequence))
             {
-                _timelineOperation = operation;
+                _document.TimelineOperation = operation;
             }
         }
 
@@ -482,7 +494,7 @@ public partial class SimulationViewer
     /// <summary>
     ///     Lists the solver stages that the timeline started with, from its first checkpoint.
     /// </summary>
-    private static void DrawInitialSolverStages(AtmosWorldReplayTimeline timeline)
+    private static void DrawInitialSolverStages(WorkbenchTimelineFrame timeline)
     {
         if (timeline.Checkpoints.Count == 0 || !ImGui.TreeNode(Locale.GetString("timeline-initial-solver-stages") + "##replay"))
             return;
@@ -673,7 +685,7 @@ public partial class SimulationViewer
         return value.ToString("R", CultureInfo.InvariantCulture);
     }
 
-    private void DrawTimelineTrack(AtmosWorldReplayTimeline timeline)
+    private void DrawTimelineTrack(WorkbenchTimelineFrame timeline)
     {
         var origin = ImGui.GetCursorScreenPos();
         float width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
@@ -701,7 +713,7 @@ public partial class SimulationViewer
 
         float Map(double tick)
         {
-            return origin.X + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * width);
+            return origin.X + (float)((tick - _document.TimelineFirstTick) / _timelineVisibleTicks * width);
         }
 
         string trackTitle = Locale.GetString("replay-timeline-axis-title");
@@ -715,8 +727,8 @@ public partial class SimulationViewer
             timeline.IsVerified == false);
 
         long tickStep = GetTimelineTickStep(_timelineVisibleTicks);
-        double lastVisibleTick = _timelineFirstTick + _timelineVisibleTicks;
-        double firstTick = Math.Ceiling(_timelineFirstTick / (double)tickStep) * tickStep;
+        double lastVisibleTick = _document.TimelineFirstTick + _timelineVisibleTicks;
+        double firstTick = Math.Ceiling(_document.TimelineFirstTick / (double)tickStep) * tickStep;
         for (double tick = firstTick; tick <= lastVisibleTick; tick += tickStep)
         {
             float x = Map(tick);
@@ -733,7 +745,7 @@ public partial class SimulationViewer
             new Vector2(origin.X + width, origin.Y + plotBottom),
             structuralLine);
 
-        if (timeline.Head.Tick >= (double)_timelineFirstTick && timeline.Start.Tick <= lastVisibleTick)
+        if (timeline.Head.Tick >= (double)_document.TimelineFirstTick && timeline.Start.Tick <= lastVisibleTick)
         {
             float restorableStart = Math.Clamp(Map(timeline.Start.Tick), origin.X, origin.X + width);
             float restorableEnd = Math.Clamp(Map(timeline.Head.Tick), origin.X, origin.X + width);
@@ -768,7 +780,7 @@ public partial class SimulationViewer
         // Markers that land on the same pixel column as the previous one are skipped, so the draw cost
         // is bounded by the track width and not by the operation count.
         int lastColumn = int.MinValue;
-        int visibleGroup = _operationIndex.LowerBound((ulong)Math.Max(0L, _timelineFirstTick - 1));
+        int visibleGroup = _operationIndex.LowerBound((ulong)Math.Max(0L, _document.TimelineFirstTick - 1));
         for (; visibleGroup < _operationIndex.TickCount; visibleGroup++)
         {
             ulong operationTick = _operationIndex.GetTick(visibleGroup);
@@ -801,7 +813,7 @@ public partial class SimulationViewer
                         ? Locale.GetString("replay-single-operation-tooltip", ("code", first.Code), ("tick", operationTick))
                         : Locale.GetString("replay-multiple-operations-tooltip", ("count", operationCount), ("tick", operationTick)));
 
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _timelineOperation = first;
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _document.TimelineOperation = first;
             }
         }
 
@@ -847,7 +859,7 @@ public partial class SimulationViewer
         }
 
         if (checkpointTarget.HasValue) SeekTimelinePosition(checkpointTarget.Value);
-        float cursor = Map(_pendingScrubTick ?? (double)timeline.Position.Tick);
+        float cursor = Map(_document.PendingScrubTick ?? (double)timeline.Position.Tick);
         if (cursor >= origin.X && cursor <= origin.X + width)
         {
             draw.AddLine(
@@ -859,7 +871,10 @@ public partial class SimulationViewer
 
         if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
         {
-            _isPaused = true;
+            // Pause once when the drag starts, so playback does not move the playhead under the pointer.
+            if (_document.PendingScrubTick == null && !IsPaused)
+                PauseHost();
+
             ScrubTimelineTo(GetScrubTick(timeline, origin.X, width));
         }
         else if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && ImGui.GetMousePos().Y > origin.Y + plotBottom)
@@ -870,9 +885,9 @@ public partial class SimulationViewer
         draw.PopClipRect();
     }
 
-    private void DrawBranchHistoryTrack(AtmosWorldReplayTimeline timeline)
+    private void DrawBranchHistoryTrack(WorkbenchTimelineFrame timeline)
     {
-        IReadOnlyList<ReplayBranchInfo> branches = _session.Branches!.Branches;
+        IReadOnlyList<ReplayBranchInfo> branches = timeline.Branches;
         float lineHeight = ImGui.GetTextLineHeight();
         float headerHeight = MathF.Max(24f, lineHeight + 11f);
         const float rowHeight = 28f;
@@ -904,7 +919,7 @@ public partial class SimulationViewer
 
         float Map(double tick)
         {
-            return graphLeft + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * graphWidth);
+            return graphLeft + (float)((tick - _document.TimelineFirstTick) / _timelineVisibleTicks * graphWidth);
         }
 
         string trackTitle = Locale.GetString("replay-timeline-axis-title");
@@ -918,9 +933,9 @@ public partial class SimulationViewer
             false,
             timeline.IsVerified == false);
 
-        double lastVisibleTick = _timelineFirstTick + _timelineVisibleTicks;
+        double lastVisibleTick = _document.TimelineFirstTick + _timelineVisibleTicks;
         long tickStep = GetTimelineTickStep(_timelineVisibleTicks);
-        double firstTick = Math.Ceiling(_timelineFirstTick / (double)tickStep) * tickStep;
+        double firstTick = Math.Ceiling(_document.TimelineFirstTick / (double)tickStep) * tickStep;
         float graphBottom = origin.Y + headerHeight + branches.Count * rowHeight;
         for (double tick = firstTick; tick <= lastVisibleTick; tick += tickStep)
         {
@@ -952,10 +967,10 @@ public partial class SimulationViewer
 
             float startX = Math.Clamp(Map(branch.Fork.Tick), graphLeft, graphLeft + graphWidth);
             float headX = Math.Clamp(Map(branch.Head.Tick), graphLeft, graphLeft + graphWidth);
-            if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick)
+            if (branch.Head.Tick >= (ulong)_document.TimelineFirstTick && branch.Fork.Tick <= lastVisibleTick)
                 draw.AddLine(new Vector2(startX, y), new Vector2(headX, y), laneColor, branch.IsSelected ? 4f : 2f);
 
-            bool forkVisible = branch.Fork.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick;
+            bool forkVisible = branch.Fork.Tick >= (ulong)_document.TimelineFirstTick && branch.Fork.Tick <= lastVisibleTick;
             if (forkVisible &&
                 branch.ParentId is { } parentId &&
                 rowById.TryGetValue(parentId, out int parentIndex))
@@ -965,7 +980,7 @@ public partial class SimulationViewer
                 draw.AddCircleFilled(new Vector2(startX, y), 4f, laneColor);
             }
 
-            if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Head.Tick <= lastVisibleTick)
+            if (branch.Head.Tick >= (ulong)_document.TimelineFirstTick && branch.Head.Tick <= lastVisibleTick)
             {
                 draw.AddRectFilled(
                     new Vector2(headX - 4f, y - 4f),
@@ -979,7 +994,7 @@ public partial class SimulationViewer
 
         // One marker per tick with operations, skipping repeated pixel columns, as in the main track.
         int lastOperationColumn = int.MinValue;
-        int operationGroup = _operationIndex.LowerBound((ulong)Math.Max(0L, _timelineFirstTick - 1));
+        int operationGroup = _operationIndex.LowerBound((ulong)Math.Max(0L, _document.TimelineFirstTick - 1));
         for (; operationGroup < _operationIndex.TickCount; operationGroup++)
         {
             ulong operationTick = _operationIndex.GetTick(operationGroup);
@@ -1021,7 +1036,7 @@ public partial class SimulationViewer
                 checkpointColor);
         }
 
-        float playheadX = Map(_pendingScrubTick ?? (double)timeline.Position.Tick);
+        float playheadX = Map(_document.PendingScrubTick ?? (double)timeline.Position.Tick);
         if (playheadX >= graphLeft && playheadX <= graphLeft + graphWidth)
         {
             draw.AddLine(
@@ -1227,37 +1242,42 @@ public partial class SimulationViewer
     {
         return Math.Clamp(
             (long)Math.Round(
-                _timelineFirstTick +
+                _document.TimelineFirstTick +
                 (mouseX - graphLeft) / (double)graphWidth * _timelineVisibleTicks),
             checked((long)branch.Fork.Tick),
             checked((long)branch.Head.Tick));
     }
 
-    private long GetScrubTick(AtmosWorldReplayTimeline timeline, float trackOriginX, float trackWidth)
+    private long GetScrubTick(WorkbenchTimelineFrame timeline, float trackOriginX, float trackWidth)
     {
         return Math.Clamp(
             (long)Math.Round(
-                _timelineFirstTick +
+                _document.TimelineFirstTick +
                 (ImGui.GetMousePos().X - trackOriginX) / (double)trackWidth * _timelineVisibleTicks),
             checked((long)timeline.Start.Tick),
             checked((long)timeline.Head.Tick));
     }
 
-    private void CenterTimelinePlayhead(AtmosWorldReplayTimeline timeline)
+    private void CenterTimelinePlayhead(WorkbenchTimelineFrame timeline)
     {
         long playheadTick = checked((long)timeline.Position.Tick);
-        _timelineFirstTick = Math.Max(
+        _document.TimelineFirstTick = Math.Max(
             checked((long)timeline.Start.Tick),
             playheadTick - _timelineVisibleTicks / 2);
     }
 
     private void ScrubTimelineTo(long tick)
     {
-        bool changed = _pendingScrubTick != tick;
-        _pendingScrubTick = tick;
+        bool changed = _document.PendingScrubTick != tick;
+        _document.PendingScrubTick = tick;
 
         if (_simulateWhileScrubbing && changed)
-            SeekTimelineTick((ulong)tick);
+        {
+            // Only the newest target survives while a seek runs, so a slow seek never queues up behind the pointer.
+            // The host cannot wake the window, so keep drawing until the seek has had time to show up as busy.
+            _host.SeekLatest((ulong)tick);
+            RequestRenderingFor(ScrubSeekRenderDuration);
+        }
     }
 
     private static unsafe bool InputTick(string label, ref long tick, long step, long stepFast)
@@ -1293,101 +1313,104 @@ public partial class SimulationViewer
 
     private void CreateTimelineBranch()
     {
-        _isPaused = true;
-        try
-        {
-            _session.CreateBranch();
-            _timelineOperation = null;
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-create-branch"), exception);
-        }
-
-        RefreshReplayPresentation();
+        RunTimelineJob(
+            HostJobLabels.Branch,
+            static session => session.CreateBranch(),
+            Locale.GetString("timeline-error-create-branch"),
+            clearOperation: true);
     }
 
     private void SelectTimelineBranch(int branchId, ulong? tick = null)
     {
-        _isPaused = true;
-        try
-        {
-            _session.SelectBranch(branchId, tick);
-            _timelineOperation = null;
-            _pendingScrubTick = null;
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-select-branch"), exception);
-        }
-
-        RefreshReplayPresentation();
+        _document.PendingScrubTick = null;
+        RunTimelineJob(
+            HostJobLabels.Branch,
+            session =>
+            {
+                session.SelectBranch(branchId, tick);
+                return true;
+            },
+            Locale.GetString("timeline-error-select-branch"),
+            clearOperation: true);
     }
 
     private void ContinueTimelineBranch()
     {
-        _isPaused = true;
-        try
-        {
-            _session.ContinueBranch();
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-continue-branch"), exception);
-        }
-
-        RefreshReplayPresentation();
+        RunTimelineJob(
+            HostJobLabels.Branch,
+            static session =>
+            {
+                session.ContinueBranch();
+                return true;
+            },
+            Locale.GetString("timeline-error-continue-branch"));
     }
 
     private void SeekTimelineTick(ulong tick)
     {
-        _isPaused = true;
-        try
-        {
-            _session.SeekTick(tick);
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-seek-tick", ("tick", tick)), exception);
-        }
-
-        RefreshReplayPresentation();
+        RunTimelineJob(
+            WorkbenchHost.SeekJobLabel,
+            session =>
+            {
+                session.SeekTick(tick);
+                return true;
+            },
+            Locale.GetString("timeline-error-seek-tick", ("tick", tick)));
     }
 
     private void SeekTimelinePosition(AtmosTimelinePosition position)
     {
-        _isPaused = true;
-        try
-        {
-            _session.SeekPosition(position);
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-seek-position"), exception);
-        }
-
-        RefreshReplayPresentation();
+        RunTimelineJob(
+            WorkbenchHost.SeekJobLabel,
+            session =>
+            {
+                session.SeekPosition(position);
+                return true;
+            },
+            Locale.GetString("timeline-error-seek-position"));
     }
 
     private void ReturnTimelineToHead()
     {
-        _isPaused = true;
-        try
-        {
-            _session.ReturnToHead();
-            _timelineError = null;
-        }
-        catch (Exception exception)
-        {
-            SetTimelineError(Locale.GetString("timeline-error-return-to-head"), exception);
-        }
+        RunTimelineJob(
+            WorkbenchHost.SeekJobLabel,
+            static session =>
+            {
+                session.ReturnToHead();
+                return true;
+            },
+            Locale.GetString("timeline-error-return-to-head"));
+    }
 
-        RefreshReplayPresentation();
+    /// <summary>
+    ///     Pauses the host and sends a seek or branch operation as one busy job.
+    /// </summary>
+    /// <param name="label">The busy label the toolbar shows.</param>
+    /// <param name="work">Runs on the host thread. It must capture only copied values.</param>
+    /// <param name="action">The localized action for the error line.</param>
+    /// <param name="clearOperation">Whether success clears the selected operation, which the new branch lacks.</param>
+    private void RunTimelineJob<T>(
+        string label,
+        Func<WorkbenchSession, T> work,
+        string action,
+        bool clearOperation = false)
+    {
+        PauseHost();
+        SendJob(
+            label,
+            (session, _) => work(session),
+            result =>
+            {
+                if (result.Exception is { } exception)
+                {
+                    SetTimelineError(action, exception);
+                    return;
+                }
+
+                _document.TimelineError = null;
+                if (clearOperation)
+                    _document.TimelineOperation = null;
+            });
     }
 
     /// <summary>
@@ -1396,36 +1419,28 @@ public partial class SimulationViewer
     /// </summary>
     private void SetTimelineError(string action, Exception exception)
     {
-        _timelineError = $"{action}. {exception.Message}";
+        _document.TimelineError = $"{action}. {DescribeFailure(exception)}";
     }
 
     /// <summary>
-    ///     Moves forward by up to <paramref name="count" /> ticks in one timeline seek or one batched world run, so a
-    ///     high tick rate costs one observe and one redraw per call.
+    ///     Moves forward by up to <paramref name="count" /> ticks. The host seeks forward while the timeline inspects
+    ///     history and ticks the live head otherwise. It stops at the head and pauses.
     /// </summary>
     private void StepTimelineForward(int count = 1)
     {
-        if (_session.Timeline == null || _session.World == null || count < 1) return;
+        if (!_frame.HasProject || count < 1)
+            return;
 
-        if (_session.IsInspecting)
-        {
-            ulong position = _session.Timeline.Position.Tick;
-            ulong head = _session.Timeline.Head.Tick;
-            if (position >= head)
+        ulong target = (_frame.Timeline?.Position.Tick ?? 0) + (ulong)count;
+        _host.Step(
+            count,
+            result =>
             {
-                _isPaused = true;
-                return;
-            }
+                if (result.Exception is { } exception and not ObjectDisposedException)
+                    SetTimelineError(Locale.GetString("timeline-error-seek-tick", ("tick", target)), exception);
+            });
 
-            bool wasPaused = _isPaused;
-            SeekTimelineTick(position + Math.Min((ulong)count, head - position));
-            _isPaused = wasPaused || _timelineError != null;
-        }
-        else
-        {
-            _session.Tick(count);
-            RefreshPresentation();
-        }
+        RequestNextFrame();
     }
 
     /// <summary>
@@ -1435,41 +1450,22 @@ public partial class SimulationViewer
     {
         _timelineVisibleTicks = TimelineTiming.VisibleTicks(
             _timelineVisibleSeconds,
-            _session.World?.TickRate ?? AtmosWorld.DefaultTickRate);
+            GetTickRate());
     }
 
     private int GetTimelineStepTicks()
     {
         return TimelineTiming.StepTicks(
             _timelineStepMilliseconds,
-            _session.World?.TickRate ?? AtmosWorld.DefaultTickRate);
+            GetTickRate());
     }
 
     /// <summary>
-    ///     Returns the simulated time at a tick through the timeline.
+    ///     Returns the simulated time at a tick. The tick rate is fixed for the whole timeline.
     /// </summary>
     private double GetTimelineTime(ulong tick)
     {
-        return _session.Timeline?.TimeAt(tick) ?? tick / (double)AtmosWorld.DefaultTickRate;
-    }
-
-    /// <summary>
-    ///     Rebuilds presentation after a timeline move. The session has already restored its configuration into the
-    ///     same <see cref="AtmosConfig" /> instance that the visualizations retain.
-    /// </summary>
-    private void RefreshReplayPresentation()
-    {
-        ReconcileSimulationSurfaces();
-        _voxelDetailCache.Clear();
-        _refreshingReplay = true;
-        try
-        {
-            RefreshPresentation();
-        }
-        finally
-        {
-            _refreshingReplay = false;
-        }
+        return tick / (double)GetTickRate();
     }
 
     /// <summary>

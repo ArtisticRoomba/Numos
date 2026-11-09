@@ -10,6 +10,7 @@ using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 using Raylib_cs;
 using rlImGui_cs;
@@ -29,133 +30,69 @@ public partial class SimulationViewer
     private bool _aboutModalOpen;
 
     private bool _requestOpenAboutModal;
+    private bool _showLegendPanel = true;
 
     private void RenderUi()
     {
-        RenderMainDockspace();
-
+        // The menu bar and the toolbar take the top of the work area, so they go before the dockspace host.
+        HandleGlobalShortcuts();
         RenderMenuBar();
+        RenderToolbar();
+        RenderWorkspaceDockspace();
+
         RenderProgramSettingsPanel();
         RenderResolutionConfirmationModal();
         RenderPerformanceOverlay();
         DrawReplayFileModals();
         DrawWorldModals();
+
+        if (!_frame.HasProject)
+            RenderStartPage();
+        else
+            RenderSimulationViewports();
+
+        RenderSliceViewport();
+
+        // Shell panes other than the slice view draw with or without a project, so their dock nodes keep their place.
+        // The slice view is skipped without a project so the start page takes its space. Each one disables only
+        // its own editing controls while the Timeline inspects history, so readouts stay legible.
+        RenderTreePanel();
+        RenderPropertiesPanel();
+        RenderLegendPanel();
+        RenderTimelinePanel();
         RenderMessagesPanel();
+        DrawCreateProjectModal();
+        DrawCloseProjectModal();
+        DrawLayoutResetModal();
+        DrawAboutModal();
+    }
 
-        if (_session.World == null)
+    private void RenderSliceViewport()
+    {
+        bool interactive = _simulation != null;
+        bool draw = _showSliceViewport && _sliceViewport != null && _frame.HasProject;
+        if (draw)
         {
-            RenderEmptyWorkspaceMessage();
-            DrawCreateProjectModal();
-            DrawCloseProjectModal();
-            DrawAboutModal();
-            return;
-        }
-
-        RenderSimulationViewports();
-
-        if (_showSliceViewport && _simulation != null)
-        {
-            _sliceViewport?.Draw(
-                "Simulation Slice 2D##slice-viewport",
+            _sliceViewport!.Draw(
+                WorkspacePanels.Slice.WindowName(Locale.GetString(WorkspacePanels.Slice.TitleKey)),
                 RenderSimulationSliceScene,
                 new Vector2(320, 560),
                 new Vector2(660, 330),
-                () =>
-                {
-                    UpdateSlicePicking();
-                    RenderSliceCellTooltip();
-                    RenderVoxelContextMenu();
-                });
+                interactive
+                    ? () =>
+                    {
+                        UpdateSlicePicking();
+                        RenderSliceCellTooltip();
+                        RenderVoxelContextMenu();
+                    }
+                    : null);
         }
-        else
+
+        if (!draw || !interactive)
         {
             _hoveredSliceCell = null;
             RebuildHighlights();
         }
-
-        // Each of these panels disables only its own editing controls while the Timeline inspects history, so
-        // readouts stay legible.
-        RenderSolutionPanel();
-        RenderToolsPanel();
-        RenderConfigurationPanel();
-        RenderWorldPanel();
-        RenderViewPanel();
-        RenderTimelinePanel();
-        DrawCreateProjectModal();
-        DrawCloseProjectModal();
-        DrawAboutModal();
-    }
-
-    private static void RenderMainDockspace()
-    {
-        var viewport = ImGui.GetMainViewport();
-
-        ImGui.SetNextWindowPos(viewport.WorkPos);
-        ImGui.SetNextWindowSize(viewport.WorkSize);
-        ImGui.SetNextWindowViewport(viewport.ID);
-
-        var windowFlags =
-            ImGuiWindowFlags.NoDocking |
-            ImGuiWindowFlags.NoTitleBar |
-            ImGuiWindowFlags.NoCollapse |
-            ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoBringToFrontOnFocus |
-            ImGuiWindowFlags.NoNavFocus |
-            ImGuiWindowFlags.NoBackground |
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse;
-
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0.0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0.0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
-
-        ImGui.Begin("MainDockspace##main-dockspace-window", windowFlags);
-
-        ImGui.PopStyleVar(3);
-
-        uint dockspaceId = ImGui.GetID("MainDockspace##main-dockspace-id");
-        ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
-
-        ImGui.End();
-    }
-
-    private void RenderEmptyWorkspaceMessage()
-    {
-        var viewport = ImGui.GetMainViewport();
-        ImGui.SetNextWindowPos(
-            viewport.WorkPos + viewport.WorkSize * 0.5f,
-            ImGuiCond.Always,
-            new Vector2(0.5f, 0.5f));
-
-        const ImGuiWindowFlags windowFlags =
-            ImGuiWindowFlags.AlwaysAutoResize |
-            ImGuiWindowFlags.NoBackground |
-            ImGuiWindowFlags.NoDecoration |
-            ImGuiWindowFlags.NoDocking |
-            ImGuiWindowFlags.NoInputs |
-            ImGuiWindowFlags.NoNav |
-            ImGuiWindowFlags.NoSavedSettings;
-
-        ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
-
-        DrawEmptyWorkspaceBranding();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-
-        ImGuiExtensions.TextCentered(Locale.GetString("viewer-description-line-one"));
-        ImGuiExtensions.TextCentered(Locale.GetString("viewer-description-line-two"));
-
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        ImGuiExtensions.TextCentered(Locale.GetString("no-simulation-loaded"), ImGui.TextDisabled);
-        ImGuiExtensions.TextCentered(
-            Locale.GetString("create-workspace-instruction"),
-            ImGui.TextDisabled);
-
-        ImGui.End();
     }
 
     private void DrawAboutModal()
@@ -421,108 +358,116 @@ public partial class SimulationViewer
         ImGui.EndGroup();
     }
 
+    private void OpenAboutModal()
+    {
+        _requestOpenAboutModal = true;
+        _aboutModalOpen = true;
+    }
+
+    /// <summary>Handles the global keyboard shortcuts shown in the menus.</summary>
+    private void HandleGlobalShortcuts()
+    {
+        var io = ImGui.GetIO();
+        if (io.WantTextInput ||
+            ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel))
+            return;
+
+        bool ctrl = io.KeyCtrl && !io.KeyAlt && !io.KeyShift;
+        bool hasProject = _frame.HasProject && !IsBusy;
+        if (ctrl && ImGui.IsKeyPressed(ImGuiKey.N, false))
+            RequestCreateProject();
+        else if (ctrl && ImGui.IsKeyPressed(ImGuiKey.O, false))
+            RequestOpenReplay();
+        else if (ctrl && hasProject && ImGui.IsKeyPressed(ImGuiKey.S, false))
+            RequestSaveReplay();
+        else if (ctrl && hasProject && ImGui.IsKeyPressed(ImGuiKey.W, false))
+            RequestCloseProject();
+        else if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift && ImGui.IsKeyPressed(ImGuiKey.F1, false))
+            OpenAboutModal();
+    }
+
     private void RenderMenuBar()
     {
         if (ImGui.BeginMainMenuBar())
         {
-            if (ImGui.BeginMenu(Locale.GetString("file")))
+            if (ImGui.BeginMenu($"{Locale.GetString("file")}###menu-file"))
             {
-                if (ImGui.MenuItem(Locale.GetString("common-new-simulation")))
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.FilePlus} {Locale.GetString("common-new-simulation")}", "Ctrl+N"))
                     RequestCreateProject();
 
-                if (ImGui.MenuItem(Locale.GetString("open-replay")))
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.FolderOpen} {Locale.GetString("open-replay")}", "Ctrl+O"))
                     RequestOpenReplay();
 
-                ImGui.BeginDisabled(_session.World == null);
-                if (ImGui.MenuItem(Locale.GetString("save-replay")))
+                ImGui.BeginDisabled(!_frame.HasProject || IsBusy);
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.Save} {Locale.GetString("save-replay")}", "Ctrl+S"))
                     RequestSaveReplay();
 
-                if (ImGui.MenuItem(Locale.GetString("close-project")))
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.X} {Locale.GetString("close-project")}", "Ctrl+W"))
                     RequestCloseProject();
 
                 ImGui.EndDisabled();
 
                 ImGui.Separator();
-                if (ImGui.MenuItem(Locale.GetString("exit"), "Alt+F4"))
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.LogOut} {Locale.GetString("exit")}", "Alt+F4"))
                     _requestExit = true;
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu(Locale.GetString("view")))
+            if (ImGui.BeginMenu($"{Locale.GetString("view")}###menu-view"))
             {
-                ImGui.MenuItem(Locale.GetString("common-messages-logs"), null, ref _showMessagesPanel);
+                RenderPaneMenuItems();
                 ImGui.Separator();
-
-                bool simulationAvailable = _simulation != null && _session.Config != null;
-                ImGui.BeginDisabled(!simulationAvailable);
-
-                ImGui.MenuItem(Locale.GetString("solution"), null, ref _showSolutionPanel);
-                ImGui.MenuItem(Locale.GetString("common-tools"), null, ref _showToolsPanel);
-                ImGui.MenuItem(Locale.GetString("view"), null, ref _showViewPanel);
-                ImGui.EndDisabled();
-
-                bool worldAvailable = _session.World != null && _session.Config != null;
-                ImGui.BeginDisabled(!worldAvailable);
-                ImGui.MenuItem(Locale.GetString("configuration"), null, ref _showConfigurationPanel);
-                ImGui.MenuItem(Locale.GetString("timeline-window"), null, ref _showTimelinePanel);
-                ImGui.MenuItem(Locale.GetString("common-world-topology"), null, ref _showWorldPanel);
-                ImGui.EndDisabled();
-
-                ImGui.BeginDisabled(!simulationAvailable);
-                ImGui.MenuItem(Locale.GetString("three-d-viewport"), null, ref _show3DViewport);
-                ImGui.MenuItem(Locale.GetString("two-d-slice-viewport"), null, ref _showSliceViewport);
-                ImGui.EndDisabled();
+                if (ImGui.MenuItem($"{Icons.LayoutDashboard} {Locale.GetString("layout-reset-menu")}"))
+                    RequestLayoutReset();
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu(Locale.GetString("settings")))
+            if (ImGui.BeginMenu($"{Locale.GetString("settings")}###menu-settings"))
             {
-                if (ImGui.MenuItem(Locale.GetString("common-configure")))
+                if (ImGui.MenuItem($"{Icons.SlidersHorizontal} {Locale.GetString("common-configure")}"))
                     _showProgramSettingsPanel = true;
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu(Locale.GetString("help")))
+            if (ImGui.BeginMenu($"{Locale.GetString("help")}###menu-help"))
             {
-                if (ImGui.MenuItem(Locale.GetString("about")))
-                {
-                    _requestOpenAboutModal = true;
-                    _aboutModalOpen = true;
-                }
+                if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.Info} {Locale.GetString("about")}", "F1"))
+                    OpenAboutModal();
 
                 ImGui.EndMenu();
             }
 
-            RenderUnseenMessagesIndicator();
             ImGui.EndMainMenuBar();
         }
     }
 
-    private void RenderViewPanel()
+    /// <summary>
+    ///     Draws the Legend pane: the visualization mode, its legend, and the legend range controls.
+    /// </summary>
+    private void RenderLegendPanel()
     {
-        if (!_showViewPanel)
+        if (!_showLegendPanel)
             return;
 
-        using var window = ImGuiExtensions.BeginWindow(
-            "View##view",
-            ref _showViewPanel,
+        using var window = BeginPane(
+            WorkspacePanels.Legend,
+            ref _showLegendPanel,
             new Vector2(990, 40),
-            new Vector2(400, 420));
+            new Vector2(260, 420));
 
-        if (!window.IsVisible)
+        if (!window.IsVisible || DrawPanePlaceholder())
             return;
 
-        ImGui.SeparatorText(Locale.GetString("visualization"));
-
-        if (_frameBuilder != null)
+        if (_document.FrameBuilder != null)
         {
-            var current = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
-            if (ImGui.BeginCombo("Mode##viz", current.DisplayName))
+            var current = _document.FrameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.BeginCombo("##visualization-mode", current.DisplayName))
             {
-                foreach (var method in _frameBuilder.Visualizations.Methods)
+                foreach (var method in _document.FrameBuilder.Visualizations.Methods)
                 {
                     bool selected = string.Equals(
                         method.Id,
@@ -538,19 +483,12 @@ public partial class SimulationViewer
 
                 ImGui.EndCombo();
             }
+
+            ImGuiExtensions.ItemTooltip(Locale.GetString("visualization"));
         }
 
+        ImGui.Spacing();
         RenderVisualizationLegend();
-
-        ImGui.SeparatorText(Locale.GetString("rendering-style"));
-        RenderRenderingStyleTable();
-
-        ImGui.SeparatorText(Locale.GetString("three-d-focus"));
-        RenderChunkFocusControls();
-
-        ImGui.SeparatorText(Locale.GetString("two-d-slice"));
-        ImGui.Checkbox(Locale.GetString("show-slice-viewport"), ref _showSliceViewport);
-        RenderSliceControls();
     }
 
     private void RenderRenderingStyleTable()
@@ -636,224 +574,196 @@ public partial class SimulationViewer
 
     private string FormatSleepTimer(int ticks)
     {
-        return QuantityFormat.Format(ticks / (double)(_session.World?.TickRate ?? AtmosWorld.DefaultTickRate), "s");
+        return QuantityFormat.Format(ticks / (double)GetTickRate(), "s");
     }
 
     /// <summary>
-    ///     Shows the world tick rate. The rate is fixed when the world is created.
+    ///     Draws the reset button and one field per <see cref="AtmosConfig" /> value of the configuration draft.
     /// </summary>
-    private void RenderTickRateSection()
+    /// <param name="config">The draft to show.</param>
+    /// <param name="inspecting">Whether editing is blocked.</param>
+    private void RenderAtmosConfigEditor(AtmosConfig config, bool inspecting)
     {
-        int current = _session.World?.TickRate ?? AtmosWorld.DefaultTickRate;
-        ImGui.Text(Locale.GetString("tick-rate-display", ("rate", current)));
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("tick-rate-description"));
-    }
+        ImGui.BeginDisabled(inspecting);
+        if (ImGui.Button(Locale.GetString("common-reset-to-defaults") + "...##config-reset"))
+            RequestResetConfiguration();
 
-    private void RenderConfigurationPanel()
-    {
-        if (!_showConfigurationPanel || _session.Config == null)
-            return;
+        ImGui.EndDisabled();
 
-        using var window = ImGuiExtensions.BeginWindow(
-            "configuration",
-            Locale.GetString("configuration"),
-            ref _showConfigurationPanel,
-            new Vector2(990, 470),
-            new Vector2(400, 420));
+        DrawFeedback(_document.ConfigurationFeedback);
+        ImGui.Separator();
 
-        if (!window.IsVisible)
-            return;
+        // Every apply is a recorded replay operation, so typed values wait for Enter or focus loss instead of
+        // recording each keystroke.
 
-        bool inspecting = DrawInspectionNotice();
-        if (inspecting)
-            ClearConfigurationDrafts();
+        ConfigFloatInput(
+            AtmosConfigFields.GlobalTemperature,
+            "config-global-temperature",
+            config.GlobalTemperature,
+            inspecting,
+            static (config, value) => config.GlobalTemperature = value);
 
-        if (ImGui.CollapsingHeader(Locale.GetString("project-section"), ImGuiTreeNodeFlags.DefaultOpen))
-            RenderTickRateSection();
+        ConfigFloatInput(
+            AtmosConfigFields.DefaultTemperatureFallback,
+            "config-default-temperature-fallback",
+            config.DefaultTemperatureFallback,
+            inspecting,
+            static (config, value) => config.DefaultTemperatureFallback = value);
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader(Locale.GetString("solver-pipeline"), ImGuiTreeNodeFlags.DefaultOpen))
-            RenderSolverPipelineSection(inspecting);
+        ConfigFloatInput(
+            AtmosConfigFields.VoxelVolume,
+            "config-voxel-volume",
+            config.VoxelVolume,
+            inspecting,
+            static (config, value) => config.VoxelVolume = value);
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader(Locale.GetString("atmos-config"), ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button(Locale.GetString("common-reset-to-defaults") + "...##config-reset"))
-                RequestResetConfiguration();
+        ConfigFloatInput(
+            AtmosConfigFields.SaturationReferencePressure,
+            "config-saturation-reference-pressure",
+            config.SaturationReferencePressure,
+            inspecting,
+            static (config, value) => config.SaturationReferencePressure = value,
+            QuantityFormat.KilopascalsPerPascal);
 
-            ImGui.EndDisabled();
+        ConfigFloatInput(
+            AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
+            "config-default-molar-cv",
+            config.DefaultMolarHeatCapacityAtConstantVolume,
+            inspecting,
+            static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
 
-            // Every apply is a recorded replay operation, so typed values wait for Enter or focus loss instead of
-            // recording each keystroke.
-            if (!inspecting)
-                ImGui.TextDisabled(Locale.GetString("configuration-apply-instructions"));
+        ConfigFloatInput(
+            AtmosConfigFields.DefaultDiffusionCoefficient,
+            "config-default-diffusion-coefficient",
+            config.DefaultDiffusionCoefficient,
+            inspecting,
+            static (config, value) => config.DefaultDiffusionCoefficient = value);
 
-            DrawFeedback(_configurationFeedback);
-            ImGui.Separator();
+        ConfigFloatInput(
+            AtmosConfigFields.DefaultThermalConductivity,
+            "config-default-thermal-conductivity",
+            config.DefaultThermalConductivity,
+            inspecting,
+            static (config, value) => config.DefaultThermalConductivity = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.GlobalTemperature,
-                "config-global-temperature",
-                _session.Config.GlobalTemperature,
-                inspecting,
-                static (config, value) => config.GlobalTemperature = value);
+        ConfigFloatInput(
+            AtmosConfigFields.SpaceTemperature,
+            "config-space-temperature",
+            config.SpaceTemperature,
+            inspecting,
+            static (config, value) => config.SpaceTemperature = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.DefaultTemperatureFallback,
-                "config-default-temperature-fallback",
-                _session.Config.DefaultTemperatureFallback,
-                inspecting,
-                static (config, value) => config.DefaultTemperatureFallback = value);
+        ConfigFloatSlider(
+            AtmosConfigFields.BulkFlowCoefficient,
+            "config-bulk-flow-coefficient",
+            config.BulkFlowCoefficient,
+            0f,
+            0.5f,
+            inspecting,
+            static (config, value) => config.BulkFlowCoefficient = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.VoxelVolume,
-                "config-voxel-volume",
-                _session.Config.VoxelVolume,
-                inspecting,
-                static (config, value) => config.VoxelVolume = value);
+        ConfigFloatInput(
+            AtmosConfigFields.VacuumThreshold,
+            "config-vacuum-threshold",
+            config.VacuumThreshold,
+            inspecting,
+            static (config, value) => config.VacuumThreshold = value,
+            QuantityFormat.KilopascalsPerPascal);
 
-            ConfigFloatInput(
-                AtmosConfigFields.SaturationReferencePressure,
-                "config-saturation-reference-pressure",
-                _session.Config.SaturationReferencePressure,
-                inspecting,
-                static (config, value) => config.SaturationReferencePressure = value,
-                QuantityFormat.KilopascalsPerPascal);
+        ConfigFloatInput(
+            AtmosConfigFields.SleepDelay,
+            "config-sleep-delay",
+            config.SleepDelay,
+            inspecting,
+            static (config, value) => config.SleepDelay = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
-                "config-default-molar-cv",
-                _session.Config.DefaultMolarHeatCapacityAtConstantVolume,
-                inspecting,
-                static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
+        ConfigFloatSlider(
+            AtmosConfigFields.SleepEpsilon,
+            "config-sleep-epsilon",
+            config.SleepEpsilon,
+            0f,
+            100f,
+            inspecting,
+            static (config, value) => config.SleepEpsilon = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.DefaultDiffusionCoefficient,
-                "config-default-diffusion-coefficient",
-                _session.Config.DefaultDiffusionCoefficient,
-                inspecting,
-                static (config, value) => config.DefaultDiffusionCoefficient = value);
+        ConfigFloatInput(
+            AtmosConfigFields.ThermalConductance,
+            "config-thermal-conductance",
+            config.ThermalConductance,
+            inspecting,
+            static (config, value) => config.ThermalConductance = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.DefaultThermalConductivity,
-                "config-default-thermal-conductivity",
-                _session.Config.DefaultThermalConductivity,
-                inspecting,
-                static (config, value) => config.DefaultThermalConductivity = value);
+        ConfigFloatSlider(
+            AtmosConfigFields.CondensationRateFactor,
+            "config-condensation-rate-factor",
+            config.CondensationRateFactor,
+            0f,
+            1f,
+            inspecting,
+            static (config, value) => config.CondensationRateFactor = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.SpaceTemperature,
-                "config-space-temperature",
-                _session.Config.SpaceTemperature,
-                inspecting,
-                static (config, value) => config.SpaceTemperature = value);
+        ConfigFloatSlider(
+            AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
+            "config-max-pressure-transfer-fraction",
+            config.MaxPressureTransferFractionPerNeighbor,
+            0f,
+            1f,
+            inspecting,
+            static (config, value) => config.MaxPressureTransferFractionPerNeighbor = value);
 
-            ConfigFloatSlider(
-                AtmosConfigFields.BulkFlowCoefficient,
-                "config-bulk-flow-coefficient",
-                _session.Config.BulkFlowCoefficient,
-                0f,
-                0.5f,
-                inspecting,
-                static (config, value) => config.BulkFlowCoefficient = value);
+        ConfigFloatInput(
+            AtmosConfigFields.AccumulatorWakeThreshold,
+            "config-accumulator-wake-threshold",
+            config.AccumulatorWakeThreshold,
+            inspecting,
+            static (config, value) => config.AccumulatorWakeThreshold = value,
+            QuantityFormat.KilopascalsPerPascal);
 
-            ConfigFloatInput(
-                AtmosConfigFields.VacuumThreshold,
-                "config-vacuum-threshold",
-                _session.Config.VacuumThreshold,
-                inspecting,
-                static (config, value) => config.VacuumThreshold = value,
-                QuantityFormat.KilopascalsPerPascal);
+        ConfigIntInput(
+            AtmosConfigFields.AccumulatorMaxAliveTicks,
+            "config-accumulator-max-alive-ticks",
+            config.AccumulatorMaxAliveTicks,
+            inspecting,
+            static (config, value) => config.AccumulatorMaxAliveTicks = value);
 
-            ConfigFloatInput(
-                AtmosConfigFields.SleepDelay,
-                "config-sleep-delay",
-                _session.Config.SleepDelay,
-                inspecting,
-                static (config, value) => config.SleepDelay = value);
-
-            ConfigFloatSlider(
-                AtmosConfigFields.SleepEpsilon,
-                "config-sleep-epsilon",
-                _session.Config.SleepEpsilon,
-                0f,
-                100f,
-                inspecting,
-                static (config, value) => config.SleepEpsilon = value);
-
-            ConfigFloatInput(
-                AtmosConfigFields.ThermalConductance,
-                "config-thermal-conductance",
-                _session.Config.ThermalConductance,
-                inspecting,
-                static (config, value) => config.ThermalConductance = value);
-
-            ConfigFloatSlider(
-                AtmosConfigFields.CondensationRateFactor,
-                "config-condensation-rate-factor",
-                _session.Config.CondensationRateFactor,
-                0f,
-                1f,
-                inspecting,
-                static (config, value) => config.CondensationRateFactor = value);
-
-            ConfigFloatSlider(
-                AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
-                "config-max-pressure-transfer-fraction",
-                _session.Config.MaxPressureTransferFractionPerNeighbor,
-                0f,
-                1f,
-                inspecting,
-                static (config, value) => config.MaxPressureTransferFractionPerNeighbor = value);
-
-            ConfigFloatInput(
-                AtmosConfigFields.AccumulatorWakeThreshold,
-                "config-accumulator-wake-threshold",
-                _session.Config.AccumulatorWakeThreshold,
-                inspecting,
-                static (config, value) => config.AccumulatorWakeThreshold = value,
-                QuantityFormat.KilopascalsPerPascal);
-
-            ConfigIntInput(
-                AtmosConfigFields.AccumulatorMaxAliveTicks,
-                "config-accumulator-max-alive-ticks",
-                _session.Config.AccumulatorMaxAliveTicks,
-                inspecting,
-                static (config, value) => config.AccumulatorMaxAliveTicks = value);
-
-            ConfigFloatInput(
-                AtmosConfigFields.ReferenceMolarMass,
-                "config-reference-molar-mass",
-                _session.Config.ReferenceMolarMass,
-                inspecting,
-                static (config, value) => config.ReferenceMolarMass = value);
-        }
-
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader(Locale.GetString("gas-registry"), ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectGasControls(inspecting);
+        ConfigFloatInput(
+            AtmosConfigFields.ReferenceMolarMass,
+            "config-reference-molar-mass",
+            config.ReferenceMolarMass,
+            inspecting,
+            static (config, value) => config.ReferenceMolarMass = value);
     }
 
     private void ResetConfigurationValues()
     {
-        if (_session.Config == null)
+        if (_document.ConfigDraft.Value == null)
             return;
 
         ClearConfigurationDrafts();
 
         // One SetAtmosConfig call, so the Timeline records the whole reset as a single operation.
-        try
-        {
-            _session.ResetConfiguration();
-            _configurationFeedback = new FeedbackMessage(Locale.GetString("reset-configuration-success"), false);
-        }
-        catch (ConfigurationRejectedException exception)
-        {
-            _configurationFeedback = new FeedbackMessage(
-                Locale.GetString("reset-configuration-failure", ("reason", exception.Reason)),
-                true);
-        }
+        var configDraft = _document.ConfigDraft;
+        int token = configDraft.BeginExternalApply();
+        Send(
+            static session =>
+            {
+                session.ResetConfiguration();
+                return true;
+            },
+            result =>
+            {
+                configDraft.EndApply(token, result.Succeeded);
+                _document.ConfigurationFeedback = result.Exception switch
+                {
+                    null => new FeedbackMessage(Locale.GetString("reset-configuration-success"), false),
+                    ConfigurationRejectedException rejected => new FeedbackMessage(
+                        Locale.GetString("reset-configuration-failure", ("reason", rejected.Reason)),
+                        true),
+                    var exception => new FeedbackMessage(
+                        Locale.GetString("reset-configuration-failure", ("reason", DescribeFailure(exception))),
+                        true)
+                };
+            });
     }
 
     /// <summary>
@@ -862,7 +772,7 @@ public partial class SimulationViewer
     /// </summary>
     private void RenderEulerFlowSettings(bool inspecting)
     {
-        var euler = AtmosConfigSettings.GetSolverConfiguration(_session.Config!, EulerFlowConfig.Default);
+        var euler = AtmosConfigSettings.GetSolverConfiguration(_document.ConfigDraft.Value!, EulerFlowConfig.Default);
 
         ConfigFloatSlider(
             AtmosConfigFields.EulerCourantNumber,
@@ -972,9 +882,8 @@ public partial class SimulationViewer
         if (!changed || value == current)
             return;
 
-        assign(_session.Config!, value);
-        if (!TryCommitConfigurationField(field, value ? "on" : "off"))
-            assign(_session.Config!, current);
+        assign(_document.ConfigDraft.Value!, value);
+        CommitConfigurationField(field, value ? "on" : "off");
     }
 
     private void ConfigReconstructionCombo(EulerReconstruction current, bool readOnly)
@@ -988,9 +897,8 @@ public partial class SimulationViewer
             return;
 
         var chosen = ReconstructionValues[index];
-        ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = chosen });
-        if (!TryCommitConfigurationField(AtmosConfigFields.EulerReconstruction, ReconstructionLabels[index]))
-            ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = current });
+        ReplaceEulerFlow(_document.ConfigDraft.Value!, previous => new EulerFlowConfig(previous) { Reconstruction = chosen });
+        CommitConfigurationField(AtmosConfigFields.EulerReconstruction, ReconstructionLabels[index]);
     }
 
     private static void DrawConfigFieldLabel(AtmosConfigFieldInfo field)
@@ -1004,7 +912,7 @@ public partial class SimulationViewer
     ///     Draws a typed numeric field that holds its edit as a draft and applies it once the field is deactivated.
     /// </summary>
     /// <param name="field">Shared label, unit, and tooltip for the setting.</param>
-    /// <param name="id">ImGui ID and draft key, unique within the Configuration panel.</param>
+    /// <param name="id">ImGui ID and draft key, unique within the Atmos configuration properties.</param>
     /// <param name="current">The value currently in <see cref="AtmosConfig" />.</param>
     /// <param name="readOnly">Shows <paramref name="current" /> without allowing edits.</param>
     /// <param name="assign">Writes an accepted value into the editable configuration.</param>
@@ -1025,14 +933,14 @@ public partial class SimulationViewer
             return;
         }
 
-        float value = _configFloatDrafts.GetValueOrDefault(id, shown);
+        float value = _document.ConfigFloatDrafts.GetValueOrDefault(id, shown);
         if (ImGui.InputFloat($"##{id}", ref value, 0f, 0f, "%g"))
-            SetConfigDraft(_configFloatDrafts, id, value);
+            SetConfigDraft(_document.ConfigFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
             CommitConfigFloat(field, id, current, assign, displayScale);
 
-        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+        ImGuiExtensions.Feedback(_document.ConfigFieldErrors.GetValueOrDefault(id), true);
     }
 
     /// <summary>
@@ -1058,14 +966,14 @@ public partial class SimulationViewer
             return;
         }
 
-        float value = _configFloatDrafts.GetValueOrDefault(id, current);
+        float value = _document.ConfigFloatDrafts.GetValueOrDefault(id, current);
         if (ImGui.SliderFloat($"##{id}", ref value, minimum, maximum, "%.3f"))
-            SetConfigDraft(_configFloatDrafts, id, value);
+            SetConfigDraft(_document.ConfigFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
             CommitConfigFloat(field, id, current, assign);
 
-        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+        ImGuiExtensions.Feedback(_document.ConfigFieldErrors.GetValueOrDefault(id), true);
     }
 
     private void ConfigIntInput(
@@ -1083,33 +991,32 @@ public partial class SimulationViewer
         }
 
         // No step buttons: they are separate items and would make "deactivated after edit" unreliable.
-        int value = _configIntDrafts.GetValueOrDefault(id, current);
+        int value = _document.ConfigIntDrafts.GetValueOrDefault(id, current);
         if (ImGui.InputInt($"##{id}", ref value, 0, 0))
-            SetConfigDraft(_configIntDrafts, id, value);
+            SetConfigDraft(_document.ConfigIntDrafts, id, value);
 
-        if (ImGui.IsItemDeactivatedAfterEdit() && _configIntDrafts.Remove(id, out int draft))
+        if (ImGui.IsItemDeactivatedAfterEdit() && _document.ConfigIntDrafts.Remove(id, out int draft))
         {
             if (draft < 0)
             {
-                _configIntDrafts[id] = draft;
-                _configFieldErrors[id] = Locale.GetString("config-value-minimum-error", ("field", field.Label));
+                _document.ConfigIntDrafts[id] = draft;
+                _document.ConfigFieldErrors[id] = Locale.GetString("config-value-minimum-error", ("field", field.Label));
             }
             else if (draft != current)
             {
-                assign(_session.Config!, draft);
-                if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
-                    assign(_session.Config!, current);
+                assign(_document.ConfigDraft.Value!, draft);
+                CommitConfigurationField(field, FormatConfigValue(draft, field.Unit));
             }
         }
 
-        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+        ImGuiExtensions.Feedback(_document.ConfigFieldErrors.GetValueOrDefault(id), true);
     }
 
     private void SetConfigDraft<T>(Dictionary<string, T> drafts, string id, T value)
     {
         drafts[id] = value;
-        _configFieldErrors.Remove(id);
-        _configurationFeedback = null;
+        _document.ConfigFieldErrors.Remove(id);
+        _document.ConfigurationFeedback = null;
     }
 
     private void CommitConfigFloat(
@@ -1119,167 +1026,55 @@ public partial class SimulationViewer
         Action<AtmosConfig, float> assign,
         float displayScale = 1f)
     {
-        if (!_configFloatDrafts.TryGetValue(id, out float draft))
+        if (!_document.ConfigFloatDrafts.TryGetValue(id, out float draft))
             return;
 
         string? error = AtmosConfigSettings.ValidateConfigValue(field, draft);
         if (error != null)
         {
             // Keep the rejected draft on screen so it can be corrected rather than retyped.
-            _configFieldErrors[id] = error;
+            _document.ConfigFieldErrors[id] = error;
             return;
         }
 
-        _configFloatDrafts.Remove(id);
+        _document.ConfigFloatDrafts.Remove(id);
         if (draft.Equals(current * displayScale))
             return;
 
-        assign(_session.Config!, draft / displayScale);
-        if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
-            assign(_session.Config!, current);
+        assign(_document.ConfigDraft.Value!, draft / displayScale);
+        CommitConfigurationField(field, FormatConfigValue(draft, field.Unit));
     }
 
-    private bool TryCommitConfigurationField(AtmosConfigFieldInfo field, string formattedValue)
+    /// <summary>
+    ///     Sends a copy of the draft to the host. The draft keeps the edit until the host answers. A rejected edit
+    ///     makes the draft reload the applied configuration.
+    /// </summary>
+    private void CommitConfigurationField(AtmosConfigFieldInfo field, string formattedValue)
     {
-        if (_session.TryApplyConfiguration(out string? error))
-        {
-            _configurationFeedback = new FeedbackMessage(
-                Locale.GetString("config-field-set-feedback", ("field", field.Label), ("value", formattedValue)),
-                false);
-
-            return true;
-        }
-
-        _configurationFeedback = new FeedbackMessage(
-            Locale.GetString("config-field-apply-error", ("field", field.Label), ("error", error)),
-            true);
-
-        return false;
+        var configDraft = _document.ConfigDraft;
+        (var candidate, int token) = configDraft.BeginApply();
+        string label = field.Label;
+        Send(
+            session => (Applied: session.TryApplyConfiguration(candidate, out string? error), Error: error),
+            result =>
+            {
+                bool applied = result is { Succeeded: true, Value.Applied: true };
+                configDraft.EndApply(token, applied);
+                string? error = result.Exception is { } exception ? DescribeFailure(exception) : result.Value.Error;
+                _document.ConfigurationFeedback = applied
+                    ? new FeedbackMessage(
+                        Locale.GetString("config-field-set-feedback", ("field", label), ("value", formattedValue)),
+                        false)
+                    : new FeedbackMessage(
+                        Locale.GetString("config-field-apply-error", ("field", label), ("error", error)),
+                        true);
+            });
     }
 
     private static string FormatConfigValue(double value, string unit)
     {
         string number = value.ToString("G6", CultureInfo.InvariantCulture);
         return unit.Length == 0 ? number : $"{number} {unit}";
-    }
-
-    private void RenderToolsPanel()
-    {
-        if (!_showToolsPanel || _simulation == null || _session.Config == null)
-            return;
-
-        using var window = ImGuiExtensions.BeginWindow(
-            "tools",
-            Locale.GetString("common-tools"),
-            ref _showToolsPanel,
-            new Vector2(10, 340),
-            new Vector2(300, 550));
-
-        if (!window.IsVisible)
-            return;
-
-        bool inspecting = DrawInspectionNotice();
-        ImGui.TextDisabled(
-            Locale.GetString(
-                "simulation-inspection-status",
-                ("mode", Locale.GetString(inspecting ? "viewing" : "editing")),
-                ("simulation", GetSimulationName(_simulation.Id))));
-
-        if (ImGui.CollapsingHeader(Locale.GetString("chunks-section"), ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectChunkControls(inspecting);
-
-        if (ImGui.CollapsingHeader(Locale.GetString("voxel-tools-section"), ImGuiTreeNodeFlags.DefaultOpen))
-            RenderVoxelTools(inspecting);
-
-        if (ImGui.CollapsingHeader(Locale.GetString("common-inject-gas")))
-            RenderProjectInjectionControls(inspecting);
-    }
-
-    private void RenderVoxelTools(bool inspecting)
-    {
-        ImGui.SeparatorText(Locale.GetString("viewport-tool-label"));
-        DrawVoxelToolButton(Locale.GetString("select-box-tool"), VoxelEditTool.Select);
-        ImGui.SameLine();
-        DrawVoxelToolButton(Locale.GetString("paint-room-tool"), VoxelEditTool.PaintClassification);
-        DrawVoxelToolButton(Locale.GetString("paint-gas-tool"), VoxelEditTool.PaintGas);
-        ImGui.SameLine();
-        DrawVoxelToolButton(Locale.GetString("erase-gas-tool"), VoxelEditTool.EraseGas);
-
-        bool draftChanged = false;
-        ImGui.BeginDisabled(inspecting);
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputInt(Locale.GetString("classification-label") + "##voxel-edit", ref _voxelClassificationDraft);
-        ImGui.EndDisabled();
-        ImGui.TextDisabled(Locale.GetString("common-classification-values-description"));
-
-        ImGui.BeginDisabled(inspecting);
-        if (_session.Config!.GasRegistry.Count > 0)
-        {
-            _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
-            if (ImGui.BeginCombo("Gas##voxel-edit", FormatGas(_injectionGasId)))
-            {
-                for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
-                {
-                    bool gasSelected = gasId == _injectionGasId;
-                    if (ImGui.Selectable(FormatGas(gasId), gasSelected))
-                    {
-                        _injectionGasId = gasId;
-                        draftChanged = true;
-                    }
-                }
-
-                ImGui.EndCombo();
-            }
-        }
-
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputFloat(Locale.GetString("amount-mol-label") + "##voxel-edit", ref _injectionMoles);
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputFloat(Locale.GetString("temperature-k-label") + "##voxel-edit", ref _injectionTemperature);
-        ImGui.EndDisabled();
-
-        if (draftChanged)
-            _voxelFeedback = null;
-
-        ImGui.SeparatorText(Locale.GetString("selection-section"));
-        if (!_selectedCell.HasValue)
-        {
-            ImGui.TextDisabled(Locale.GetString("no-voxels-selected"));
-        }
-        else
-        {
-            ImGui.Text(
-                Locale.GetString(
-                    "voxels-selected",
-                    ("count", _selectedCells.Count)));
-
-            DrawCellSelectionDetails(_selectedCell.Value);
-
-            ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button(Locale.GetString("common-set-classification")))
-                ApplyClassification(_selectedCells, _voxelClassificationDraft);
-
-            ImGui.SameLine();
-            if (ImGui.Button(Locale.GetString("common-inject-gas") + "##selected-voxels"))
-                ApplyGasInjection(_selectedCells);
-
-            if (ImGui.Button(Locale.GetString("common-clear-gas")))
-                ApplyClearGas(_selectedCells);
-
-            ImGui.EndDisabled();
-            ImGui.SameLine();
-            if (ImGui.Button(Locale.GetString("clear-selection-button")))
-                ClearVoxelSelection();
-        }
-
-        DrawFeedback(_voxelFeedback);
-    }
-
-    private void DrawVoxelToolButton(string label, VoxelEditTool tool)
-    {
-        bool active = _voxelEditTool == tool;
-        if (ImGui.RadioButton(label, active))
-            _voxelEditTool = tool;
     }
 
     private void RenderSliceControls()
@@ -1329,7 +1124,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
 
-        using var readout = ImGuiExtensions.BeginDefinitionTable("slice-readout");
+        using var readout = ImGuiExtensions.BeginWrappedDefinitionTable("slice-readout");
         if (!readout.IsVisible)
             return;
 
@@ -1369,7 +1164,7 @@ public partial class SimulationViewer
         {
             RenderGradientLegend(legend, units, scale);
 
-            using (var readout = ImGuiExtensions.BeginDefinitionTable("legend-readout"))
+            using (var readout = ImGuiExtensions.BeginWrappedDefinitionTable("legend-readout"))
             {
                 if (readout.IsVisible)
                 {
@@ -1465,7 +1260,6 @@ public partial class SimulationViewer
             _legendRangeRevision++;
         }
 
-        ImGui.SameLine();
         ImGui.SetNextItemWidth(NumericInputWidth);
         float maximum = _legendMaximum * scale;
         if (ImGui.InputFloat(Locale.GetString("maximum-short-label") + "##legend-maximum", ref maximum))
@@ -1686,11 +1480,25 @@ public partial class SimulationViewer
         ImGui.EndTooltip();
     }
 
-    private void DrawCellSelectionDetails(VoxelAddress address, int? sliceU = null, int? sliceV = null)
+    /// <summary>
+    ///     Draws a voxel's readout and gas makeup.
+    /// </summary>
+    /// <param name="address">The voxel.</param>
+    /// <param name="sliceU">The voxel's U coordinate in the slice plane, shown when the slice view hovers it.</param>
+    /// <param name="sliceV">The voxel's V coordinate in the slice plane.</param>
+    /// <param name="wrapped">
+    ///     Whether the readout sits in a docked pane, where it wraps to the pane width. Tooltips size themselves to
+    ///     their content and must leave it off.
+    /// </param>
+    private void DrawCellSelectionDetails(
+        VoxelAddress address,
+        int? sliceU = null,
+        int? sliceV = null,
+        bool wrapped = false)
     {
         // The ID must not depend on the voxel: a new table ID restarts column auto-fit, and a hover tooltip that
-        // moves between voxels every frame would keep showing a half-measured table. The Tools panel and the
-        // tooltips are separate windows, so their table IDs already differ.
+        // moves between voxels every frame would keep showing a half-measured table. Properties and the tooltips
+        // are separate windows, so their table IDs already differ.
         ImGui.PushID("voxel-details");
 
         bool exists = _drawData != null && _drawData.TryResolve(address, out _);
@@ -1698,7 +1506,9 @@ public partial class SimulationViewer
         bool hasDetails = exists && TryGetVoxelDetails(address, out details);
         var summary = hasDetails ? GasAmounts.GetGasSummary(details.Gases) : default;
 
-        using (var table = ImGuiExtensions.BeginDefinitionTable("voxel-details"))
+        using (var table = wrapped
+                   ? ImGuiExtensions.BeginWrappedDefinitionTable("voxel-details")
+                   : ImGuiExtensions.BeginDefinitionTable("voxel-details"))
         {
             if (table.IsVisible)
             {
@@ -1868,59 +1678,29 @@ public partial class SimulationViewer
         };
     }
 
+    /// <summary>
+    ///     Reads a voxel from the active simulation's snapshot in the frame.
+    /// </summary>
+    /// <remarks>
+    ///     The snapshot holds the detail fields only while <see cref="GetRequestedSnapshotFields" /> asks for them, so
+    ///     the first frame after the pointer reaches a voxel can show no details.
+    /// </remarks>
     private bool TryGetVoxelDetails(VoxelAddress address, out AtmosVoxelSnapshot snapshot)
     {
-        if (!_snapshotCache.TryGetValue(address.Chunk.Position, out var presented) ||
-            presented.Version.Generation != address.Chunk.Generation)
+        if (_simulation == null ||
+            !_simulation.Snapshots.TryGetValue(address.Chunk.Position, out var chunk) ||
+            chunk.Version.Generation != address.Chunk.Generation)
         {
             snapshot = default;
             return false;
         }
 
-        var presentedVersion = presented.Version;
-        if (_voxelDetailCache.TryGetValue(address, out var cached) &&
-            cached.PresentedVersion == presentedVersion)
-        {
-            snapshot = cached.Snapshot;
-            return cached.IsAvailable;
-        }
-
-        if (_simulation == null)
-        {
-            snapshot = default;
-            return false;
-        }
-
-        try
-        {
-            bool available = _simulation.TryGetVoxelSnapshot(
-                new AtmosChunkHandle(address.Chunk.Position),
-                address.LocalIndex,
-                presentedVersion,
-                out snapshot);
-
-            CacheVoxelDetail(address, presentedVersion, available, snapshot);
-            return available;
-        }
-        catch (Exception exception) when (
-            exception is KeyNotFoundException or ArgumentOutOfRangeException)
-        {
-            snapshot = default;
-            CacheVoxelDetail(address, presentedVersion, false, snapshot);
-            return false;
-        }
+        return VoxelDetails.TryRead(chunk, address.LocalIndex, out snapshot);
     }
 
-    private void CacheVoxelDetail(
-        VoxelAddress address,
-        AtmosChunkVersion presentedVersion,
-        bool isAvailable,
-        AtmosVoxelSnapshot snapshot)
+    private int GetTickRate()
     {
-        if (_voxelDetailCache.Count >= 16 && !_voxelDetailCache.ContainsKey(address))
-            _voxelDetailCache.Clear();
-
-        _voxelDetailCache[address] = new VoxelDetailCacheEntry(presentedVersion, isAvailable, snapshot);
+        return _frame.TickRate > 0 ? _frame.TickRate : AtmosWorld.DefaultTickRate;
     }
 
     private string FormatCellCoordinates(VoxelAddress address)
@@ -1947,122 +1727,116 @@ public partial class SimulationViewer
         if (gasId < 0)
             return Locale.GetString("none");
 
-        if (_session.Config != null && gasId < _session.Config.GasRegistry.Count)
+        if (gasId < Gases.Count)
             return Locale.GetString(
                 "gas-name-id",
-                ("name", _session.Config.GasRegistry[gasId].Name),
+                ("name", Gases[gasId].Name),
                 ("id", gasId));
 
         return Locale.GetString("gas-id", ("id", gasId));
     }
 
-    private void RenderSolutionDetails()
+    /// <summary>
+    ///     Draws the snapshot readout of one chunk: its size, activity, sleep state, and pressure and temperature
+    ///     extremes.
+    /// </summary>
+    /// <param name="simulation">The frame entry of the chunk's simulation.</param>
+    /// <param name="position">The chunk's grid position.</param>
+    private void DrawChunkState(WorkbenchSimulationFrame simulation, Int3 position)
     {
-        if (ImGui.CollapsingHeader(Locale.GetString("simulation-state"), ImGuiTreeNodeFlags.DefaultOpen))
+        if (!simulation.Snapshots.TryGetValue(position, out var snapshot) || snapshot.Dimensions.X <= 0)
         {
-            if (_simulation == null)
-                return;
+            ImGui.TextDisabled(Locale.GetString("waiting-for-chunk-snapshot"));
+            return;
+        }
 
-            if (!TryGetDetailChunk(out var snapshot, out string source))
+        using var table = ImGuiExtensions.BeginWrappedDefinitionTable("chunk-state");
+        if (!table.IsVisible)
+            return;
+
+        var dimensions = snapshot.Dimensions;
+        ImGuiExtensions.DefinitionRow(
+            Locale.GetString("dimensions"),
+            Locale.GetString(
+                "voxel-dimensions",
+                ("x", dimensions.X),
+                ("y", dimensions.Y),
+                ("z", dimensions.Z)));
+
+        ImGuiExtensions.DefinitionRow(Locale.GetString("total-voxels"), (dimensions.X * dimensions.Y * dimensions.Z).ToString());
+        ImGuiExtensions.DefinitionRow(Locale.GetString("active-voxels"), snapshot.ActiveAirCount.ToString());
+        ImGuiExtensions.DefinitionRow(Locale.GetString("active-gases"), snapshot.ActiveGasCount.ToString());
+        ImGuiExtensions.DefinitionRow(
+            Locale.GetString("simulation-state-label"),
+            snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping"));
+
+        ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), FormatSleepTimer(snapshot.SleepTimer));
+
+        // Zero entries are solid or empty voxels, so the average and minimum skip them.
+        if (snapshot.TotalPressure is { Length: > 0 } pressures)
+        {
+            float maximum = pressures[0];
+            double sum = 0d;
+            int count = 0;
+            foreach (float pressure in pressures)
             {
-                ImGui.TextDisabled(
-                    _liveChunkHandles.Count == 0
-                        ? Locale.GetString("no-chunks-in-simulation")
-                        : Locale.GetString("waiting-for-chunk-snapshot"));
+                if (pressure > maximum || float.IsNaN(maximum))
+                    maximum = pressure;
 
-                return;
-            }
-
-            using var table = ImGuiExtensions.BeginDefinitionTable("SimulationState##solution");
-            if (!table.IsVisible)
-                return;
-
-            var dimensions = snapshot.Dimensions;
-            ImGuiExtensions.DefinitionRow(Locale.GetString("chunk"), FormatChunkPosition(snapshot.GridPosition));
-            ImGuiExtensions.DefinitionRow(Locale.GetString("source"), source);
-            ImGuiExtensions.DefinitionRow(
-                Locale.GetString("dimensions"),
-                Locale.GetString(
-                    "voxel-dimensions",
-                    ("x", dimensions.X),
-                    ("y", dimensions.Y),
-                    ("z", dimensions.Z)));
-
-            ImGuiExtensions.DefinitionRow(Locale.GetString("total-voxels"), (dimensions.X * dimensions.Y * dimensions.Z).ToString());
-            ImGuiExtensions.DefinitionRow(Locale.GetString("active-voxels"), snapshot.ActiveAirCount.ToString());
-            ImGuiExtensions.DefinitionRow(Locale.GetString("active-gases"), snapshot.ActiveGasCount.ToString());
-            ImGuiExtensions.DefinitionRow(
-                Locale.GetString("simulation-state-label"),
-                snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping"));
-
-            ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), FormatSleepTimer(snapshot.SleepTimer));
-
-            // Zero entries are solid or empty voxels, so the average and minimum skip them.
-            if (snapshot.TotalPressure is { Length: > 0 } pressures)
-            {
-                float maximum = pressures[0];
-                double sum = 0d;
-                int count = 0;
-                foreach (float pressure in pressures)
+                if (pressure > 0f)
                 {
-                    if (pressure > maximum || float.IsNaN(maximum))
-                        maximum = pressure;
-
-                    if (pressure > 0f)
-                    {
-                        sum += pressure;
-                        count++;
-                    }
+                    sum += pressure;
+                    count++;
                 }
-
-                ImGuiExtensions.DefinitionRow(Locale.GetString("max-pressure"), QuantityFormat.Pressure(maximum));
-                ImGuiExtensions.DefinitionRow(
-                    Locale.GetString("average-pressure-non-zero-voxels"),
-                    QuantityFormat.Pressure(count == 0 ? 0d : sum / count));
-            }
-            else
-            {
-                ImGuiExtensions.DefinitionRow(
-                    Locale.GetString("pressure"),
-                    Locale.GetString("not-captured-current-visualization"),
-                    ViewerTheme.SecondaryText);
             }
 
-            if (snapshot.Temperature is { Length: > 0 } temperatures)
+            ImGuiExtensions.DefinitionRow(Locale.GetString("max-pressure"), QuantityFormat.Pressure(maximum));
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("average-pressure-non-zero-voxels"),
+                QuantityFormat.Pressure(count == 0 ? 0d : sum / count));
+        }
+        else
+        {
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("pressure"),
+                Locale.GetString("not-captured-current-visualization"),
+                ViewerTheme.SecondaryText);
+        }
+
+        if (snapshot.Temperature is { Length: > 0 } temperatures)
+        {
+            float maximum = temperatures[0];
+            float minimum = 0f;
+            bool hasPositive = false;
+            foreach (float temperature in temperatures)
             {
-                float maximum = temperatures[0];
-                float minimum = 0f;
-                bool hasPositive = false;
-                foreach (float temperature in temperatures)
+                if (temperature > maximum || float.IsNaN(maximum))
+                    maximum = temperature;
+
+                if (temperature > 0f && (!hasPositive || temperature < minimum))
                 {
-                    if (temperature > maximum || float.IsNaN(maximum))
-                        maximum = temperature;
-
-                    if (temperature > 0f && (!hasPositive || temperature < minimum))
-                    {
-                        minimum = temperature;
-                        hasPositive = true;
-                    }
+                    minimum = temperature;
+                    hasPositive = true;
                 }
-
-                ImGuiExtensions.DefinitionRow(
-                    Locale.GetString("min-temperature-non-zero-voxels"),
-                    QuantityFormat.Temperature(minimum));
-
-                ImGuiExtensions.DefinitionRow(Locale.GetString("max-temperature"), QuantityFormat.Temperature(maximum));
             }
-            else
-            {
-                ImGuiExtensions.DefinitionRow(
-                    Locale.GetString("temperature"),
-                    Locale.GetString("not-captured-current-visualization"),
-                    ViewerTheme.SecondaryText);
-            }
+
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("min-temperature-non-zero-voxels"),
+                QuantityFormat.Temperature(minimum));
+
+            ImGuiExtensions.DefinitionRow(Locale.GetString("max-temperature"), QuantityFormat.Temperature(maximum));
+        }
+        else
+        {
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("temperature"),
+                Locale.GetString("not-captured-current-visualization"),
+                ViewerTheme.SecondaryText);
         }
     }
 
     /// <summary>
-    ///     Readout of <see cref="AtmosSimulation.LastFlowDiagnostics" />. Hidden while the diagnostics are all zero,
+    ///     Readout of <see cref="WorkbenchSimulationFrame.FlowDiagnostics" />. Hidden while the diagnostics are all zero,
     ///     which is the case under the legacy transport model and before the first Euler tick.
     /// </summary>
     private void RenderFlowDiagnostics()
@@ -2070,14 +1844,14 @@ public partial class SimulationViewer
         if (_simulation == null)
             return;
 
-        var flow = _simulation.LastFlowDiagnostics;
+        var flow = _simulation.FlowDiagnostics;
         if (flow == default)
             return;
 
         if (!ImGui.CollapsingHeader(Locale.GetString("flow"), ImGuiTreeNodeFlags.DefaultOpen))
             return;
 
-        using var table = ImGuiExtensions.BeginDefinitionTable("FlowDiagnostics##flow");
+        using var table = ImGuiExtensions.BeginWrappedDefinitionTable("FlowDiagnostics##flow");
         if (!table.IsVisible)
             return;
 

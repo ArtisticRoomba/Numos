@@ -250,7 +250,7 @@ public sealed class WorkbenchRegionTests
         using var session = CreateSession();
         session.SetSolverEnabled("boundary-flow", false);
 
-        bool full = session.ResetSolvers();
+        bool full = session.ResetSolvers().Applied;
 
         Assert.Multiple(() =>
         {

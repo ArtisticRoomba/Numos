@@ -191,7 +191,7 @@ public static class AtmosConfigFields
     public readonly static AtmosConfigFieldInfo EulerMaxVelocity = new(
         "Max velocity",
         "m/s",
-        "Speeds are clamped to this; a safety net that only engages when a state has gone wrong.",
+        "Speeds are clamped to this.",
         ConfigDomain.Positive);
 
     public readonly static AtmosConfigFieldInfo EulerWakePressureDelta = new(
@@ -208,12 +208,12 @@ public static class AtmosConfigFields
     public readonly static AtmosConfigFieldInfo EulerReconstruction = new(
         "Reconstruction",
         "",
-        "How face states are built. Only first order exists today.");
+        "How face states are built.");
 
     public readonly static AtmosConfigFieldInfo EulerMomentumDamping = new(
         "Momentum damping",
         "1/s",
-        "Exponential decay rate applied to momentum each tick; a stand-in for wall friction. 0 disables it.",
+        "Exponential decay rate applied to momentum each tick. 0 disables it.",
         ConfigDomain.NonNegative);
 
     public readonly static AtmosConfigFieldInfo EulerDefaultLinkAreaFraction = new(

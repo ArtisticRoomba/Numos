@@ -78,7 +78,8 @@ public sealed class ConfigurationRejectedException : InvalidOperationException
 ///     </para>
 ///     <para>
 ///         A session has no locking. Call it from one thread. <see cref="LoadReplay" /> is the exception and can run
-///         on a worker thread.
+///         on a worker thread. <see cref="WorkbenchHost" /> owns a session on a thread of its own, so a front end can
+///         keep drawing while the world ticks.
 ///     </para>
 /// </remarks>
 public sealed partial class WorkbenchSession : IDisposable
@@ -136,7 +137,9 @@ public sealed partial class WorkbenchSession : IDisposable
     /// <remarks>
     ///     This instance stays the same for the life of the project. Presentation code can hold it. After a timeline
     ///     move the session copies the restored world values into it. Edits take effect only after
-    ///     <see cref="TryApplyConfiguration" /> or <see cref="ApplyConfiguration" />.
+    ///     <see cref="TryApplyConfiguration(out string)" /> or <see cref="ApplyConfiguration" />.
+    ///     <see cref="TryApplyConfiguration(AtmosConfig, out string)" /> applies a separate copy and then copies the
+    ///     applied values into this instance.
     /// </remarks>
     public AtmosConfig? Config { get; private set; }
 
@@ -171,6 +174,31 @@ public sealed partial class WorkbenchSession : IDisposable
         ActiveSimulationId is { } id && World != null && World.TryGetSimulation(id, out var simulation)
             ? simulation
             : null;
+
+    /// <summary>
+    ///     Counts changes to what the project is made of, as opposed to its simulated state.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Solver edits, gas edits, applied configuration, and simulation name changes increase it. Opening or
+    ///         closing a project and each timeline move increase it too, because a move can restore a different
+    ///         configuration or solver pipeline.
+    ///     </para>
+    ///     <para>
+    ///         A front end compares this with the value it saw last and rereads the solver steps, gases, and
+    ///         configuration only when it changed. A failed edit can still increase it.
+    ///     </para>
+    /// </remarks>
+    public long DefinitionRevision { get; private set; }
+
+    /// <summary>
+    ///     Counts the failures this session has written to <see cref="Log" />.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="WorkbenchHost" /> compares it before and after a command, so it logs a failure only when the
+    ///     session has not already done so.
+    /// </remarks>
+    internal long FailureCount { get; private set; }
 
     /// <summary>
     ///     Raised after a new project is ready and just before the old one is disposed.
@@ -266,6 +294,7 @@ public sealed partial class WorkbenchSession : IDisposable
         Branches = new ReplayBranchSession(world, timeline);
         PlaybackElapsed = 0f;
         TimelineRevision++;
+        DefinitionRevision++;
         ReconcileSimulations();
         if (firstSimulation != null)
             SetActiveSimulation(firstSimulation.Id);
@@ -287,6 +316,7 @@ public sealed partial class WorkbenchSession : IDisposable
         _chunkDimensions = default;
         _simulationNames.Clear();
         TimelineRevision++;
+        DefinitionRevision++;
     }
 
     private void Info(string message)
@@ -301,6 +331,7 @@ public sealed partial class WorkbenchSession : IDisposable
 
     private void Failed(string action, Exception exception)
     {
+        FailureCount++;
         Log.Write(
             WorkbenchLogLevel.Error,
             LogSource,

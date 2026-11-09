@@ -922,7 +922,7 @@ var result = simulation.EditVoxelBox(
 ```
 
 ## Using the viewer
-`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs. The visualization list covers temperature, pressure, gas composition, speed, density, the three velocity components, and numerical schlieren. `Numos.CoreSim.FlowFieldMath` holds the density, gradient, and schlieren formulas, so the viewer and the headless exports agree.
+`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the fonts and the window icon the application needs. The visualization list covers temperature, pressure, gas composition, speed, density, the three velocity components, and numerical schlieren. `Numos.CoreSim.FlowFieldMath` holds the density, gradient, and schlieren formulas, so the viewer and the headless exports agree.
 
 `Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation. A front end calls the session and reports its failures.
 
@@ -936,26 +936,57 @@ dotnet add package Numos.Viewer --prerelease
 
 The viewer needs a desktop environment with graphics support. To host it from C#, construct a `SimulationViewer` and call `Run()`. The About dialog shows the Viewer and CoreSim package versions, source references, and commit hashes, so a tester can identify the exact build.
 
+The window has a toolbar for file, run, and voxel-tool actions, a simulation tree with a Properties pane beside the viewports, and the Timeline along the bottom. Select a node in the tree to inspect or edit it in Properties.
+
 The Viewer has two velocity readouts.
 
-The "Velocity arrows" row in the View panel's rendering-style table draws an arrow from each drawn voxel along its
-velocity, in the 3D viewport and in the slice (which shows only the two in-plane components). The arrow-scale slider
-sets how many seconds of travel one arrow represents: at the default 0.05 s, a voxel moving at 20 m/s draws a
-one-voxel arrow.
+The "Velocity arrows" row in the rendering-style table of the Visualization properties draws an arrow from each drawn
+voxel along its velocity, in the 3D viewport and in the slice (which shows only the two in-plane components). The
+arrow-scale slider sets how many seconds of travel one arrow represents: at the default 0.05 s, a voxel moving at 20 m/s
+draws a one-voxel arrow.
 
 The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
 
 Three overlays cost one draw call per voxel, so the viewer limits them. The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels. Velocity arrows stop at 4,000 per view, and a larger scene shows every n-th voxel. The 2D view outlines cells only when a cell is at least 8 pixels wide.
 
-The 2D slice view shows one plane through every chunk. The Axis and Slice controls pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
+The 2D slice view shows one plane through every chunk. The Axis and Slice controls in the 2D slice properties pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
 
-The Configuration panel starts with a "Solver Pipeline" section. It lists the stages in execution order. Each row has an enabled checkbox, move buttons, and a description on hover. Built-in stages also have a remove button. The host owns custom stages, so the viewer cannot remove them. The "Add stage" combo inserts a missing built-in stage at its canonical position. The "Euler" and "Legacy" buttons swap the stages that move gas and keep the rest. "Reset to defaults" restores the built-in layout. Every click is one recorded operation, so the timeline replays it at the same tick. A row expands to show the stage settings, such as the Euler flow settings. The panel warns when no stage moves gas or when `euler-flow` and `advection` both run. The panel is read-only while the timeline inspects history. The replay inspector lists the recorded stage list and the solver configuration keys.
+Select the Solvers node in the simulation tree to edit the pipeline in Properties. The stage table lists the stages in execution order. Each row has an enabled checkbox, the tick interval, move buttons, and a description on hover. Built-in stages also have a remove button. The host owns custom stages, so the viewer cannot remove them. The "Add stage" combo inserts a missing built-in stage at its canonical position. The "Euler" and "Legacy" buttons swap the stages that move gas and keep the rest. "Reset to defaults" restores the built-in layout. Every click is one recorded operation, so the timeline replays it at the same tick. Selecting a stage in the table or the tree shows its settings, such as the Euler flow settings. The table warns when no stage moves gas or when `euler-flow` and `advection` both run. It is read-only while the timeline inspects history. A recorded solver-layout operation selected in the Timeline shows its stage list.
 
-On a project that runs the `euler-flow` stage, the Simulation panel shows a "Flow" readout of
+On a project that runs the `euler-flow` stage, the active simulation's Properties show a "Flow" readout of
 `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time, whether the substep cap engaged, the largest Courant
 number and signal speed, and the clamp and negative-value counters. Anything that means the tick did not finish cleanly
-is drawn in the caution colour. The Create Simulation dialog picks the initial transport model. Solver Pipeline changes
+is drawn in the caution colour. The Create Simulation dialog picks the initial transport model. The Solvers node changes
 it later.
+
+### Running a session off the UI thread
+
+A slow tick must not freeze a window. `WorkbenchHost` takes ownership of a session and runs it on a dedicated thread named "Numos simulation". It does not use a pool thread, because the solver's parallel phases use the pool. After construction, only the host thread calls the session. A front end sends work with `Submit` or `Post` and draws from the latest `WorkbenchFrame`.
+
+Commands run between ticks, in the order they were submitted. The world records each edit at the tick boundary where it applied, so a replay reproduces it. An edit sent while the host runs lands on whatever tick the host has reached, which is usually a frame newer than the one on screen. A command closure must copy what it needs when it is submitted, because the front end keeps changing its own state while the command waits.
+
+The host loop keeps three rules:
+
+- While running, it ticks one tick at a time against the wall clock and drains commands between ticks. `Pause` and edits therefore wait at most one tick.
+- It keeps at most 0.25 s of backlog, the same cap as `AtmosWorld.Update`. A world slower than real time falls behind, and `WorkbenchFrame.RealtimeFactor` drops below 1.
+- `Step(n)` ticks the same way, so other commands run between its ticks and `Pause` stops it. A scrub bar calls `SeekLatest` every frame, and the host runs only the newest target.
+
+The host builds a frame only after `RequestFrame`, so a paused or hidden front end costs nothing. A frame is immutable. It holds the run state, detached chunk snapshots, link sets, solver steps, gases, a configuration copy, and the timeline. Each simulation's snapshot map is the previous map plus the chunks that changed since, so a front end that skips frames misses nothing. A section that did not change keeps the same object, and a front end compares references to skip its own rebuild.
+
+```csharp
+using var host = new WorkbenchHost(session);
+host.Submit(s => s.AddChunk(new Int3(1, 0, 0)), result => ShowError(result.Exception));
+host.Run();
+
+// Once per UI frame:
+host.DrainCompletions();                // runs Submit callbacks on this thread
+host.RequestFrame(AtmosChunkSnapshotFields.Pressure);
+WorkbenchFrame frame = host.Frame;      // the latest published frame
+```
+
+`SubmitJob` queues a long job, such as loading a replay. The host cannot tick or drain commands while it runs. It publishes copies of the last frame with `RunState` set to `Busy`, the job's `BusyLabel`, and its `BusyProgress`, so a front end can show what it waits for. A step on the live head reports `WorkbenchHost.AdvanceJobLabel` the same way. While the timeline inspects history, `Run` plays the recording back in real time and `Step` seeks forward. Both stop at the head. A client without a frame loop, such as a script runner, blocks on `WaitForCompletions` until a result is ready.
+
+A command that throws comes back as a failed `HostResult<T>`, and the host thread keeps running. `ProjectEpoch` increases when a project is created, opened, or closed, so a front end knows when to drop its per-project state. `Dispose` waits for the thread to stop and then disposes the session.
 
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.

@@ -1,7 +1,8 @@
+using System.Globalization;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.Maths;
-using Numos.SimDrawer;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
@@ -17,228 +18,193 @@ public partial class SimulationViewer
         AtmosTransportModel transportModel = AtmosTransportModel.Euler,
         int tickRate = AtmosWorld.DefaultTickRate)
     {
-        SimulationFrameBuilder? frameBuilder = null;
-        _session.CreateProject(
-            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases, transportModel, tickRate),
-            config =>
-            {
-                var visualizations = VisualizationRegistry.CreateDefault(config);
-                _configureVisualizations?.Invoke(visualizations);
-                frameBuilder = new SimulationFrameBuilder(config, visualizations);
-            });
+        var options = new WorkbenchProjectOptions(
+            projectName,
+            chunkWidth,
+            chunkHeight,
+            chunkDepth,
+            includeDefaultGases,
+            transportModel,
+            tickRate);
 
-        _frameBuilder = frameBuilder;
-        _isPaused = true;
-        _showConfigurationPanel = true;
-        _knownSimulationRevision = -1;
-        ReconcileSimulationSurfaces();
-        RequestNextFrame();
+        _createProjectPending = true;
+        Send(
+            session =>
+            {
+                session.CreateProject(options);
+                return true;
+            },
+            result =>
+            {
+                _createProjectPending = false;
+                if (result.Exception is { } exception)
+                {
+                    _createProjectError = DescribeFailure(exception);
+                    return;
+                }
+
+                _closeCreateProjectModal = true;
+                _showTreePanel = true;
+                _showPropertiesPanel = true;
+            });
     }
 
     /// <summary>
-    ///     Drops every presentation object tied to the project that is closing. The session raises
-    ///     <see cref="WorkbenchSession.ProjectClosing" /> before it disposes the world.
+    ///     Drops every presentation object tied to the project that closed. <see cref="UpdateHost" /> calls it on the
+    ///     UI thread when the frame's project epoch changes, after the host has already replaced the world.
     /// </summary>
     private void ResetProjectPresentation()
     {
-        SaveActiveSurfaceState();
-        foreach (var surface in _simulationSurfaces)
-            surface.Dispose();
+        _document.Dispose();
+        _document = new ProjectDocument();
+        ResetActiveSurfaceCaches();
+    }
 
-        _simulationSurfaces.Clear();
-        _viewport = null;
-        _simulation = null;
-        _knownSimulationRevision = -1;
-        _simulationFeedback = null;
-        _simulationPendingRemoval = null;
-        _removeSimulationModalOpen = false;
-        _requestRemoveSimulation = false;
-        _selectedLinkSet = null;
-        _topologyFeedback = null;
-        _topologyPendingRemoval = null;
-        _removeTopologyModalOpen = false;
-        _requestRemoveTopology = false;
-        _portalFirst = null;
-        _portalSecond = null;
-        _timelineOperation = null;
-        _timelineError = null;
-        _pendingScrubTick = null;
-        _timelineFirstTick = 0;
-        _frameBuilder = null;
+    /// <summary>
+    ///     Sends a chunk edit for the active simulation and shows its outcome beside the chunk controls.
+    /// </summary>
+    /// <param name="edit">Runs on the host thread with the simulation id. It must capture only copied values.</param>
+    /// <param name="success">The feedback on success.</param>
+    /// <param name="failure">Builds the feedback from the failure message.</param>
+    private void SendChunkEdit(
+        Action<WorkbenchSession, AtmosSimulationId> edit,
+        string success,
+        Func<string, string> failure)
+    {
+        if (_simulation is not { } simulation)
+            return;
 
-        _liveChunkHandles.Clear();
-        _liveChunkPositions.Clear();
-        _chunkCollectionRevision = -1;
-        _snapshotCache.Clear();
-        _snapshotRequests.Clear();
-        _snapshotSourceVersion = 0;
-        _orderedSnapshots.Clear();
-        _staleSnapshotKeys.Clear();
-        _drawData = null;
-        _sliceDrawData = null;
-        _sliceSourceFrame = null;
-        _sliceFrameChunk = null;
-        _sliceCameraFit = true;
-        _sliceRenderer?.ReleaseTexture();
-        _hoveredSliceCell = null;
-        _hovered3DCell = null;
-        _selectedCell = null;
-        _selectedCells.Clear();
-        _paintedCells.Clear();
-        _lastPaintedCell = null;
-        _voxelDragStart = null;
-        _voxelDragAnchor = null;
-        _voxelDragViewport = 0;
-        _voxelDetailCache.Clear();
-        _highlights.Clear();
-        _focusedChunk = null;
-        _cameraInitialized = false;
-        _frameSceneOnNextPresentation = false;
-
-        _steppedToTick = null;
-        _toolChunkPosition = null;
-        _chunkPendingRemoval = null;
-        _removeChunkModalOpen = false;
-        _requestRemoveChunk = false;
-        _resetConfigurationModalOpen = false;
-        _requestResetConfiguration = false;
-        _chunkFeedback = null;
-        _voxelFeedback = null;
-        _injectionFeedback = null;
-        _gasRegistryFeedback = null;
-        _newGasFeedback = null;
-        _configurationFeedback = null;
-        _solverFeedback = null;
-        _solverAddDraft = null;
-        _selectedSolverStage = null;
-        ClearConfigurationDrafts();
+        var id = simulation.Id;
+        Send(
+            session =>
+            {
+                edit(session, id);
+                return true;
+            },
+            result => _document.ChunkFeedback = result.Exception is { } exception
+                ? new FeedbackMessage(failure(DescribeFailure(exception)), true)
+                : new FeedbackMessage(success, false));
     }
 
     private void AddProjectChunk(Int3 position, int roomId)
     {
-        if (_session.World == null)
-            return;
-
-        try
-        {
-            _session.AddChunk(position, roomId);
-            _frameSceneOnNextPresentation = true;
-            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-add-chunk",
-                ("position", FormatChunkPosition(position))), false);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentOutOfRangeException or InvalidOperationException)
-        {
-            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-add-chunk-failed",
-                ("position", FormatChunkPosition(position)), ("message", exception.Message)), true);
-        }
+        _frameSceneOnNextPresentation = true;
+        string label = FormatChunkPosition(position);
+        SendChunkEdit(
+            (session, id) => session.AddChunk(position, roomId, id),
+            Locale.GetString("message-project-add-chunk", ("position", label)),
+            message => Locale.GetString(
+                "message-project-add-chunk-failed",
+                ("position", label),
+                ("message", message)));
     }
 
     private void RemoveProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_session.World == null)
+        if (_simulation is not { } simulation)
             return;
 
-        _chunkFeedback = _session.RemoveChunk(chunk.Position)
-            ? new FeedbackMessage(Locale.GetString("message-project-remove-chunk",
-                ("position", FormatChunkPosition(chunk.Position))), false)
-            : new FeedbackMessage(Locale.GetString("message-project-remove-chunk-not-found",
-                ("position", FormatChunkPosition(chunk.Position))), true);
+        var id = simulation.Id;
+        var position = chunk.Position;
+        string label = FormatChunkPosition(position);
+        Send(
+            session => session.RemoveChunk(position, id),
+            result => _document.ChunkFeedback = result switch
+            {
+                { Exception: { } exception } => new FeedbackMessage(
+                    Locale.GetString(
+                        "message-project-remove-chunk-failed",
+                        ("position", label),
+                        ("message", DescribeFailure(exception))),
+                    true),
+                { Value: true } => new FeedbackMessage(
+                    Locale.GetString("message-project-remove-chunk", ("position", label)),
+                    false),
+                _ => new FeedbackMessage(
+                    Locale.GetString("message-project-remove-chunk-not-found", ("position", label)),
+                    true)
+            });
     }
 
     private void SealProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_session.World == null)
-            return;
-
-        try
-        {
-            _session.SealChunk(chunk.Position);
-            _chunkFeedback = new FeedbackMessage(
-                Locale.GetString("message-project-seal-chunk",
-                    ("position", FormatChunkPosition(chunk.Position))),
-                false);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-seal-chunk-failed",
-                ("position", FormatChunkPosition(chunk.Position)), ("message", exception.Message)), true);
-        }
+        var position = chunk.Position;
+        string label = FormatChunkPosition(position);
+        SendChunkEdit(
+            (session, id) => session.SealChunk(position, id),
+            Locale.GetString("message-project-seal-chunk", ("position", label)),
+            message => Locale.GetString(
+                "message-project-seal-chunk-failed",
+                ("position", label),
+                ("message", message)));
     }
 
     private void UnsleepProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_session.World == null)
-            return;
-
-        try
-        {
-            _session.WakeChunk(chunk.Position);
-            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-unsleep-chunk",
-                ("position", FormatChunkPosition(chunk.Position))), false);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            _chunkFeedback = new FeedbackMessage(exception.Message, true);
-        }
+        var position = chunk.Position;
+        SendChunkEdit(
+            (session, id) => session.WakeChunk(position, id),
+            Locale.GetString("message-project-unsleep-chunk", ("position", FormatChunkPosition(position))),
+            static message => message);
     }
 
     private void FillProjectChunk(AtmosChunkHandle chunk, int classification)
     {
-        if (_session.World == null)
-            return;
-
-        try
-        {
-            _session.FillChunk(chunk.Position, classification);
-            _chunkFeedback = new FeedbackMessage(
-                Locale.GetString("message-project-fill-chunk",
-                    ("position", FormatChunkPosition(chunk.Position)), ("classification", classification)),
-                false);
-        }
-        catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
-        {
-            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-fill-chunk-failed",
-                ("position", FormatChunkPosition(chunk.Position)), ("message", exception.Message)), true);
-        }
+        var position = chunk.Position;
+        string label = FormatChunkPosition(position);
+        SendChunkEdit(
+            (session, id) => session.FillChunk(position, classification, id),
+            Locale.GetString(
+                "message-project-fill-chunk",
+                ("position", label),
+                ("classification", classification)),
+            message => Locale.GetString(
+                "message-project-fill-chunk-failed",
+                ("position", label),
+                ("message", message)));
     }
 
     private void AddProjectGas(GasProperties gas)
     {
-        if (_session.Config == null)
+        if (!_frame.HasProject)
             return;
 
-        try
-        {
-            int gasId = _session.AddGas(gas);
-            _newGasFeedback = new FeedbackMessage(Locale.GetString("message-project-add-gas",
-                ("name", gas.Name), ("id", gasId)), false);
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            _newGasFeedback = new FeedbackMessage(exception.Message, true);
-        }
+        var configDraft = _document.ConfigDraft;
+        int token = configDraft.BeginExternalApply();
+        Send(
+            session => session.AddGas(gas),
+            result =>
+            {
+                configDraft.EndApply(token, result.Succeeded);
+                _document.NewGasFeedback = result.Exception is { } exception
+                    ? new FeedbackMessage(DescribeFailure(exception), true)
+                    : new FeedbackMessage(
+                        Locale.GetString("message-project-add-gas", ("name", gas.Name), ("id", result.Value)),
+                        false);
+            });
     }
 
     private void RemoveProjectGas(int gasId)
     {
-        if (_session.World == null ||
-            _session.Config == null ||
-            gasId < 0 ||
-            gasId >= _session.Config.GasRegistry.Count)
+        if (!_frame.HasProject || gasId < 0 || gasId >= Gases.Count)
             return;
 
-        string name = _session.Config.GasRegistry[gasId].Name;
-        try
-        {
-            _session.RemoveGas(gasId);
-            _gasRegistryFeedback = new FeedbackMessage(Locale.GetString("message-project-remove-gas",
-                ("name", name)), false);
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            _gasRegistryFeedback = new FeedbackMessage(exception.Message, true);
-        }
+        string name = Gases[gasId].Name;
+        var configDraft = _document.ConfigDraft;
+        int token = configDraft.BeginExternalApply();
+        Send(
+            session =>
+            {
+                session.RemoveGas(gasId);
+                return true;
+            },
+            result =>
+            {
+                configDraft.EndApply(token, result.Succeeded);
+                _document.GasRegistryFeedback = result.Exception is { } exception
+                    ? new FeedbackMessage(DescribeFailure(exception), true)
+                    : new FeedbackMessage(Locale.GetString("message-project-remove-gas", ("name", name)), false);
+            });
     }
 
     private void InjectProjectGas(
@@ -250,32 +216,35 @@ public partial class SimulationViewer
         float moles,
         float temperature)
     {
-        if (_session.ActiveSimulation == null || _session.Config == null)
+        if (_simulation is not { } simulation)
             return;
 
-        if (gasId < 0 || gasId >= _session.Config.GasRegistry.Count)
+        if (gasId < 0 || gasId >= Gases.Count)
         {
-            _injectionFeedback = Report(Locale.GetString("message-project-inject-gas-not-selected"), true);
+            _document.InjectionFeedback = Report(Locale.GetString("message-project-inject-gas-not-selected"), true);
             return;
         }
 
-        try
-        {
-            var cell = _session.GetCell(chunk.Position, x, y, z);
-            _session.AddVoxelGas(cell, gasId, moles, temperature);
-            _injectionFeedback = new FeedbackMessage(
-                Locale.GetString("message-project-inject-gas",
-                    ("moles", $"{moles:G}"),
-                    ("name", _session.Config.GasRegistry[gasId].Name),
-                    ("pos", new Int3(x, y, z).ToString())),
-                false);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
-        {
-            _injectionFeedback = new FeedbackMessage(Locale.GetString("message-project-inject-gas-failed",
-                ("message", exception.Message)), true);
-        }
+        var id = simulation.Id;
+        var position = chunk.Position;
+        string success = Locale.GetString(
+            "message-project-inject-gas",
+            ("moles", $"{moles:G}"),
+            ("name", Gases[gasId].Name),
+            ("pos", new Int3(x, y, z).ToString()));
+
+        Send(
+            session =>
+            {
+                var cell = session.GetCell(position, x, y, z, id);
+                session.AddVoxelGas(cell, gasId, moles, temperature, id);
+                return true;
+            },
+            result => _document.InjectionFeedback = result.Exception is { } exception
+                ? new FeedbackMessage(
+                    Locale.GetString("message-project-inject-gas-failed", ("message", DescribeFailure(exception))),
+                    true)
+                : new FeedbackMessage(success, false));
     }
 
     private void IgniteProjectSource(
@@ -286,21 +255,26 @@ public partial class SimulationViewer
         float temperature,
         float volume)
     {
-        if (_simulation == null || _session.Config == null)
+        if (_simulation is not { } simulation)
             return;
 
-        try
-        {
-            _simulation.IgniteVoxel(chunk, x, y, z, temperature, volume);
-            _injectionFeedback = Report(
-                Locale.GetString("message-project-ignite-source-success"),
-                false);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
-        {
-            _injectionFeedback = new FeedbackMessage(exception.Message, true);
-        }
+        var id = simulation.Id;
+        var position = chunk.Position;
+        string success = Locale.GetString(
+            "message-project-ignite-source-success",
+            ("pos", new Int3(x, y, z).ToString()),
+            ("chunk", FormatChunkPosition(position)),
+            ("temperature", temperature.ToString("G", CultureInfo.InvariantCulture)));
+
+        Send(
+            session =>
+            {
+                session.IgniteVoxel(session.GetCell(position, x, y, z, id), temperature, volume, id);
+                return true;
+            },
+            result => _document.VoxelFeedback = result.Exception is { } exception
+                ? new FeedbackMessage(DescribeFailure(exception), true)
+                : Report(success, false));
     }
 
     /// <summary>
@@ -311,6 +285,4 @@ public partial class SimulationViewer
         SetProjectMessage(message, isError);
         return new FeedbackMessage(message, isError);
     }
-
-    private readonly record struct FeedbackMessage(string Message, bool IsError);
 }

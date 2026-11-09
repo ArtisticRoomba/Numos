@@ -345,6 +345,34 @@ public sealed partial class WorkbenchSession
             });
     }
 
+    /// <summary>
+    ///     Adds an ignition source to one voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="cell">The voxel to ignite.</param>
+    /// <param name="temperature">The temperature of the ignition source, in kelvins.</param>
+    /// <param name="volume">The volume of the ignition source, in cubic metres.</param>
+    /// <param name="simulation">The target simulation, or <see langword="null" /> for the active one.</param>
+    /// <remarks>
+    ///     The source lasts until the next <c>gas-reactions</c> pass. Solid and void voxels ignore it. The world
+    ///     records the ignition, so it replays at the same position.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The voxel index is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">The chunk does not exist.</exception>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
+    public void IgniteVoxel(VoxelCell cell, float temperature, float volume, AtmosSimulationId? simulation = null)
+    {
+        Guard(
+            $"Could not ignite a voxel in chunk {FormatChunk(cell.ChunkPosition)}",
+            () =>
+            {
+                ThrowIfInspecting();
+                RequireSimulation(simulation)
+                    .IgniteVoxel(new AtmosChunkHandle(cell.ChunkPosition), cell.LocalIndex, temperature, volume);
+
+                Info($"Ignited voxel {cell.LocalIndex} of chunk {FormatChunk(cell.ChunkPosition)} at {temperature:G4} K.");
+            });
+    }
+
     private int EditVoxels(
         IEnumerable<VoxelCell> cells,
         AtmosSimulationId? simulation,

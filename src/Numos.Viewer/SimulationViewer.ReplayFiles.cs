@@ -5,10 +5,9 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.Serialization;
 using Numos.Serialization.FileSystem;
-using Numos.SimDrawer;
 using Numos.Viewer.Ui;
-using Raylib_cs;
 using Numos.Workbench;
+using Raylib_cs;
 
 namespace Numos.Viewer;
 
@@ -17,12 +16,22 @@ public partial class SimulationViewer
     private const string ReplayExtension = ReplayPaths.Extension;
     private CancellationTokenSource? _replayFileCancellation;
     private string? _replayFileError;
-    private float _replayFileProgress;
-    private Task<LoadedReplay>? _replayLoadTask;
+
+    /// <summary>
+    ///     Whether a replay load job is queued or running on the host. The progress modal reads its progress from the
+    ///     busy frame.
+    /// </summary>
+    private bool _replayLoadPending;
+
     private string _replayOpenPath = string.Empty;
     private string _replaySavePath = string.Empty;
     private int _replaySaveRange;
     private Task? _replaySaveTask;
+
+    /// <summary>
+    ///     Whether the host is still capturing the replay for <see cref="_replaySaveTask" />.
+    /// </summary>
+    private bool _replaySavePreparing;
     private bool _requestOpenReplayModal;
     private bool _requestSaveReplayModal;
 
@@ -86,10 +95,10 @@ public partial class SimulationViewer
 
     private void RequestSaveReplay()
     {
-        if (_session.World == null || _session.Timeline == null || _session.Branches == null) return;
+        if (!_frame.HasProject || _frame.Timeline == null) return;
 
         if (string.IsNullOrWhiteSpace(_replaySavePath))
-            _replaySavePath = ReplayPaths.SanitizeName(_session.ProjectName ?? "simulation") + ReplayExtension;
+            _replaySavePath = ReplayPaths.SanitizeName(_frame.ProjectName ?? "simulation") + ReplayExtension;
 
         PickReplaySaveFile();
     }
@@ -148,17 +157,18 @@ public partial class SimulationViewer
         ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replayOpenPath, 4096);
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-browse"))) PickReplayFile();
-        if (_session.World != null)
+        if (_frame.HasProject)
         {
+            int branchCount = _frame.Timeline?.Branches.Count ?? 0;
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                _session.Branches?.BranchCount > 1
-                    ? Locale.GetString("replay-file-load-discard-branches-warning", ("branchCount", _session.Branches.BranchCount))
+                branchCount > 1
+                    ? Locale.GetString("replay-file-load-discard-branches-warning", ("branchCount", branchCount))
                     : Locale.GetString("replay-file-load-close-project-warning"));
         }
 
         DrawReplayFileError();
-        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replayOpenPath) || _replayLoadTask != null);
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replayOpenPath) || _replayLoadPending || IsBusy);
         if (ImGui.Button(_simulation == null ? Locale.GetString("replay-file-open-button") : Locale.GetString("replay-file-load-replace-button"), new Vector2(150f, 0f)))
         {
             StartReplayLoad(_replayOpenPath);
@@ -178,13 +188,13 @@ public partial class SimulationViewer
         CenterNextReplayModal();
         bool open = true;
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref open);
-        if (!modal.IsVisible || _session.Timeline == null) return;
+        if (!modal.IsVisible || _frame.Timeline is not { } timeline) return;
 
         ImGui.SetNextItemWidth(460f);
         ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replaySavePath, 4096);
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-browse") + "##save-replay")) PickReplaySaveFile();
-        if (_session.Timeline.IsInspecting)
+        if (timeline.IsInspecting)
         {
             ImGui.RadioButton(Locale.GetString("replay-file-save-full-branch-option"), ref _replaySaveRange, 0);
             ImGui.RadioButton(Locale.GetString("replay-file-save-branch-until-here-option"), ref _replaySaveRange, 1);
@@ -195,11 +205,11 @@ public partial class SimulationViewer
             ImGui.TextDisabled(Locale.GetString("replay-file-save-live-branch-description"));
         }
 
-        if (_session.Branches?.BranchCount > 1)
+        if (timeline.Branches.Count > 1)
         {
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                Locale.GetString("replay-file-save-selected-branch-warning", ("branchName", _session.Branches.SelectedBranch.Name)));
+                Locale.GetString("replay-file-save-selected-branch-warning", ("branchName", GetSelectedBranch()?.Name ?? string.Empty)));
         }
 
         string normalized = ReplayPaths.Normalize(_replaySavePath);
@@ -208,7 +218,7 @@ public partial class SimulationViewer
             ImGui.TextColored(ViewerTheme.Caution, Locale.GetString("replay-file-overwrite-warning"));
 
         DrawReplayFileError();
-        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replaySavePath) || _replaySaveTask != null);
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replaySavePath) || IsReplaySaving() || IsBusy);
         if (ImGui.Button(overwrite ? Locale.GetString("replay-file-overwrite-button") : Locale.GetString("replay-file-save-button"), new Vector2(120f, 0f)))
         {
             StartReplaySave(normalized, overwrite);
@@ -221,9 +231,14 @@ public partial class SimulationViewer
         ImGui.SetItemDefaultFocus();
     }
 
+    private bool IsReplaySaving()
+    {
+        return _replaySavePreparing || _replaySaveTask != null;
+    }
+
     private void DrawReplayProgressModal()
     {
-        if (_replayLoadTask == null && _replaySaveTask == null) return;
+        if (!_replayLoadPending && !IsReplaySaving()) return;
 
         RequestNextFrame();
         ImGui.OpenPopup("Replay File Progress##replay-file");
@@ -231,10 +246,12 @@ public partial class SimulationViewer
         using var modal = ImGuiExtensions.BeginPopupModal("Replay File Progress##replay-file", ref open);
         if (!modal.IsVisible) return;
 
-        if (_replayLoadTask != null)
+        if (_replayLoadPending)
         {
+            // The load runs as a host job, so its progress arrives in the busy frame.
+            float progress = _frame.BusyLabel == HostJobLabels.LoadReplay ? (float)(_frame.BusyProgress ?? 0d) : 0f;
             ImGui.TextUnformatted(Locale.GetString("replay-file-loading-progress"));
-            ImGui.ProgressBar(Math.Clamp(_replayFileProgress, 0f, 1f), new Vector2(420f, 0f));
+            ImGui.ProgressBar(Math.Clamp(progress, 0f, 1f), new Vector2(420f, 0f));
             if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
         }
         else
@@ -258,76 +275,134 @@ public partial class SimulationViewer
             new Vector2(0.5f, 0.5f));
     }
 
+    /// <summary>
+    ///     Loads a replay as one busy host job, which reads and indexes the file and then opens it as the project.
+    /// </summary>
+    /// <remarks>
+    ///     The job returns a failure instead of throwing it. The session already logged the failure, and a thrown
+    ///     exception would make the host log it a second time.
+    /// </remarks>
     private void StartReplayLoad(string path)
     {
         _replayFileCancellation?.Dispose();
         _replayFileCancellation = new CancellationTokenSource();
         var cancellation = _replayFileCancellation.Token;
-        _replayFileProgress = 0f;
         _replayFileError = null;
+        _replayLoadPending = true;
         string fullPath = Path.GetFullPath(path);
-        _replayLoadTask = Task.Run(() => LoadReplay(fullPath, cancellation), cancellation);
+        PauseHost();
+        SendJob<Exception?>(
+            HostJobLabels.LoadReplay,
+            (session, reportProgress) =>
+            {
+                var progress = new InlineProgress<AtmosWorldReplayIndexProgress>(value =>
+                    reportProgress(value.TotalTicks == 0 ? 1d : (double)value.CompletedTicks / value.TotalTicks));
+
+                LoadedReplay loaded;
+                try
+                {
+                    loaded = session.LoadReplay(fullPath, progress, cancellation);
+                }
+                catch (Exception exception)
+                {
+                    return exception;
+                }
+
+                try
+                {
+                    session.InstallReplay(loaded);
+                    return null;
+                }
+                catch (Exception exception)
+                {
+                    loaded.Dispose();
+                    return exception;
+                }
+            },
+            CompleteReplayLoad);
     }
 
-    private LoadedReplay LoadReplay(string path, CancellationToken cancellation)
+    private void CompleteReplayLoad(HostResult<Exception?> result)
     {
-        var progress = new InlineProgress<AtmosWorldReplayIndexProgress>(value =>
-            _replayFileProgress = value.TotalTicks == 0 ? 1f : (float)value.CompletedTicks / value.TotalTicks);
+        _replayLoadPending = false;
+        _replayFileCancellation?.Dispose();
+        _replayFileCancellation = null;
+        switch (result.Exception ?? result.Value)
+        {
+            case null:
+                _showTimelinePanel = true;
+                break;
+            case OperationCanceledException:
+                _replayFileError = Locale.GetString("replay-file-loading-cancelled-error");
+                break;
+            case var exception:
+                _replayFileError = Locale.GetString("replay-file-load-error", ("message", DescribeFailure(exception)));
+                _requestOpenReplayModal = true;
+                break;
+        }
 
-        return _session.LoadReplay(path, progress, cancellation);
+        RequestNextFrame();
     }
 
+    /// <summary>
+    ///     Captures the replay on the host thread, then writes the file on a worker thread.
+    /// </summary>
     private void StartReplaySave(string path, bool overwrite)
+    {
+        PauseHost();
+        bool throughCurrentPosition = _replaySaveRange == 1;
+        _replaySavePreparing = true;
+        _replayFileError = null;
+        var log = _host.Log;
+        Send(
+            session => session.PrepareReplaySave(path, throughCurrentPosition, overwrite),
+            result =>
+            {
+                _replaySavePreparing = false;
+                if (result.Exception is { } exception)
+                {
+                    _replayFileError = Locale.GetString(
+                        "replay-file-prepare-save-error",
+                        ("message", DescribeFailure(exception)));
+
+                    _requestSaveReplayModal = true;
+                    return;
+                }
+
+                var job = result.Value!;
+                _replaySaveTask = Task.Run(() => WriteReplay(job, throughCurrentPosition, log));
+            });
+    }
+
+    /// <summary>
+    ///     Writes a captured replay and logs the result. It runs on a worker thread and touches only the job and the
+    ///     thread-safe log.
+    /// </summary>
+    private static void WriteReplay(ReplaySaveJob job, bool throughCurrentPosition, WorkbenchLog log)
     {
         try
         {
-            _isPaused = true;
-            bool throughCurrentPosition = _replaySaveRange == 1;
-            var job = _session.PrepareReplaySave(path, throughCurrentPosition, overwrite);
-            _replaySaveTask = Task.Run(() => _session.WriteReplay(job, throughCurrentPosition));
-            _replayFileError = null;
+            job.Execute();
+            string range = throughCurrentPosition
+                ? "selected branch up to the inspected position"
+                : "full selected branch";
+
+            log.Write(WorkbenchLogLevel.Info, "Replay", $"Saved replay to '{job.Path}' ({range}).");
         }
         catch (Exception exception)
         {
-            _replayFileError = Locale.GetString("replay-file-prepare-save-error", ("message", exception.Message));
-            _requestSaveReplayModal = true;
+            log.Write(
+                WorkbenchLogLevel.Error,
+                "Replay",
+                $"Could not save the replay: {exception.Message}",
+                exception.ToString());
+
+            throw;
         }
     }
 
     private void UpdateReplayFileOperations()
     {
-        if (_replayLoadTask?.IsCompleted == true)
-        {
-            Task<LoadedReplay> task = _replayLoadTask;
-            _replayLoadTask = null;
-            LoadedReplay? loaded = null;
-            try
-            {
-                loaded = task.GetAwaiter().GetResult();
-                InstallLoadedReplay(loaded);
-                loaded = null;
-            }
-            catch (OperationCanceledException)
-            {
-                _replayFileError = Locale.GetString("replay-file-loading-cancelled-error");
-                RequestNextFrame();
-            }
-            catch (Exception exception)
-            {
-                // The session already logged the failure.
-                _replayFileError = Locale.GetString("replay-file-load-error", ("message", exception.Message));
-                _requestOpenReplayModal = true;
-                RequestNextFrame();
-            }
-            finally
-            {
-                loaded?.World.Dispose();
-            }
-
-            _replayFileCancellation?.Dispose();
-            _replayFileCancellation = null;
-        }
-
         if (_replaySaveTask?.IsCompleted == true)
         {
             var task = _replaySaveTask;
@@ -339,34 +414,12 @@ public partial class SimulationViewer
             }
             catch (Exception exception)
             {
-                // The session already logged the failure.
+                // WriteReplay already logged the failure.
                 _replayFileError = Locale.GetString("replay-file-save-error", ("message", exception.Message));
                 _requestSaveReplayModal = true;
                 RequestNextFrame();
             }
         }
-    }
-
-    private void InstallLoadedReplay(LoadedReplay loaded)
-    {
-        SimulationFrameBuilder? frameBuilder = null;
-        _session.InstallReplay(
-            loaded,
-            config =>
-            {
-                var visualizations = VisualizationRegistry.CreateDefault(config);
-                _configureVisualizations?.Invoke(visualizations);
-                frameBuilder = new SimulationFrameBuilder(config, visualizations);
-            });
-
-        _frameBuilder = frameBuilder;
-        _knownSimulationRevision = -1;
-        ReconcileSimulationSurfaces();
-        _isPaused = true;
-        _showTimelinePanel = true;
-        _timelineFirstTick = checked((long)loaded.Timeline.Start.Tick);
-        _frameSceneOnNextPresentation = true;
-        RequestNextFrame();
     }
 
     private void HandleReplayFileDrop()

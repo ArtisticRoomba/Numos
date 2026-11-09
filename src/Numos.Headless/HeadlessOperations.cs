@@ -774,7 +774,7 @@ internal sealed partial class HeadlessOperations
             throw Missing("solver");
 
         bool enabled = Require(request.Enabled, "enabled");
-        if (!_session.SetSolverEnabled(request.Solver, enabled))
+        if (!_session.SetSolverEnabled(request.Solver, enabled).Applied)
         {
             throw new HeadlessRequestException(
                 "solverNotFound",
@@ -796,7 +796,7 @@ internal sealed partial class HeadlessOperations
         // SetInterval reports whether the stage exists, not whether its interval changed.
         string name = request.Solver;
         bool unchanged = _session.World!.Solvers.Steps.Any(step => step.Name == name && step.Interval == interval);
-        if (!_session.SetSolverInterval(name, interval))
+        if (!_session.SetSolverInterval(name, interval).Applied)
         {
             throw new HeadlessRequestException(
                 "solverNotFound",
@@ -808,7 +808,7 @@ internal sealed partial class HeadlessOperations
 
     private CommandExecution ResetSolvers(HeadlessRequest request)
     {
-        bool full = _session.ResetSolvers(ParseTransportModel(request.TransportModel));
+        bool full = _session.ResetSolvers(ParseTransportModel(request.TransportModel)).Applied;
         return Result(new CommandResult { Changed = full });
     }
 
@@ -830,13 +830,13 @@ internal sealed partial class HeadlessOperations
                 stage.Interval ?? 0);
         }
 
-        return Result(new CommandResult { Changed = _session.SetSolverLayout(layout) });
+        return Result(new CommandResult { Changed = _session.SetSolverLayout(layout).Applied });
     }
 
     private CommandExecution ApplyTransportPreset(HeadlessRequest request)
     {
         var model = ParseTransportModel(request.TransportModel) ?? throw Missing("transportModel");
-        return Result(new CommandResult { Changed = _session.ApplyTransportPreset(model) });
+        return Result(new CommandResult { Changed = _session.ApplyTransportPreset(model).Applied });
     }
 
     private AtmosCellRef CellRef(LinkEndpoint endpoint, string property)

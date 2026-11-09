@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
@@ -9,6 +10,7 @@ using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 using Raylib_cs;
 using rlImGui_cs;
@@ -23,29 +25,28 @@ public partial class SimulationViewer : IDisposable
     private const float CameraMoveDuration = 0.45f;
     private const float MaxSliceZoom = 256f;
     private const int DefaultLegendResolution = 8;
+
+    /// <summary>
+    ///     The smallest size raylib's <see cref="Raylib.DrawText(string, int, int, int, Color)" /> draws the default
+    ///     font at. A smaller size draws at this one.
+    /// </summary>
+    private const int MinimumBrandingTextSize = 10;
+
     private readonly static TimeSpan ImGuiTransitionRenderDuration = TimeSpan.FromMilliseconds(250);
     private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
     private readonly List<VoxelGasSnapshot> _gasMakeupRows = [];
     private readonly List<VoxelHighlight> _highlights = [];
-    private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
-    private readonly HashSet<Int3> _liveChunkPositions = [];
-    private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
     private readonly HashSet<VoxelAddress> _paintedCells = [];
     private readonly HashSet<VoxelAddress> _selectedCells = [];
-    private readonly WorkbenchSession _session;
-    private readonly Dictionary<Int3, AtmosChunkSnapshot> _snapshotCache = new();
-    private readonly List<AtmosChunkSnapshotRequest> _snapshotRequests = [];
-    private readonly List<Int3> _staleSnapshotKeys = [];
-    private readonly Dictionary<VoxelAddress, VoxelDetailCacheEntry> _voxelDetailCache = new();
-    private ulong _appliedLegendRangeRevision = ulong.MaxValue;
+    private readonly HashSet<Int3> _liveChunkPositions = [];
 
     /// <summary>
-    ///     Snapshot fields the current frame was built from. Turning arrows on widens the request to include
-    ///     velocity, but the chunk revisions do not move, so the builder has to be told to remap.
+    ///     Chunk handles of the active simulation, from the latest frame. <see cref="_liveChunkPositions" /> holds the
+    ///     same positions for lookups.
     /// </summary>
-    private AtmosChunkSnapshotFields _appliedSnapshotFields;
+    private IReadOnlyList<AtmosChunkHandle> _liveChunkHandles = [];
     private int _appliedTargetFps = -1;
     private Camera2D _camera2D = new()
     {
@@ -67,7 +68,6 @@ public partial class SimulationViewer : IDisposable
     private Vector3 _cameraMoveEndTarget;
     private Vector3 _cameraMoveStartPosition;
     private Vector3 _cameraMoveStartTarget;
-    private long _chunkCollectionRevision = -1;
     private long _continuousRenderingUntilTimestamp;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
@@ -76,7 +76,6 @@ public partial class SimulationViewer : IDisposable
     private bool _eventBasedRenderingEnabled;
     private bool _eventWaitingEnabled;
     private ChunkIdentity? _focusedChunk;
-    private SimulationFrameBuilder? _frameBuilder;
     private bool _frameSceneOnNextPresentation;
     private bool _hadOpenImGuiPopup;
     private VoxelAddress? _hovered3DCell;
@@ -84,7 +83,6 @@ public partial class SimulationViewer : IDisposable
     private bool _imguiInitialized;
 
     private bool _isOrbiting;
-    private bool _isPaused;
     private VoxelAddress? _lastPaintedCell;
     private bool _legendAutomaticBounds = true;
     private float _legendAutomaticRangeOffset;
@@ -100,6 +98,8 @@ public partial class SimulationViewer : IDisposable
     ///     turn, like <see cref="_drawData" />.
     /// </summary>
     private ChunkMeshCache? _meshCache;
+
+    // Read and written with Volatile, because a background task can request a frame.
     private bool _nextFrameRequested;
     private string? _pendingCulture;
     private int _programSettingsTab;
@@ -112,18 +112,17 @@ public partial class SimulationViewer : IDisposable
     private bool _show3DVelocityArrows;
     private bool _show3DViewport = true;
     private bool _show3DVoxelOutlines = true;
-    private bool _showConfigurationPanel;
     private bool _showPerformanceOverlay;
     private bool _showProgramSettingsPanel;
     private bool _showSliceViewport = true;
 
-    // UI state
-    private bool _showSolutionPanel = true;
-    private bool _showToolsPanel = true;
-    private bool _showViewPanel = true;
     private bool _showViewportBranding = true;
 
-    private AtmosSimulation? _simulation;
+    /// <summary>
+    ///     The frame entry of the simulation being presented. <see cref="RenderSimulationViewports" /> points it at
+    ///     each surface in turn, like <see cref="_drawData" />.
+    /// </summary>
+    private WorkbenchSimulationFrame? _simulation;
     private Vector2 _sliceCameraCenter;
 
     /// <summary>
@@ -151,7 +150,6 @@ public partial class SimulationViewer : IDisposable
     private SimulationDrawData? _sliceSourceFrame;
     private int _sliceSourceIndex;
     private SimulationViewport? _sliceViewport;
-    private long _snapshotSourceVersion;
     private int _targetFps = 144;
     private bool _transparent2DVoxels;
     private bool _transparent3DVoxels;
@@ -180,15 +178,18 @@ public partial class SimulationViewer : IDisposable
     {
         Locale.SetCulture();
 
-        _newGasName = Locale.GetString("simulation-new-gas-name");
+        // The document's drafts read localized defaults, so it comes after the culture.
+        _document = new ProjectDocument();
         _projectNameDraft = Locale.GetString("common-untitled-simulation");
 
         _configureVisualizations = configureVisualizations;
-        _session = new WorkbenchSession(
+        var session = new WorkbenchSession(
             _messages,
             new WorkbenchHostInfo("Numos.Viewer", ViewerBuildInfo.PackageVersion));
 
-        _session.ProjectClosing += ResetProjectPresentation;
+        _host = new WorkbenchHost(session);
+        _frame = _host.Frame;
+        _projectEpoch = _frame.ProjectEpoch;
         StartMessageCapture();
     }
 
@@ -239,6 +240,12 @@ public partial class SimulationViewer : IDisposable
             Raylib.SetExitKey(KeyboardKey.Null);
             rlImGui.Setup(true, true);
             _imguiInitialized = true;
+            unsafe
+            {
+                // Without a file name ImGui never touches ./imgui.ini. The layout goes through LayoutStore instead.
+                ImGui.GetIO().NativePtr->IniFilename = null;
+            }
+
             ViewerTheme.Apply();
             var io = ImGui.GetIO();
             io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
@@ -263,7 +270,7 @@ public partial class SimulationViewer : IDisposable
 
             while (!Raylib.WindowShouldClose() && !_requestExit)
             {
-                _nextFrameRequested = false;
+                Volatile.Write(ref _nextFrameRequested, false);
                 if (_pendingCulture != null)
                 {
                     Locale.SetCulture(_pendingCulture);
@@ -284,83 +291,54 @@ public partial class SimulationViewer : IDisposable
 
     private void Update(float deltaTime)
     {
+        UpdateHost();
         UpdateReplayFileOperations();
         HandleReplayFileDrop();
 
-        if (_session.World != null && _session.Config != null)
+        if (_frame.HasProject)
         {
-            if (!_isPaused)
-            {
-                if (_session.IsInspecting)
-                {
-                    // One batched step per frame, so a high tick rate costs one seek and one redraw.
-                    int due = _session.AccumulatePlayback(deltaTime);
-                    if (due > 0)
-                        StepTimelineForward(due);
-                }
-                else
-                {
-                    _session.Update(deltaTime);
-                }
-            }
-
-            _session.ObserveLiveState();
+            SyncPresentationConfig();
             ReconcileSimulationSurfaces();
-            if (_simulation != null)
-                RefreshPresentation();
-
-            RefreshSimulationSurfaces();
+            RefreshTreeSelection();
+            ForgetStaleSteppedTick();
+            UpdateSurfaceBuilds();
+            RefreshPresentation();
         }
 
         UpdateCamera(deltaTime);
     }
 
+    /// <summary>
+    ///     Takes the active surface's newest draw data into the presentation. The draw data comes from a background
+    ///     build, so this only swaps references and updates the selection, slice, and camera.
+    /// </summary>
     private void RefreshPresentation()
     {
-        if (_simulation == null || _frameBuilder == null)
+        var surface = GetActiveSurface();
+        if (surface == null)
             return;
 
-        bool snapshotsChanged = RefreshSnapshotCache();
-        var visualization = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
-        var requiredFields = GetRequiredSnapshotFields();
-        bool visualizationChanged = _drawData == null ||
-                                    _appliedSnapshotFields != requiredFields ||
-                                    !string.Equals(
-                                        _drawData.Visualization.Id,
-                                        visualization.Id,
-                                        StringComparison.OrdinalIgnoreCase) ||
-                                    _drawData.VisualizationMappingRevision != visualization.MappingRevision ||
-                                    _drawData.Visualization.Range.Resolution != GetLegendResolution() ||
-                                    _appliedLegendRangeRevision != _legendRangeRevision;
+        if (!ReferenceEquals(_liveChunkHandles, surface.Frame.ChunkHandles))
+        {
+            _liveChunkHandles = surface.Frame.ChunkHandles;
+            _liveChunkPositions.Clear();
+            foreach (var handle in _liveChunkHandles)
+                _liveChunkPositions.Add(handle.Position);
+        }
 
-        if (!snapshotsChanged && !visualizationChanged)
+        if (surface.DrawData == null || ReferenceEquals(surface.DrawData, _drawData))
         {
             RefreshSliceData();
             return;
         }
 
-        _orderedSnapshots.Clear();
-        foreach (var handle in _liveChunkHandles)
-        {
-            if (_snapshotCache.TryGetValue(handle.Position, out var snapshot))
-                _orderedSnapshots.Add(snapshot);
-        }
-
-        _drawData = _frameBuilder.BuildSimulation(
-            _orderedSnapshots,
-            _currentVisualizationId,
-            _snapshotSourceVersion,
-            _drawData,
-            forceRemap: visualizationChanged,
-            resolution: GetLegendResolution(),
-            automaticRangeOffset: _legendAutomaticBounds ? _legendAutomaticRangeOffset : 0f,
-            rangeOverride: _legendAutomaticBounds
-                ? null
-                : new VisualizationRange(_legendMinimum, _legendMaximum));
-
-        _appliedLegendRangeRevision = _legendRangeRevision;
-        _appliedSnapshotFields = requiredFields;
-        NormalizeInteractionState();
+        // A timeline move can drop a chunk from the shown tick. The focus and selection stay then, so returning to
+        // the head restores them.
+        long timelineRevision = surface.BuiltInputs?.TimelineRevision ?? _document.PresentedTimelineRevision;
+        bool timelineMoved = timelineRevision != _document.PresentedTimelineRevision;
+        _document.PresentedTimelineRevision = timelineRevision;
+        _drawData = surface.DrawData;
+        NormalizeInteractionState(timelineMoved);
         RefreshSliceData();
         RebuildHighlights();
 
@@ -377,77 +355,9 @@ public partial class SimulationViewer : IDisposable
         }
     }
 
-    private bool RefreshSnapshotCache()
-    {
-        if (_simulation == null)
-            return false;
-
-        bool changed = false;
-        var requiredFields = GetRequiredSnapshotFields();
-        if (_simulation.TryGetChunkHandles(
-                _chunkCollectionRevision,
-                out long collectionRevision,
-                out AtmosChunkHandle[] handles))
-        {
-            _chunkCollectionRevision = collectionRevision;
-            _liveChunkHandles.Clear();
-            _liveChunkHandles.AddRange(handles);
-            _liveChunkPositions.Clear();
-            foreach (var handle in handles)
-                _liveChunkPositions.Add(handle.Position);
-
-            changed = true;
-        }
-
-        if (_focusedChunk.HasValue &&
-            !_liveChunkPositions.Contains(_focusedChunk.Value.Position) &&
-            _session.Timeline?.IsInspecting != true &&
-            !_refreshingReplay)
-        {
-            _focusedChunk = null;
-            _frameSceneOnNextPresentation = true;
-        }
-
-        _snapshotRequests.Clear();
-        foreach (var handle in _liveChunkHandles)
-        {
-            bool hasCachedSnapshot = _snapshotCache.TryGetValue(handle.Position, out var cached);
-            bool cachedFieldsAreSufficient = hasCachedSnapshot && cached.HasFields(requiredFields);
-
-            var knownVersion = cachedFieldsAreSufficient
-                ? cached.Version
-                : default;
-
-            _snapshotRequests.Add(new AtmosChunkSnapshotRequest(handle.Position, knownVersion, requiredFields));
-        }
-
-        var batch = _simulation.GetChangedChunkSnapshots(_snapshotRequests);
-        _snapshotSourceVersion = batch.TickCount;
-        foreach (var snapshot in batch.ChangedChunks)
-        {
-            _snapshotCache[snapshot.GridPosition] = snapshot;
-            changed = true;
-        }
-
-        _staleSnapshotKeys.Clear();
-        foreach (var position in _snapshotCache.Keys)
-        {
-            if (!_liveChunkPositions.Contains(position))
-                _staleSnapshotKeys.Add(position);
-        }
-
-        foreach (var position in _staleSnapshotKeys)
-        {
-            _snapshotCache.Remove(position);
-            changed = true;
-        }
-
-        return changed;
-    }
-
     private void RefreshSliceData()
     {
-        if (_drawData == null || _frameBuilder == null || _drawData.Chunks.Count == 0)
+        if (_drawData == null || _document.FrameBuilder == null || _drawData.Chunks.Count == 0)
         {
             _sliceDrawData = null;
             _sliceSourceFrame = null;
@@ -466,7 +376,7 @@ public partial class SimulationViewer : IDisposable
         }
 
         // Passing the old slice lets the builder keep its pixels and cell lookup when nothing in the plane changed.
-        _sliceDrawData = _frameBuilder.BuildPlaneSlice(
+        _sliceDrawData = _document.FrameBuilder.BuildPlaneSlice(
             _drawData,
             _currentSliceAxis,
             _currentSliceIndex,
@@ -478,31 +388,119 @@ public partial class SimulationViewer : IDisposable
         _hoveredSliceCell = null;
     }
 
-    private static ImFontPtr LoadFonts(ImGuiIOPtr io)
+    private ImFontPtr LoadFonts(ImGuiIOPtr io)
     {
         string assets = Path.Combine(AppContext.BaseDirectory, "assets");
+        string proggy = Path.Combine(assets, "ProggyClean.ttf");
+        string cyrillic = Path.Combine(assets, "NumosFixedCyrillic-6x13.ttf");
 
-        var main = AddFont(io, Path.Combine(assets, "ProggyClean.ttf"), 13f, false);
+        var main = AddFont(io, proggy, 13f, false, IntPtr.Zero, 0f);
         // The Cyrillic font is misc-fixed 6x13 padded to ProggyClean's 7px advance (eng/fonts/build_fixed_cyrillic.py).
         // At 13 px it lands on whole pixels like ProggyClean.
-        AddFont(io, Path.Combine(assets, "NumosFixedCyrillic-6x13.ttf"), 13f, true);
+        AddFont(io, cyrillic, 13f, true, io.Fonts.GetGlyphRangesCyrillic(), 0f);
+        RegisterIconRects(io, main, Path.Combine(assets, "icons.png"));
         return main;
     }
 
-    private static unsafe ImFontPtr AddFont(ImGuiIOPtr io, string path, float size, bool merge)
+    /// <summary>
+    ///     Registers one custom glyph rectangle per icon on <paramref name="font" />, builds the atlas, and copies the
+    ///     sheet pixels into the rectangles. <c>rlImGui.ReloadFonts</c> only reads the built atlas, so it uploads the
+    ///     copied pixels. A missing or too-small sheet leaves the atlas without icons.
+    /// </summary>
+    private unsafe void RegisterIconRects(ImGuiIOPtr io, ImFontPtr font, string sheetPath)
+    {
+        int width = Icons.Columns * Icons.CellSize;
+        int height = (Icons.Count + Icons.Columns - 1) / Icons.Columns * Icons.CellSize;
+
+        if (!File.Exists(sheetPath))
+        {
+            ReportIconSheetError(sheetPath, Locale.GetString("icon-sheet-missing"));
+            return;
+        }
+
+        var sheet = Raylib.LoadImage(sheetPath);
+        Color* colors = null;
+        try
+        {
+            if (sheet.Width < width || sheet.Height < height)
+            {
+                ReportIconSheetError(
+                    sheetPath,
+                    Locale.GetString(
+                        "icon-sheet-size",
+                        ("width", width),
+                        ("height", height),
+                        ("actualWidth", sheet.Width),
+                        ("actualHeight", sheet.Height)));
+                return;
+            }
+
+            colors = Raylib.LoadImageColors(sheet);
+            var rectIndices = new int[Icons.Count];
+            for (int i = 0; i < Icons.Count; i++)
+            {
+                rectIndices[i] = io.Fonts.AddCustomRectFontGlyph(
+                    font,
+                    (ushort)(Icons.First + i),
+                    Icons.CellSize,
+                    Icons.CellSize,
+                    Icons.Advance,
+                    Icons.Offset);
+            }
+
+            // Building the atlas packs the rectangles. The RGBA32 copy that rlImGui uploads is cached after this call.
+            io.Fonts.GetTexDataAsRGBA32(out byte* pixels, out int atlasWidth, out _, out _);
+            for (int i = 0; i < Icons.Count; i++)
+            {
+                var rect = io.Fonts.GetCustomRectByIndex(rectIndices[i]);
+                int cellX = i % Icons.Columns * Icons.CellSize;
+                int cellY = i / Icons.Columns * Icons.CellSize;
+                for (int y = 0; y < Icons.CellSize; y++)
+                {
+                    var row = (uint*)(pixels + ((rect.Y + y) * atlasWidth + rect.X) * 4);
+                    for (int x = 0; x < Icons.CellSize; x++)
+                    {
+                        // Ink is opaque white and the background is transparent, so the alpha channel is the mask.
+                        byte alpha = colors[(cellY + y) * sheet.Width + cellX + x].A;
+                        row[x] = alpha == 0 ? 0x00FFFFFFu : 0xFFFFFFFFu;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (colors != null)
+                Raylib.UnloadImageColors(colors);
+
+            Raylib.UnloadImage(sheet);
+        }
+    }
+
+    private void ReportIconSheetError(string path, string reason)
+    {
+        WriteMessage(
+            WorkbenchLogLevel.Error,
+            "Viewer",
+            Locale.GetString("icon-sheet-error", ("path", path), ("reason", reason)));
+    }
+
+    private static unsafe ImFontPtr AddFont(
+        ImGuiIOPtr io,
+        string path,
+        float size,
+        bool merge,
+        IntPtr glyphRanges,
+        float glyphMinAdvanceX)
     {
         ImFontConfig* config = ImGuiNative.ImFontConfig_ImFontConfig();
         config->OversampleH = 1;
         config->OversampleV = 1;
         config->PixelSnapH = 1;
         config->MergeMode = merge ? (byte)1 : (byte)0;
+        config->GlyphMinAdvanceX = glyphMinAdvanceX;
         try
         {
-            return io.Fonts.AddFontFromFileTTF(
-                path,
-                size,
-                new ImFontConfigPtr(config),
-                merge ? io.Fonts.GetGlyphRangesCyrillic() : IntPtr.Zero);
+            return io.Fonts.AddFontFromFileTTF(path, size, new ImFontConfigPtr(config), glyphRanges);
         }
         finally
         {
@@ -536,7 +534,7 @@ public partial class SimulationViewer : IDisposable
         _sliceFrameChunk = chunk.ChunkPosition;
     }
 
-    private void NormalizeInteractionState()
+    private void NormalizeInteractionState(bool timelineMoved)
     {
         if (_drawData == null)
             return;
@@ -545,7 +543,7 @@ public partial class SimulationViewer : IDisposable
         {
             if (_drawData.Chunks.TryGetValue(_focusedChunk.Value.Position, out var focused))
                 _focusedChunk = focused.Identity;
-            else if (_session.Timeline?.IsInspecting != true && !_refreshingReplay)
+            else if (!IsInspecting && !timelineMoved)
             {
                 _focusedChunk = null;
                 _frameSceneOnNextPresentation = true;
@@ -554,7 +552,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_selectedCell.HasValue && !_drawData.TryResolve(_selectedCell.Value, out _))
         {
-            if (_session.Timeline?.IsInspecting == true || _refreshingReplay)
+            if (IsInspecting || timelineMoved)
             {
                 var selected = _selectedCell.Value;
                 if (_drawData.Chunks.TryGetValue(selected.Chunk.Position, out var chunk))
@@ -637,33 +635,70 @@ public partial class SimulationViewer : IDisposable
         _focusedChunk = null;
     }
 
-    private void FocusCameraOnScene()
+    private bool TryGetSceneBounds(out Vector3 minimum, out Vector3 maximum)
     {
+        minimum = default;
+        maximum = default;
         if (_drawData == null || _drawData.Chunks.Count == 0)
-            return;
+            return false;
 
-        float minX = float.PositiveInfinity;
-        float minY = float.PositiveInfinity;
-        float minZ = float.PositiveInfinity;
-        float maxX = float.NegativeInfinity;
-        float maxY = float.NegativeInfinity;
-        float maxZ = float.NegativeInfinity;
+        var min = new Vector3(float.PositiveInfinity);
+        var max = new Vector3(float.NegativeInfinity);
         foreach (var chunk in _drawData.Chunks.Values)
         {
-            float x = chunk.ChunkPosition.X * chunk.Dimensions.X;
-            float y = chunk.ChunkPosition.Y * chunk.Dimensions.Y;
-            float z = chunk.ChunkPosition.Z * chunk.Dimensions.Z;
-            minX = Math.Min(minX, x);
-            minY = Math.Min(minY, y);
-            minZ = Math.Min(minZ, z);
-            maxX = Math.Max(maxX, x + chunk.Dimensions.X);
-            maxY = Math.Max(maxY, y + chunk.Dimensions.Y);
-            maxZ = Math.Max(maxZ, z + chunk.Dimensions.Z);
+            var origin = new Vector3(
+                chunk.ChunkPosition.X * chunk.Dimensions.X,
+                chunk.ChunkPosition.Y * chunk.Dimensions.Y,
+                chunk.ChunkPosition.Z * chunk.Dimensions.Z);
+            min = Vector3.Min(min, origin);
+            max = Vector3.Max(max, origin + new Vector3(chunk.Dimensions.X, chunk.Dimensions.Y, chunk.Dimensions.Z));
         }
 
-        var target = new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f);
-        float distance = Math.Max(5f, Math.Max(maxX - minX, Math.Max(maxY - minY, maxZ - minZ)) * 2.5f);
+        minimum = min;
+        maximum = max;
+        return true;
+    }
+
+    private void FocusCameraOnScene()
+    {
+        if (!TryGetSceneBounds(out var minimum, out var maximum))
+            return;
+
+        var target = (minimum + maximum) * 0.5f;
+        var size = maximum - minimum;
+        float distance = Math.Max(5f, Math.Max(size.X, Math.Max(size.Y, size.Z)) * 2.5f);
         FrameCamera(target, distance);
+    }
+
+    /// <summary>
+    ///     Sets the Raylib clip planes for <see cref="_camera3D" /> and the current scene.
+    /// </summary>
+    /// <returns>The previous planes. Pass them to <see cref="RestoreClipPlanes" /> when the 3D work ends.</returns>
+    /// <remarks>
+    ///     <c>BeginMode3D</c>, <c>GetScreenToWorldRayEx</c>, and <c>GetWorldToScreenEx</c> read the planes when they
+    ///     run, so call this before any of them.
+    /// </remarks>
+    private (double Near, double Far) ApplyClipPlanes()
+    {
+        var previous = (Rlgl.GetCullDistanceNear(), Rlgl.GetCullDistanceFar());
+        float distanceToTarget = Vector3.Distance(_camera3D.Position, _camera3D.Target);
+        float distanceToCenter = distanceToTarget;
+        float radius = 0f;
+        if (TryGetSceneBounds(out var minimum, out var maximum))
+        {
+            var center = (minimum + maximum) * 0.5f;
+            distanceToCenter = Vector3.Distance(_camera3D.Position, center);
+            radius = (maximum - minimum).Length() * 0.5f;
+        }
+
+        var (near, far) = CameraScale.GetClipPlanes(distanceToTarget, distanceToCenter, radius);
+        Rlgl.SetClipPlanes(near, far);
+        return previous;
+    }
+
+    private static void RestoreClipPlanes((double Near, double Far) previous)
+    {
+        Rlgl.SetClipPlanes(previous.Near, previous.Far);
     }
 
     private void UpdateCamera(float deltaTime)
@@ -693,7 +728,8 @@ public partial class SimulationViewer : IDisposable
         if (wheel != 0f)
         {
             CancelCameraMove();
-            Raylib.CameraMoveToTarget(ref _camera3D, -wheel * 2f);
+            float distance = Vector3.Distance(_camera3D.Position, _camera3D.Target);
+            Raylib.CameraMoveToTarget(ref _camera3D, CameraScale.GetZoomedDistance(distance, wheel) - distance);
         }
     }
 
@@ -744,6 +780,7 @@ public partial class SimulationViewer : IDisposable
             UpdateImGuiFrameDemand();
 
             rlImGui.End();
+            AutosaveLayout();
             ApplyFramePacing();
         }
         finally
@@ -780,15 +817,14 @@ public partial class SimulationViewer : IDisposable
 
     private bool RequiresContinuousFrames()
     {
-        if (_nextFrameRequested ||
+        if (Volatile.Read(ref _nextFrameRequested) ||
             Stopwatch.GetTimestamp() < _continuousRenderingUntilTimestamp ||
             _resolutionConfirmationPending)
             return true;
 
-        if (_simulation == null)
-            return false;
-
-        return !_isPaused;
+        // The host cannot wake a window that waits for events, so the viewer keeps drawing while it expects a
+        // command result, a new frame, or a background build.
+        return IsAwaitingHost() || HasPendingSurfaceBuild();
     }
 
     /// <summary>
@@ -801,7 +837,7 @@ public partial class SimulationViewer : IDisposable
     /// </remarks>
     private void RequestNextFrame()
     {
-        _nextFrameRequested = true;
+        Volatile.Write(ref _nextFrameRequested, true);
     }
 
     /// <summary>
@@ -851,6 +887,7 @@ public partial class SimulationViewer : IDisposable
     {
         if (_drawData != null && _meshCache != null)
         {
+            var previousPlanes = ApplyClipPlanes();
             Raylib.BeginMode3D(_camera3D);
             try
             {
@@ -866,6 +903,7 @@ public partial class SimulationViewer : IDisposable
             finally
             {
                 Raylib.EndMode3D();
+                RestoreClipPlanes(previousPlanes);
             }
 
             // A large scene uploads over several frames, and the window may be waiting for events.
@@ -964,9 +1002,15 @@ public partial class SimulationViewer : IDisposable
         int logoSize = Math.Min(requestedLogoSize, Math.Max(1, Math.Min(viewportHeight, viewportWidth / 4)));
         int textLineGap = Math.Max(1, (int)MathF.Round(logoSize * 0.08f));
         int textHeight = Math.Max(3, logoSize - textLineGap * 2);
-        int titleTextSize = Math.Max(1, textHeight / 2);
-        int coreSimVersionTextSize = Math.Max(1, (textHeight - titleTextSize) / 2);
-        int viewerVersionTextSize = Math.Max(1, textHeight - titleTextSize - coreSimVersionTextSize);
+        int titleSplit = textHeight / 2;
+        int coreSimSplit = (textHeight - titleSplit) / 2;
+
+        // DrawText never draws the default font below its minimum size, so the lines are spaced by the size drawn.
+        int titleTextSize = Math.Max(MinimumBrandingTextSize, titleSplit);
+        int coreSimVersionTextSize = Math.Max(MinimumBrandingTextSize, coreSimSplit);
+        int viewerVersionTextSize = Math.Max(MinimumBrandingTextSize, textHeight - titleSplit - coreSimSplit);
+        int textBlockHeight = titleTextSize + coreSimVersionTextSize + viewerVersionTextSize + textLineGap * 2;
+        int brandingHeight = Math.Max(logoSize, textBlockHeight);
         int logoTextGap = Math.Max(1, (int)MathF.Round(logoSize * 0.23f));
         int textColumnWidth = Math.Max(
             Raylib.MeasureText(label, titleTextSize),
@@ -981,14 +1025,14 @@ public partial class SimulationViewer : IDisposable
         {
             ViewportBrandingCorner.TopLeft => (offsetX, offsetY),
             ViewportBrandingCorner.TopRight => (viewportWidth - offsetX - totalWidth, offsetY),
-            ViewportBrandingCorner.BottomLeft => (offsetX, viewportHeight - offsetY - logoSize),
+            ViewportBrandingCorner.BottomLeft => (offsetX, viewportHeight - offsetY - brandingHeight),
             ViewportBrandingCorner.BottomRight =>
-                (viewportWidth - offsetX - totalWidth, viewportHeight - offsetY - logoSize),
+                (viewportWidth - offsetX - totalWidth, viewportHeight - offsetY - brandingHeight),
             _ => (offsetX, offsetY)
         };
 
         left = Math.Clamp(left, 0, Math.Max(0, viewportWidth - totalWidth));
-        top = Math.Clamp(top, 0, Math.Max(0, viewportHeight - logoSize));
+        top = Math.Clamp(top, 0, Math.Max(0, viewportHeight - brandingHeight));
         var tint = new Color(1f, 1f, 1f, _viewportBrandingOpacityPercent / 100f);
 
         Raylib.DrawTexturePro(
@@ -1141,9 +1185,9 @@ public partial class SimulationViewer : IDisposable
     ///     Fields the visualization needs, plus velocity whenever either viewport draws arrows: the arrows read
     ///     <see cref="VoxelDrawData.VelocityX" /> and friends, which are NaN unless the snapshot carried them.
     /// </summary>
-    private AtmosChunkSnapshotFields GetRequiredSnapshotFields()
+    private AtmosChunkSnapshotFields GetDrawSnapshotFields()
     {
-        var fields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        var fields = _document.FrameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
         if (_show3DVelocityArrows || _show2DVelocityArrows)
             fields |= AtmosChunkSnapshotFields.Velocity;
 
@@ -1169,14 +1213,6 @@ public partial class SimulationViewer : IDisposable
             _highlights.Add(new VoxelHighlight(_hovered3DCell.Value, new ColorRgba(1f, 1f, 1f)));
     }
 
-    private enum VoxelEditTool
-    {
-        Select,
-        PaintClassification,
-        PaintGas,
-        EraseGas
-    }
-
     private enum ViewportBrandingCorner
     {
         TopLeft,
@@ -1184,9 +1220,4 @@ public partial class SimulationViewer : IDisposable
         BottomLeft,
         BottomRight
     }
-
-    private readonly record struct VoxelDetailCacheEntry(
-        AtmosChunkVersion PresentedVersion,
-        bool IsAvailable,
-        AtmosVoxelSnapshot Snapshot);
 }

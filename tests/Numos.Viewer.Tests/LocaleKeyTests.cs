@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using Linguini.Syntax.Ast;
-using Linguini.Syntax.Parser;
 
 namespace Numos.Viewer.Tests;
 
@@ -13,7 +11,7 @@ public partial class LocaleKeyTests
     [Test]
     public void EveryCulture_HasTheSameMessageIdsAsEnglish()
     {
-        var english = ReadMessageIds("en");
+        var english = LocaleFiles.ReadMessageIds("en");
         var failures = new List<string>();
 
         foreach (string directory in Directory.EnumerateDirectories(Locale.LocaleDirectory))
@@ -22,7 +20,7 @@ public partial class LocaleKeyTests
             if (culture == "en")
                 continue;
 
-            var ids = ReadMessageIds(culture);
+            var ids = LocaleFiles.ReadMessageIds(culture);
             string[] missing = english.Except(ids).Order(StringComparer.Ordinal).ToArray();
             string[] extra = ids.Except(english).Order(StringComparer.Ordinal).ToArray();
 
@@ -38,7 +36,7 @@ public partial class LocaleKeyTests
     [Test]
     public void KeysUsedInCode_ExistInEnglish()
     {
-        var english = ReadMessageIds("en");
+        var english = LocaleFiles.ReadMessageIds("en");
         string viewerDirectory = Path.Combine(FindRepoRoot(), "src", "Numos.Viewer");
         char sep = Path.DirectorySeparatorChar;
         var missing = new SortedSet<string>(StringComparer.Ordinal);
@@ -57,23 +55,6 @@ public partial class LocaleKeyTests
         }
 
         Assert.That(missing, Is.Empty, "Keys missing from en: " + string.Join(", ", missing));
-    }
-
-    private static HashSet<string> ReadMessageIds(string culture)
-    {
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        string directory = Path.Combine(Locale.LocaleDirectory, culture);
-
-        foreach (string file in Directory.GetFiles(directory, "*.ftl", SearchOption.TopDirectoryOnly))
-        {
-            foreach (var entry in LinguiniParser.FromFile(file).Parse().Entries)
-            {
-                if (entry is AstMessage message)
-                    ids.Add(message.GetId().ToString());
-            }
-        }
-
-        return ids;
     }
 
     private static string FindRepoRoot()

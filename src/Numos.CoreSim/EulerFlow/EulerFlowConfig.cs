@@ -205,8 +205,7 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     ///     Reconstruction used to build the face states.
     /// </summary>
     /// <remarks>
-    ///     Second-order reconstruction is planned. Undefined values normalize to
-    ///     <see cref="EulerReconstruction.FirstOrder" />.
+    ///     Undefined values normalize to <see cref="EulerReconstruction.FirstOrder" />.
     /// </remarks>
     [NumosSerialize]
     public EulerReconstruction Reconstruction { get; init; } = EulerReconstruction.FirstOrder;

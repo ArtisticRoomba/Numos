@@ -1,6 +1,7 @@
 ﻿message-project-add-chunk = Добавлен чанк { $position }.
 message-project-add-chunk-failed = Не удалось добавить чанк { $position }: { $message }
 message-project-remove-chunk = Удалён чанк { $position }.
+message-project-remove-chunk-failed = Не удалось удалить чанк { $position }: { $message }
 message-project-remove-chunk-not-found = Чанк { $position } больше не существует.
 message-project-seal-chunk = Внешняя поверхность чанка { $position } заменена твёрдыми стенами.
 message-project-seal-chunk-failed = Не удалось покрыть поверхность чанка { $position }: { $message }
@@ -12,4 +13,4 @@ message-project-remove-gas = Удалён газ { $name }.
 message-project-inject-gas-not-selected = Газ для впрыскивания не выбран.
 message-project-inject-gas = Впрыснуто { $moles } молей { $name } в ({ $pos }).
 message-project-inject-gas-failed = Не удалось впрыснуть газ: { $message }
-message-project-ignite-source-success = Сделано
+message-project-ignite-source-success = Подожжён воксель ({ $pos }) чанка { $chunk } при { $temperature } K.

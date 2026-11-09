@@ -43,9 +43,9 @@ def check_viewer_assets(package_name: str, names: set[str], locale_directory: Pa
     content = "contentFiles/any/any"
     for asset in (
             f"{content}/assets/icon.png",
-            f"{content}/assets/imgui-default.ini",
             f"{content}/assets/ProggyClean.ttf",
             f"{content}/assets/NumosFixedCyrillic-6x13.ttf",
+            f"{content}/assets/icons.png",
     ):
         if asset not in names:
             raise ValueError(f"{package_name}: missing runtime asset {asset}")

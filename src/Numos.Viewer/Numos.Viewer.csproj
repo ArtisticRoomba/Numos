@@ -44,13 +44,6 @@
             <PackagePath>contentFiles/any/any/assets/icon.png</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
-        <None Update="assets/imgui-default.ini">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-            <Pack>true</Pack>
-            <PackagePath>contentFiles/any/any/assets/imgui-default.ini</PackagePath>
-            <PackageCopyToOutput>true</PackageCopyToOutput>
-        </None>
         <None Update="assets/ProggyClean.ttf">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
@@ -63,6 +56,13 @@
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
             <Pack>true</Pack>
             <PackagePath>contentFiles/any/any/assets/NumosFixedCyrillic-6x13.ttf</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
+        <None Update="assets/icons.png">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/icons.png</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
         <None Update="locale/**/*.ftl">

@@ -2,7 +2,6 @@
 viewer-description-line-two = псевдо-реалистичная, основанная на вокселях библиотека атмосферной симуляции.
 viewer-description = Внешняя программа для просмотра Numos: независимая от движка, псевдо-реалистичная, основанная на вокселях библиотека атмосферной симуляции.
 no-simulation-loaded = Симуляция сейчас не загружена.
-create-workspace-instruction = Выберите Файл > Новая Симуляция, чтобы создать рабочее пространство.
 
 about = Подробнее
 authors = Авторы
@@ -34,17 +33,12 @@ save-replay = Сохранить Повтор...
 exit = Выйти
 
 view = Просмотр
-solution = Решение
 three-d-viewport = 3D Окно просмотра
-two-d-slice-viewport = 2D Окно просмотра среза
 
 settings = Настройки
 help = Помощь
 
 visualization = Визуализация
-rendering-style = Стиль отрисовки
-three-d-focus = 3D фокус
-two-d-slice = 2D срез
 show-slice-viewport = Показать окно просмотра среза
 
 three-dimensional = 3D
@@ -61,14 +55,9 @@ velocity-arrows-tooltip = Рисует максимум { $max-arrows } стре
 arrow-scale = Масштаб стрелок
 velocity-arrow-scale-tooltip = Секунды перемещения которые показывает каждая стрелка. При 0.05 секунд воксель двигающийся при 20 м/с рисует стрелку длинной в один воксель. Стрелки длиннее чем { $max-length } ограничены и сохраняют только своё направление.
 
-solver-pipeline = Последовательность Решателей
-project-section = Проект
-tick-rate-display = Частота тиков: { $rate } Гц
 tick-rate-description = Тиков в секунду симулируемого времени. Частота задаётся при создании проекта.
 tick-rate-error = Частота тиков должна быть кратна 20, от 20 до 100000.
 atmos-config = Атмос Конфигурация
-configuration-apply-instructions = Values apply on Enter, when a field loses focus, or when a slider is released.
-gas-registry = Регистр Газов
 
 reset-configuration-success = Очищена каждая настройка Атмос Конфигурации до настроек по-умолчанию библиотеки.
 reset-configuration-failure = Не удалось очистить настройки: { $reason }
@@ -77,22 +66,15 @@ config-value-minimum-error = {$field} должно быть 0 или более.
 config-field-set-feedback = {$field} установлено на {$value}.
 config-field-apply-error = Не удалось применить {$field}: {$error}
 
-viewing = Просмотр
-editing = Редактировать
-simulation-inspection-status = {$mode} {$simulation}
-chunks-section = Чанки
-voxel-tools-section = Воксель Инструменты
-
-viewport-tool-label = Инструменты Окна просмотра
 select-box-tool = Выбрать / Коробка
 paint-room-tool = Рисовать Комнату
 paint-gas-tool = Рисовать Газ
 erase-gas-tool = Стирать Газ
 classification-label = Классификация
+toolbar-room-id-label = ID комнаты
 amount-mol-label = Количество (моль)
 temperature-k-label = Температура (K)
 
-selection-section = Выделение
 no-voxels-selected = Воксели не выбраны.
 voxels-selected =
     { $count ->
@@ -173,8 +155,6 @@ none = нет
 gas-name-id = { $name } ({ $id })
 gas-id = Газ { $id }
 
-simulation-state = Состояние Симуляции
-no-chunks-in-simulation = Нет чанков в данной симуляции.
 waiting-for-chunk-snapshot = Ожидание следующего снимка чанка.
 dimensions = Размеры
 voxel-dimensions = { $x } × { $y } × { $z } вокселей

@@ -2,60 +2,56 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
+using Numos.Workbench;
 using Raylib_cs;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly List<SimulationSurface> _simulationSurfaces = [];
-    private long _knownSimulationRevision = -1;
-    private int _newSimulationDepth = 1;
-    private int _newSimulationHeight = AtmosChunkConstants.DefaultHeight;
-    private int _newSimulationWidth = AtmosChunkConstants.DefaultWidth;
-    private bool _removeSimulationModalOpen;
-    private bool _requestRemoveSimulation;
-    private bool _showWorldPanel = true;
-    private string? _simulationFeedback;
-    private bool _simulationFeedbackIsError;
-    private AtmosSimulationId? _simulationPendingRemoval;
-
+    /// <summary>
+    ///     Matches the surfaces to the frame's simulations and resolves the active one.
+    /// </summary>
     private void ReconcileSimulationSurfaces()
     {
-        if (_session.World == null ||
-            !_session.World.TryGetSimulations(_knownSimulationRevision, out long revision, out AtmosSimulation[] simulations))
-            return;
+        var simulations = _frame.Simulations;
+        var liveIds = new HashSet<AtmosSimulationId>();
+        foreach (var simulation in simulations)
+            liveIds.Add(simulation.Id);
 
-        _knownSimulationRevision = revision;
-        HashSet<AtmosSimulationId> liveIds = simulations.Select(static simulation => simulation.Id).ToHashSet();
-        if (_portalFirst is { } firstPortal && !liveIds.Contains(firstPortal.Simulation))
-            _portalFirst = null;
+        if (_document.Topology.PortalFirst is { } firstPortal && !liveIds.Contains(firstPortal.Simulation))
+            _document.Topology.PortalFirst = null;
 
-        if (_portalSecond is { } secondPortal && !liveIds.Contains(secondPortal.Simulation))
-            _portalSecond = null;
+        if (_document.Topology.PortalSecond is { } secondPortal && !liveIds.Contains(secondPortal.Simulation))
+            _document.Topology.PortalSecond = null;
 
-        foreach (var removed in _simulationSurfaces.Where(surface => !liveIds.Contains(surface.Simulation.Id)).ToArray())
+        for (int index = _document.Surfaces.Count - 1; index >= 0; index--)
         {
+            var removed = _document.Surfaces[index];
+            if (liveIds.Contains(removed.Id))
+                continue;
+
             removed.Dispose();
-            _simulationSurfaces.Remove(removed);
+            _document.Surfaces.RemoveAt(index);
         }
 
+        bool added = false;
         foreach (var simulation in simulations)
         {
-            var retained = _simulationSurfaces.FirstOrDefault(surface => surface.Simulation.Id == simulation.Id);
+            var retained = FindSurface(simulation.Id);
             if (retained != null)
             {
-                retained.Simulation = simulation;
+                retained.Frame = simulation;
                 continue;
             }
 
-            var surface = new SimulationSurface(simulation);
+            var surface = new SimulationSurface(simulation, CreateSurfaceBuilder());
             if (_windowInitialized)
             {
                 surface.Viewport = new SimulationViewport(
@@ -63,138 +59,232 @@ public partial class SimulationViewer
                     new Color(0.04f, 0.04f, 0.05f, 1f));
             }
 
-            _simulationSurfaces.Add(surface);
+            _document.Surfaces.Add(surface);
+            added = true;
         }
 
-        _simulationSurfaces.Sort(static (left, right) => left.Simulation.Id.CompareTo(right.Simulation.Id));
-        _session.ReconcileSimulations();
-        SetActiveSimulation(_session.ActiveSimulationId);
+        if (added)
+            _document.Surfaces.Sort(static (left, right) => left.Id.CompareTo(right.Id));
+
+        if (_document.PendingActiveSimulationId is { } pending && liveIds.Contains(pending))
+        {
+            _document.PendingActiveSimulationId = null;
+            SetActiveSimulation(pending);
+        }
+        else if (_document.ActiveSimulationId is not { } active || !liveIds.Contains(active))
+        {
+            // The session repairs its own selection after a removal or a timeline move, so follow it first.
+            var fallback = _frame.ActiveSimulationId is { } sessionActive && liveIds.Contains(sessionActive)
+                ? sessionActive
+                : simulations.Count > 0
+                    ? simulations[0].Id
+                    : (AtmosSimulationId?)null;
+
+            SetActiveSimulation(fallback);
+        }
+
+        _simulation = GetActiveSurface()?.Frame;
+    }
+
+    private SimulationSurface? FindSurface(AtmosSimulationId id)
+    {
+        foreach (var surface in _document.Surfaces)
+        {
+            if (surface.Id == id)
+                return surface;
+        }
+
+        return null;
+    }
+
+    private SimulationSurface? GetActiveSurface()
+    {
+        return _document.ActiveSimulationId is { } id ? FindSurface(id) : null;
+    }
+
+    private SimulationFrameBuilder? CreateSurfaceBuilder()
+    {
+        return _document.PresentationConfig == null || _document.FrameBuilder == null
+            ? null
+            : new SimulationFrameBuilder(_document.PresentationConfig, _document.FrameBuilder.Visualizations);
     }
 
     private void SetActiveSimulation(AtmosSimulationId? id)
     {
-        if (_session.World == null || id == null || !_session.World.TryGetSimulation(id.Value, out var simulation))
+        var surface = id is { } value ? FindSurface(value) : null;
+        if (surface == null)
         {
-            if (_session.World != null)
-                _session.SetActiveSimulation(null);
-
+            SaveActiveSurfaceState();
+            _document.ActiveSimulationId = null;
             _simulation = null;
             _viewport = null;
+            _drawData = null;
             return;
         }
 
-        if (_session.ActiveSimulationId == id && ReferenceEquals(_simulation, simulation))
+        if (_document.ActiveSimulationId == id)
             return;
 
         SaveActiveSurfaceState();
-        var resolved = simulation!;
-        _session.SetActiveSimulation(id);
-        _simulation = resolved;
-        var surface = _simulationSurfaces.First(candidate => candidate.Simulation.Id == id.Value);
+        _document.ActiveSimulationId = id;
+        ResetActiveSurfaceCaches();
+        _simulation = surface.Frame;
         _viewport = surface.Viewport;
         _camera3D = surface.Camera;
-        ResetActivePresentationState();
         _frameSceneOnNextPresentation = surface.DrawData == null;
+
+        // Only the session's defaults read its active simulation, such as an export without a simulation id.
+        if (_frame.ActiveSimulationId != id)
+        {
+            var target = id!.Value;
+            _host.Post(session =>
+            {
+                if (session.TryGetSimulation(target, out _))
+                    session.SetActiveSimulation(target);
+            });
+        }
     }
 
     private void SaveActiveSurfaceState()
     {
-        // The session can already point at another simulation by now, so key off the one being presented.
-        if (_simulation == null)
-            return;
-
-        var surface =
-            _simulationSurfaces.FirstOrDefault(candidate => candidate.Simulation.Id == _simulation.Id);
-
-        if (surface == null)
-            return;
-
-        surface.Camera = _camera3D;
-        if (_drawData != null)
-            surface.DrawData = _drawData;
+        // The frame can already list another active simulation by now, so key off the one being presented.
+        var surface = GetActiveSurface();
+        if (surface != null)
+            surface.Camera = _camera3D;
     }
 
-    private void ResetActivePresentationState()
+    /// <summary>
+    ///     Drops the render caches and the pointer state of the surface on screen, before another surface or project
+    ///     takes its place.
+    /// </summary>
+    private void ResetActiveSurfaceCaches()
     {
-        _liveChunkHandles.Clear();
+        _viewport = null;
+        _simulation = null;
+        _liveChunkHandles = [];
         _liveChunkPositions.Clear();
-        _chunkCollectionRevision = -1;
-        _snapshotCache.Clear();
-        _snapshotRequests.Clear();
-        _orderedSnapshots.Clear();
-        _staleSnapshotKeys.Clear();
-        _voxelDetailCache.Clear();
         _drawData = null;
         _sliceDrawData = null;
         _sliceSourceFrame = null;
         _sliceFrameChunk = null;
         _sliceCameraFit = true;
+        _sliceRenderer?.ReleaseTexture();
         _hovered3DCell = null;
         _hoveredSliceCell = null;
         _selectedCell = null;
         _selectedCells.Clear();
+        _paintedCells.Clear();
+        _lastPaintedCell = null;
+        _voxelDragStart = null;
+        _voxelDragAnchor = null;
+        _voxelDragViewport = 0;
         _highlights.Clear();
         _focusedChunk = null;
         _cameraInitialized = false;
+        _frameSceneOnNextPresentation = false;
     }
 
-    private void RefreshSimulationSurfaces()
+    /// <summary>
+    ///     Collects finished background builds and starts a build for every surface whose inputs changed.
+    /// </summary>
+    /// <remarks>
+    ///     A surface has at most one build in flight, because its builder must not run two builds at once. A frame
+    ///     that arrives during a build waits for the next build, which reads the newest frame.
+    /// </remarks>
+    private void UpdateSurfaceBuilds()
     {
-        if (_frameBuilder == null)
+        foreach (var surface in _document.Surfaces)
+            CollectSurfaceBuild(surface);
+
+        if (_document.FrameBuilder == null)
             return;
 
-        SaveActiveSurfaceState();
-        foreach (var surface in _simulationSurfaces)
-        {
-            if (surface.Simulation.Id == _session.ActiveSimulationId && _drawData != null)
-            {
-                surface.DrawData = _drawData;
-                continue;
-            }
+        // Right after a visualization change the frame still holds the old fields. Building from it would map
+        // fields the snapshots lack, so the surfaces keep their draw data until the host captures the new ones.
+        var drawFields = GetDrawSnapshotFields();
+        if ((_frame.SnapshotFields & drawFields) != drawFields)
+            return;
 
-            RefreshSimulationSurface(surface);
+        var visualization = _document.FrameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+        foreach (var surface in _document.Surfaces)
+        {
+            if (surface.PendingBuild != null || surface.Builder == null)
+                continue;
+
+            var frame = surface.Frame;
+            var inputs = new DrawBuildInputs(
+                surface.Builder,
+                frame.Snapshots,
+                frame.ChunkHandles,
+                frame.SnapshotTickCount,
+                _frame.TimelineRevision,
+                visualization.Id,
+                visualization.MappingRevision,
+                drawFields,
+                GetLegendResolution(),
+                _legendRangeRevision,
+                _legendAutomaticBounds ? _legendAutomaticRangeOffset : 0f,
+                _legendAutomaticBounds ? null : new VisualizationRange(_legendMinimum, _legendMaximum));
+
+            if (inputs != surface.BuiltInputs)
+                StartSurfaceBuild(surface, inputs);
         }
     }
 
-    private void RefreshSimulationSurface(SimulationSurface surface)
+    private static void StartSurfaceBuild(SimulationSurface surface, DrawBuildInputs inputs)
     {
-        var fields = GetRequiredSnapshotFields();
-        if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out AtmosChunkHandle[] handles))
+        // The task captures only immutable values. The previous draw data is immutable too, and the UI thread keeps
+        // drawing it while the build runs.
+        var previous = surface.DrawData;
+        bool forceRemap = inputs.RequiresRemap(surface.BuiltInputs);
+        surface.PendingInputs = inputs;
+        surface.PendingBuild = Task.Run(() => inputs.Builder.BuildSimulation(
+            inputs.OrderSnapshots(),
+            inputs.VisualizationId,
+            inputs.SourceVersion,
+            previous,
+            forceRemap: forceRemap,
+            resolution: inputs.Resolution,
+            automaticRangeOffset: inputs.AutomaticRangeOffset,
+            rangeOverride: inputs.RangeOverride));
+    }
+
+    private void CollectSurfaceBuild(SimulationSurface surface)
+    {
+        if (surface.PendingBuild is not { IsCompleted: true } task)
+            return;
+
+        var inputs = surface.PendingInputs!;
+        surface.PendingBuild = null;
+        surface.PendingInputs = null;
+        RequestNextFrame();
+
+        // A configuration change replaced the builder while this build ran, so its result may use the old one.
+        if (!ReferenceEquals(inputs.Builder, surface.Builder))
+            return;
+
+        if (task.IsCompletedSuccessfully)
         {
-            surface.ChunkRevision = revision;
-            surface.Handles = handles;
+            surface.DrawData = task.Result;
+            surface.BuiltInputs = inputs;
+            return;
         }
 
-        var requests = new AtmosChunkSnapshotRequest[surface.Handles.Length];
-        for (int index = 0; index < surface.Handles.Length; index++)
+        // Keep the failed inputs, so the same failure does not rebuild and log every frame.
+        surface.BuiltInputs = inputs;
+        if (task.Exception is { } exception)
+            WriteException(Locale.GetString("draw-data-build-failed"), exception.GetBaseException());
+    }
+
+    private bool HasPendingSurfaceBuild()
+    {
+        foreach (var surface in _document.Surfaces)
         {
-            var handle = surface.Handles[index];
-            bool usable = surface.Snapshots.TryGetValue(handle.Position, out var cached) && cached.HasFields(fields);
-            requests[index] = new AtmosChunkSnapshotRequest(handle.Position, usable ? cached.Version : default, fields);
+            if (surface.PendingBuild != null)
+                return true;
         }
 
-        var batch = surface.Simulation.GetChangedChunkSnapshots(requests);
-        foreach (var snapshot in batch.ChangedChunks)
-            surface.Snapshots[snapshot.GridPosition] = snapshot;
-
-        HashSet<Int3> live = surface.Handles.Select(static handle => handle.Position).ToHashSet();
-        foreach (var stale in surface.Snapshots.Keys.Where(position => !live.Contains(position)).ToArray())
-            surface.Snapshots.Remove(stale);
-
-        AtmosChunkSnapshot[] ordered = surface.Handles
-            .Select(handle => surface.Snapshots.GetValueOrDefault(handle.Position))
-            .Where(static snapshot => snapshot.Dimensions.X > 0)
-            .ToArray();
-
-        surface.DrawData = _frameBuilder!.BuildSimulation(
-            ordered,
-            _currentVisualizationId,
-            batch.TickCount,
-            surface.DrawData,
-            forceRemap: true,
-            resolution: GetLegendResolution(),
-            automaticRangeOffset: _legendAutomaticBounds ? _legendAutomaticRangeOffset : 0f,
-            rangeOverride: _legendAutomaticBounds ? null : new VisualizationRange(_legendMinimum, _legendMaximum));
+        return false;
     }
 
     private void RenderSimulationViewports()
@@ -203,7 +293,7 @@ public partial class SimulationViewer
             return;
 
         AtmosSimulationId? requestedActive = null;
-        foreach (var surface in _simulationSurfaces)
+        foreach (var surface in _document.Surfaces)
         {
             if (surface.Viewport == null)
                 continue;
@@ -213,159 +303,103 @@ public partial class SimulationViewer
             var savedViewport = _viewport;
             var savedCamera = _camera3D;
             var savedMeshes = _meshCache;
-            _simulation = surface.Simulation;
+            _simulation = surface.Frame;
             _drawData = surface.DrawData;
             _meshCache = surface.MeshCache;
             _viewport = surface.Viewport;
-            _camera3D = surface.Camera;
-            string name = GetSimulationName(surface.Simulation.Id);
-            string activeLabel = surface.Simulation.Id == _session.ActiveSimulationId ? Locale.GetString("active-label") : string.Empty;
+
+            // UpdateCamera moves _camera3D before the draw, so the active surface draws with _camera3D.
+            // Its surface.Camera is a copy that this loop refreshes after the draw.
+            bool active = surface.Id == _document.ActiveSimulationId;
+            if (!active)
+                _camera3D = surface.Camera;
+
+            string name = GetSimulationName(surface.Id);
+            string title = active
+                ? Locale.GetString("viewport-3d-title-active", ("name", name))
+                : Locale.GetString("viewport-3d-title", ("name", name));
+
             surface.Viewport.Draw(
-                $"{name} 3D{activeLabel}##viewport-{surface.Simulation.Id.Index}-{surface.Simulation.Id.Generation}",
+                WorkspacePanels.ViewportWindowName(title, surface.Id),
                 RenderSimulationScene,
-                new Vector2(320 + surface.Simulation.Id.Index * 26, 40 + surface.Simulation.Id.Index * 26),
+                new Vector2(320 + surface.Id.Index * 26, 40 + surface.Id.Index * 26),
                 new Vector2(660, 510),
                 () =>
                 {
                     if (ImGui.IsItemClicked(ImGuiMouseButton.Left) || ImGui.IsItemClicked(ImGuiMouseButton.Middle))
-                        requestedActive = surface.Simulation.Id;
+                        requestedActive = surface.Id;
 
-                    if (surface.Simulation.Id == _session.ActiveSimulationId)
+                    if (active)
                     {
                         Update3DPicking();
                         Render3DVoxelTooltip();
                         RenderVoxelContextMenu();
                     }
-                });
+                },
+                _centralDockNodeId);
 
             surface.Camera = _camera3D;
             _simulation = savedSimulation;
             _drawData = savedDrawData;
             _viewport = savedViewport;
-            _camera3D = savedCamera;
+            if (!active)
+                _camera3D = savedCamera;
+
             _meshCache = savedMeshes;
         }
 
-        if (requestedActive.HasValue)
-            SetActiveSimulation(requestedActive);
+        // Clicking another simulation's viewport selects that simulation, which also makes it active. While a portal
+        // endpoint pick is armed, the click only activates the simulation, so Properties keeps the portal form.
+        if (requestedActive is { } clicked && clicked != _document.ActiveSimulationId)
+        {
+            SetActiveSimulation(clicked);
+            if (!_document.PortalCapture.IsArmed)
+                SelectTreeNode(TreeNodeId.ForSimulation(clicked));
+        }
     }
 
-    private void RenderWorldPanel()
+    private void RequestRemoveSimulation(AtmosSimulationId id)
     {
-        if (!_showWorldPanel || _session.World == null)
-            return;
+        _document.SimulationPendingRemoval = id;
+        _document.RequestRemoveSimulation = true;
+        _document.RemoveSimulationModalOpen = true;
+    }
 
-        using var window = ImGuiExtensions.BeginWindow(
-            "world",
-            Locale.GetString("common-world-topology"),
-            ref _showWorldPanel,
-            new Vector2(580, 80),
-            new Vector2(430, 620));
-
-        if (!window.IsVisible)
-            return;
-
-        bool inspecting = DrawInspectionNotice();
-        if (ImGui.BeginTable(
-                "WorldStatus##world",
-                3,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
-        {
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("common-simulations-heading"), _session.World.Simulations.Count.ToString());
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("active-links-label"), _session.World.ActiveLinkCount.ToString());
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("topology-version-label"), _session.World.TopologyVersion.ToString());
-            ImGui.EndTable();
-        }
-
-        ImGui.SeparatorText(Locale.GetString("common-simulations-heading"));
-        if (ImGui.BeginTable(
-                "Simulations##world",
-                3,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
-        {
-            ImGui.TableSetupColumn(Locale.GetString("simulation-label"));
-            ImGui.TableSetupColumn(Locale.GetString("common-chunks-heading"), ImGuiTableColumnFlags.WidthFixed, 64f);
-            ImGui.TableSetupColumn(Locale.GetString("chunk-size-label"), ImGuiTableColumnFlags.WidthFixed, 100f);
-            ImGui.TableHeadersRow();
-            foreach (var surface in _simulationSurfaces)
-            {
-                var id = surface.Simulation.Id;
-                var dimensions = surface.Simulation.ChunkDimensions;
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                if (ImGui.Selectable(
-                        $"{GetSimulationName(id)}##sim-{id.Index}-{id.Generation}",
-                        id == _session.ActiveSimulationId,
-                        ImGuiSelectableFlags.SpanAllColumns))
-                {
-                    SetActiveSimulation(id);
-                    _simulationFeedback = null;
-                }
-
-                ImGui.TableSetColumnIndex(1);
-                ImGui.TextUnformatted(surface.Simulation.ChunkCount.ToString());
-                ImGui.TableSetColumnIndex(2);
-                ImGui.TextUnformatted($"{dimensions.X} x {dimensions.Y} x {dimensions.Z}");
-            }
-
-            ImGui.EndTable();
-        }
-
-        if (_simulationSurfaces.Count == 0)
-            ImGui.TextDisabled(Locale.GetString("world-no-simulations"));
-
-        ImGui.BeginDisabled(_session.ActiveSimulationId == null || inspecting);
-        if (ImGui.Button(Locale.GetString("remove-simulation-button")))
-        {
-            _simulationPendingRemoval = _session.ActiveSimulationId;
-            _requestRemoveSimulation = true;
-            _removeSimulationModalOpen = true;
-        }
-
-        ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("remove-simulation-tooltip"));
-
-        if (!string.IsNullOrWhiteSpace(_simulationFeedback))
+    private void DrawSimulationFeedback()
+    {
+        if (!string.IsNullOrWhiteSpace(_document.SimulationFeedback))
         {
             ImGui.TextColored(
-                _simulationFeedbackIsError ? ViewerTheme.Error : ViewerTheme.Running,
-                _simulationFeedback);
+                _document.SimulationFeedbackIsError ? ViewerTheme.Error : ViewerTheme.Running,
+                _document.SimulationFeedback);
         }
+    }
 
+    /// <summary>
+    ///     Draws the chunk dimensions and the button of the add-simulation form.
+    /// </summary>
+    /// <param name="inspecting">Whether editing is blocked.</param>
+    /// <param name="focus">Whether to scroll to the form and focus its first field.</param>
+    private void RenderNewSimulationForm(bool inspecting, bool focus = false)
+    {
         ImGui.SeparatorText(Locale.GetString("common-new-simulation"));
         bool dimensionsChanged = false;
         ImGui.BeginDisabled(inspecting);
+        FocusFormHere(focus);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-width-label"), ref _newSimulationWidth);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-width-label"), ref _document.NewSimulation.Width);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-height-label"), ref _newSimulationHeight);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-height-label"), ref _document.NewSimulation.Height);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-depth-label"), ref _newSimulationDepth);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-depth-label"), ref _document.NewSimulation.Depth);
         if (dimensionsChanged)
-            _simulationFeedback = null;
+            _document.SimulationFeedback = null;
 
         if (ImGui.Button(Locale.GetString("add-simulation-button")))
-        {
-            try
-            {
-                var added = _session.AddSimulation(_newSimulationWidth, _newSimulationHeight, _newSimulationDepth);
-                ReconcileSimulationSurfaces();
-                SetActiveSimulation(added.Id);
-                SetSimulationFeedback(Locale.GetString("simulation-created-feedback", ("name", GetSimulationName(added.Id))), false);
-            }
-            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-            {
-                SetSimulationFeedback(Locale.GetString("simulation-create-failed-feedback", ("message", exception.Message)), true);
-            }
-        }
+            AddSimulation(_document.NewSimulation.Width, _document.NewSimulation.Height, _document.NewSimulation.Depth);
 
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("add-simulation-tooltip"));
-
-        RenderTopologyControls(inspecting);
     }
 
     private void DrawWorldModals()
@@ -379,21 +413,19 @@ public partial class SimulationViewer
     private void DrawRemoveSimulationModal()
     {
         const string popupId = "Remove Simulation?##world";
-        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestRemoveSimulation);
+        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _document.RequestRemoveSimulation);
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _removeSimulationModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _document.RemoveSimulationModalOpen);
         if (!modal.IsVisible)
             return;
 
-        if (_session.World == null ||
-            _simulationPendingRemoval is not { } id ||
-            !_session.World.TryGetSimulation(id, out var simulation))
+        if (_document.SimulationPendingRemoval is not { } id || GetSimulationFrame(id) is not { } simulation)
         {
             ImGui.TextWrapped(Locale.GetString("simulation-no-longer-exists"));
             if (ImGui.Button(Locale.GetString("common-close"), new Vector2(120, 0)))
             {
-                _removeSimulationModalOpen = false;
-                _simulationPendingRemoval = null;
+                _document.RemoveSimulationModalOpen = false;
+                _document.SimulationPendingRemoval = null;
                 ImGui.CloseCurrentPopup();
             }
 
@@ -404,88 +436,91 @@ public partial class SimulationViewer
 
         string name = GetSimulationName(id);
         ImGui.TextWrapped(
-            Locale.GetString("simulation-remove-confirmation", ("name", name), ("chunk-count", simulation!.ChunkCount)) +
+            Locale.GetString("simulation-remove-confirmation", ("name", name), ("chunk-count", simulation.ChunkHandles.Count)) +
             " " +
             Locale.GetString("simulation-remove-immediate-warning"));
 
         ImGui.Spacing();
+        ImGui.BeginDisabled(IsEditingBlocked);
         if (ImGui.Button(Locale.GetString("remove-simulation-button"), new Vector2(160, 0)))
         {
-            try
-            {
-                _session.RemoveSimulation(id);
-                _simulationPendingRemoval = null;
-                _removeSimulationModalOpen = false;
-                ReconcileSimulationSurfaces();
-                SetSimulationFeedback(Locale.GetString("simulation-removed-feedback", ("name", name)), false);
-                ImGui.CloseCurrentPopup();
-            }
-            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-            {
-                SetSimulationFeedback(
-                    Locale.GetString("simulation-remove-failed-feedback", ("name", name), ("message", exception.Message)),
-                    true);
-
-                _removeSimulationModalOpen = false;
-                ImGui.CloseCurrentPopup();
-            }
+            RemoveSimulation(id, name);
+            _document.SimulationPendingRemoval = null;
+            _document.RemoveSimulationModalOpen = false;
+            ImGui.CloseCurrentPopup();
         }
+
+        ImGui.EndDisabled();
 
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
-            _removeSimulationModalOpen = false;
-            _simulationPendingRemoval = null;
+            _document.RemoveSimulationModalOpen = false;
+            _document.SimulationPendingRemoval = null;
             ImGui.CloseCurrentPopup();
         }
 
         ImGui.SetItemDefaultFocus();
     }
 
+    private void AddSimulation(int width, int height, int depth)
+    {
+        Send(
+            session =>
+            {
+                var added = session.AddSimulation(width, height, depth);
+                return (added.Id, Name: session.GetSimulationName(added.Id));
+            },
+            result =>
+            {
+                if (result.Exception is { } exception)
+                {
+                    SetSimulationFeedback(
+                        Locale.GetString("simulation-create-failed-feedback", ("message", DescribeFailure(exception))),
+                        true);
+
+                    return;
+                }
+
+                _document.PendingActiveSimulationId = result.Value.Id;
+                SelectTreeNode(TreeNodeId.ForSimulation(result.Value.Id), _host.Frame.Sequence);
+                SetSimulationFeedback(Locale.GetString("simulation-created-feedback", ("name", result.Value.Name)), false);
+            });
+    }
+
+    private void RemoveSimulation(AtmosSimulationId id, string name)
+    {
+        Send(
+            session => session.RemoveSimulation(id),
+            result =>
+            {
+                if (result.Exception is { } exception)
+                {
+                    SetSimulationFeedback(
+                        Locale.GetString(
+                            "simulation-remove-failed-feedback",
+                            ("name", name),
+                            ("message", DescribeFailure(exception))),
+                        true);
+
+                    return;
+                }
+
+                SetSimulationFeedback(Locale.GetString("simulation-removed-feedback", ("name", name)), false);
+            });
+    }
+
+    /// <summary>
+    ///     The display name from the frame, or the session's default name for a simulation the frame does not list.
+    /// </summary>
     private string GetSimulationName(AtmosSimulationId id)
     {
-        return _session.GetSimulationName(id);
+        return GetSimulationFrame(id)?.Name ?? $"Simulation {id.Index + 1}";
     }
 
     private void SetSimulationFeedback(string message, bool isError)
     {
-        _simulationFeedback = message;
-        _simulationFeedbackIsError = isError;
-    }
-
-    private sealed class SimulationSurface : IDisposable
-    {
-        internal SimulationSurface(AtmosSimulation simulation)
-        {
-            Simulation = simulation;
-        }
-
-        internal AtmosSimulation Simulation { get; set; }
-        internal SimulationViewport? Viewport { get; set; }
-        internal Camera3D Camera { get; set; } = new()
-        {
-            Position = new Vector3(24, 24, 24),
-            Target = new Vector3(8, 8, 8),
-            Up = Vector3.UnitZ,
-            FovY = 45f,
-            Projection = CameraProjection.Perspective
-        };
-        internal long ChunkRevision { get; set; } = -1;
-        internal AtmosChunkHandle[] Handles { get; set; } = [];
-        internal Dictionary<Int3, AtmosChunkSnapshot> Snapshots { get; } = [];
-        internal SimulationDrawData? DrawData { get; set; }
-
-        /// <summary>
-        ///     GPU meshes for this simulation's chunks. Chunk positions repeat between simulations, so each surface
-        ///     owns a cache.
-        /// </summary>
-        internal ChunkMeshCache MeshCache { get; } = new();
-
-        public void Dispose()
-        {
-            MeshCache.Dispose();
-            Viewport?.Dispose();
-            Viewport = null;
-        }
+        _document.SimulationFeedback = message;
+        _document.SimulationFeedbackIsError = isError;
     }
 }

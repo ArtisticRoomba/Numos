@@ -1,7 +1,7 @@
 ﻿move-up = Двигать вверх
 move-down = Двигать вниз
 remove-stage = Убрать этап
-solver-interval-tooltip = Тиков между запусками этого этапа. Изменения применяются по Enter или когда поле теряет фокус.
+solver-interval-tooltip = Тиков между запусками этого этапа.
 custom-stage-removal-unavailable = Хост имеет кастомные этапы. Просмотрщик не может убрать их.
 select-stage-description-settings = Выберите этап чтобы увидеть его описание и настройки.
 configured-reactions = Конфигурируемые реакции: { $count }

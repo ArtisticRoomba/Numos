@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Text;
 using ImGuiNET;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 using Raylib_cs;
 
@@ -17,12 +18,12 @@ public partial class SimulationViewer
     private int _messageMinimumLevel;
     private long _messagesLastRenderedSequence;
 
-    // Whether the Messages panel was on screen last frame. The menu bar is drawn before the panel, so it reads the
-    // previous frame's value; that keeps the unseen indicator from flashing while the log is already visible.
+    // Whether the Messages panel was on screen last frame. The toolbar is drawn before the panel, so it reads the
+    // previous frame's value. That keeps the unseen indicator from flashing while the log is already visible.
     private bool _messagesPanelVisible;
     private TextWriter? _originalConsoleError;
     private TextWriter? _originalConsoleOut;
-    private bool _showMessagesPanel;
+    private bool _showMessagesPanel = true;
     private WorkbenchConsoleWriter? _viewerConsoleError;
     private WorkbenchConsoleWriter? _viewerConsoleOut;
 
@@ -109,41 +110,28 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Draws a right-aligned menu-bar item for warnings and errors logged while the Messages panel was not on
-    ///     screen. It stays until the panel is shown. The panel is hidden by default, so a failure would
-    ///     otherwise go unnoticed.
+    ///     Returns the toolbar label for warnings and errors logged while the Messages panel was not on screen, or
+    ///     <see langword="null" /> when there are none. The label stays until the panel is shown, so a failure logged
+    ///     behind another tab does not go unnoticed.
     /// </summary>
-    private void RenderUnseenMessagesIndicator()
+    /// <param name="hasErrors">Whether any of the unseen messages is an error.</param>
+    private string? GetUnseenMessagesLabel(out bool hasErrors)
     {
+        hasErrors = false;
         if (_messagesPanelVisible)
-            return;
+            return null;
 
         int errors = _messages.UnseenErrorCount;
         int warnings = _messages.UnseenWarningCount;
         if (errors == 0 && warnings == 0)
-            return;
+            return null;
 
-        string label = errors > 0 && warnings > 0
+        hasErrors = errors > 0;
+        return errors > 0 && warnings > 0
             ? $"{Locale.GetString("error-count", ("count", errors))}, {Locale.GetString("warning-count", ("count", warnings))}"
             : errors > 0
                 ? Locale.GetString("error-count", ("count", errors))
                 : Locale.GetString("warning-count", ("count", warnings));
-
-        // A menu-bar MenuItem is as wide as its label plus one item spacing on either side.
-        float itemWidth = ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemSpacing.X * 2f;
-        float cursorX = ImGui.GetCursorPosX();
-        float right = cursorX + ImGui.GetContentRegionAvail().X;
-        ImGui.SetCursorPosX(Math.Max(cursorX, right - itemWidth));
-
-        ImGui.PushStyleColor(ImGuiCol.Text, errors > 0 ? ViewerTheme.Error : ViewerTheme.Caution);
-        bool clicked = ImGui.MenuItem($"{label}##unseen-messages");
-        ImGui.PopStyleColor();
-
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
-            ImGui.SetTooltip(Locale.GetString("open-messages-logs"));
-
-        if (clicked)
-            ShowMessagesPanel();
     }
 
     private void RenderMessagesPanel()
@@ -158,9 +146,8 @@ public partial class SimulationViewer
             _focusMessagesPanelRequested = false;
         }
 
-        using var window = ImGuiExtensions.BeginWindow(
-            "messages",
-            Locale.GetString("common-messages-logs"),
+        using var window = BeginPane(
+            WorkspacePanels.Messages,
             ref _showMessagesPanel,
             new Vector2(320, 650),
             new Vector2(900, 240));

@@ -5,23 +5,24 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.GasReactions;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private FeedbackMessage? _solverFeedback;
-    private string? _solverAddDraft;
-    private string? _selectedSolverStage;
-
-    private void RenderSolverPipelineSection(bool inspecting)
+    /// <summary>
+    ///     Draws the stage table, its warnings, the add-stage form, and the transport presets. A row click selects
+    ///     the stage node, whose properties show the stage's details.
+    /// </summary>
+    /// <param name="inspecting">Whether editing is blocked.</param>
+    /// <param name="focusAddStage">Whether to scroll to the add-stage form and focus it.</param>
+    private void RenderSolverPipelineSection(bool inspecting, bool focusAddStage = false)
     {
-        var steps = _session.GetSolverSteps();
-        DrawFeedback(_solverFeedback);
-
-        if (_selectedSolverStage != null && !steps.Any(step => step.Name == _selectedSolverStage))
-            _selectedSolverStage = null;
+        var steps = _frame.SolverSteps;
+        string? selectedStage = GetSelectedSolverStage();
+        DrawFeedback(_document.SolverFeedback);
 
         IReadOnlyList<AtmosWorldSolverLayoutEntry>? pendingLayout = null;
         (string Name, bool Enabled)? pendingToggle = null;
@@ -63,9 +64,9 @@ public partial class SimulationViewer
 
                     ImGui.TableSetColumnIndex(1);
                     var rowStart = ImGui.GetCursorPos();
-                    if (ImGui.Selectable("##select", step.Name == _selectedSolverStage,
+                    if (ImGui.Selectable("##select", step.Name == selectedStage,
                             ImGuiSelectableFlags.AllowOverlap))
-                        _selectedSolverStage = step.Name;
+                        SelectTreeNode(TreeNodeId.ForSolverStage(step.Name));
 
                     bool nameHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip);
                     ImGui.SetCursorPos(rowStart);
@@ -129,11 +130,11 @@ public partial class SimulationViewer
         ImGui.PopStyleVar();
 
         if (pendingInterval is { } change)
-            RunSolverEdit(() => _session.SetSolverInterval(change.Name, change.Interval));
+            RunSolverEdit(session => session.SetSolverInterval(change.Name, change.Interval));
         else if (pendingToggle is { } toggle)
-            RunSolverEdit(() => _session.SetSolverEnabled(toggle.Name, toggle.Enabled));
-        else if (pendingLayout != null)
-            RunSolverEdit(() => _session.SetSolverLayout(pendingLayout));
+            RunSolverEdit(session => session.SetSolverEnabled(toggle.Name, toggle.Enabled));
+        else if (pendingLayout is { } layoutChange)
+            RunSolverEdit(session => session.SetSolverLayout(layoutChange));
 
         foreach (string warning in SolverPipelineEditor.GetWarnings(steps))
         {
@@ -142,25 +143,19 @@ public partial class SimulationViewer
             ImGui.PopStyleColor();
         }
 
-        RenderSolverStageDetails(inspecting);
+        ImGui.TextDisabled(Locale.GetString("select-stage-description-settings"));
 
         ImGui.Separator();
-        RenderSolverAddStage(steps, inspecting);
+        RenderSolverAddStage(steps, inspecting, focusAddStage);
         RenderSolverPresets(steps, inspecting);
     }
 
     /// <summary>
-    ///     Draws the selected stage's name, description, and settings at the full panel width.
+    ///     Draws a stage's name, description, and settings at the full panel width.
     /// </summary>
-    private void RenderSolverStageDetails(bool inspecting)
+    private void RenderSolverStageDetails(string name, bool inspecting)
     {
         ImGui.Separator();
-        if (_selectedSolverStage is not { } name)
-        {
-            ImGui.TextDisabled(Locale.GetString("select-stage-description-settings"));
-            return;
-        }
-
         ImGui.TextUnformatted(name);
         ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
         ImGui.TextWrapped(SolverPipelineEditor.Describe(name));
@@ -173,7 +168,7 @@ public partial class SimulationViewer
                 RenderEulerFlowSettings(inspecting);
                 break;
             case AtmosBuiltInSolvers.GasReactions:
-                var reactions = AtmosConfigSettings.GetSolverConfiguration<GasReactionConfig>(_session.Config!);
+                var reactions = AtmosConfigSettings.GetSolverConfiguration<GasReactionConfig>(_document.ConfigDraft.Value!);
                 int count = reactions == null ? 0 : reactions.LinearReactions.Count + reactions.StandardReactions.Count;
                 ImGui.TextUnformatted(Locale.GetString("configured-reactions",
                     ("count", count.ToString(CultureInfo.InvariantCulture))));
@@ -183,11 +178,11 @@ public partial class SimulationViewer
         ImGui.Unindent();
     }
 
-    private void RenderSolverAddStage(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
+    private void RenderSolverAddStage(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting, bool focus)
     {
         var addable = SolverPipelineEditor.GetAddableStages(steps);
-        if (_solverAddDraft != null && !addable.Contains(_solverAddDraft))
-            _solverAddDraft = null;
+        if (_document.SolverAdd.StageName != null && !addable.Contains(_document.SolverAdd.StageName))
+            _document.SolverAdd.StageName = null;
 
         if (addable.Count == 0)
         {
@@ -202,13 +197,14 @@ public partial class SimulationViewer
             ImGui.GetContentRegionAvail().X - addWidth - markerWidth - style.ItemSpacing.X);
 
         ImGui.BeginDisabled(inspecting);
+        FocusFormHere(focus);
         ImGui.SetNextItemWidth(comboWidth);
-        if (ImGui.BeginCombo("##solver-add-stage", _solverAddDraft ?? Locale.GetString("add-stage-placeholder")))
+        if (ImGui.BeginCombo("##solver-add-stage", _document.SolverAdd.StageName ?? Locale.GetString("add-stage-placeholder")))
         {
             foreach (string name in addable)
             {
-                if (ImGui.Selectable($"{name}##add-{name}", name == _solverAddDraft))
-                    _solverAddDraft = name;
+                if (ImGui.Selectable($"{name}##add-{name}", name == _document.SolverAdd.StageName))
+                    _document.SolverAdd.StageName = name;
 
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
                     ImGui.SetTooltip(SolverPipelineEditor.Describe(name));
@@ -218,13 +214,13 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(_solverAddDraft == null);
-        if (ImGui.Button(Locale.GetString("common-add")) && _solverAddDraft != null)
+        ImGui.BeginDisabled(_document.SolverAdd.StageName == null);
+        if (ImGui.Button(Locale.GetString("common-add")) && _document.SolverAdd.StageName != null)
         {
-            var layout = SolverPipelineEditor.Add(steps, _solverAddDraft);
-            _solverAddDraft = null;
+            var layout = SolverPipelineEditor.Add(steps, _document.SolverAdd.StageName);
+            _document.SolverAdd.StageName = null;
             if (layout != null)
-                RunSolverEdit(() => _session.SetSolverLayout(layout));
+                RunSolverEdit(session => session.SetSolverLayout(layout));
         }
 
         ImGui.EndDisabled();
@@ -243,15 +239,15 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(inspecting);
         SameLineOrWrap(Locale.GetString("euler"), style);
         if (RenderPresetButton("Euler##solver-preset-euler", current == AtmosTransportModel.Euler))
-            RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Euler));
+            RunSolverEdit(static session => session.ApplyTransportPreset(AtmosTransportModel.Euler));
 
         SameLineOrWrap(Locale.GetString("legacy"), style);
         if (RenderPresetButton("Legacy##solver-preset-legacy", current == AtmosTransportModel.Legacy))
-            RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Legacy));
+            RunSolverEdit(static session => session.ApplyTransportPreset(AtmosTransportModel.Legacy));
 
         SameLineOrWrap(Locale.GetString("common-reset-to-defaults"), style);
         if (ImGui.Button(Locale.GetString("common-reset-to-defaults")))
-            RunSolverEdit(() => _session.ResetSolvers());
+            RunSolverEdit(static session => session.ResetSolvers());
 
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("transport-presets-help"));
@@ -281,23 +277,15 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Runs one session edit and shows the last log line as feedback, so the panel and Messages agree.
+    ///     Sends one solver edit and shows its logged message as feedback, so the panel and Messages agree.
     /// </summary>
-    private void RunSolverEdit(Func<bool> edit)
+    /// <param name="edit">Runs on the host thread. It must capture only copied values.</param>
+    private void RunSolverEdit(Func<WorkbenchSession, SolverEditResult> edit)
     {
-        try
-        {
-            edit();
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
-        {
-            _solverFeedback = new FeedbackMessage(exception.Message, true);
-            return;
-        }
-
-        var entries = _session.Log.Snapshot();
-        _solverFeedback = entries.Length == 0
-            ? null
-            : new FeedbackMessage(entries[^1].Message, entries[^1].Level >= WorkbenchLogLevel.Warn);
+        Send(
+            edit,
+            result => _document.SolverFeedback = result.Exception is { } exception
+                ? new FeedbackMessage(DescribeFailure(exception), true)
+                : new FeedbackMessage(result.Value.Message, result.Value.Level >= WorkbenchLogLevel.Warn));
     }
 }

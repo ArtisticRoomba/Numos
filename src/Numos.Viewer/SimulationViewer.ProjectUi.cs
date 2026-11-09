@@ -3,9 +3,9 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.Viewer.Ui;
+using Numos.Viewer.Workspace;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
@@ -14,109 +14,61 @@ public partial class SimulationViewer
 {
     private readonly static AtmosTransportModel[] TransportModelValues =
         [AtmosTransportModel.Legacy, AtmosTransportModel.Euler];
-    private readonly Dictionary<string, string> _configFieldErrors = [];
 
-    private readonly Dictionary<string, float> _configFloatDrafts = [];
-    private readonly Dictionary<string, int> _configIntDrafts = [];
-
-    private FeedbackMessage? _chunkFeedback;
-    private AtmosChunkHandle? _chunkPendingRemoval;
+    private bool _closeCreateProjectModal;
     private bool _closeProjectModalOpen;
-    private FeedbackMessage? _configurationFeedback;
+    private bool _createProjectPending;
     private string? _createProjectError;
     private bool _createProjectModalOpen;
-    private FeedbackMessage? _gasRegistryFeedback;
 
-    private bool _igniteOnCellClick;
     private float _ignitionTemperature = 2000f;
     private float _ignitionVolume = 1e-3f;
     private bool _includeDefaultGasesDraft = true;
 
-    private Int3? _injectionChunkPosition;
-    private FeedbackMessage? _injectionFeedback;
     private int _injectionGasId;
     private float _injectionMoles = 1f;
     private float _injectionTemperature = AtmosPhysicalConstants.RoomTemperature;
-    private int _injectionX;
-    private int _injectionY;
-    private int _injectionZ;
-    private int _lastIgnitionControlsFrame = -1;
 
-    // The selection the ignition controls last saw, so only a change of selection counts as a click, and the
-    // frame they were last drawn on, so a selection that changed while they were hidden doesn't count either.
-    private (Int3 Chunk, int X, int Y, int Z)? _lastIgnitionSelection;
-    private int _newChunkRoomId = 1;
-
-    private int _newChunkX;
-    private int _newChunkY;
-    private int _newChunkZ;
-    private float _newGasBoilingPoint;
-    private bool _newGasCondensationEnabled;
-    private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
-    private float _newGasEnthalpyOfVaporization;
-    private FeedbackMessage? _newGasFeedback;
-    private int _newGasLiquidId = -1;
-    private float _newGasMolarHeatCapacityAtConstantVolume =
-        AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
-    private float _newGasMolarMass;
-
-    private string _newGasName = "New Gas";
     private int _projectChunkDepthDraft = 1;
     private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
     private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
 
     private string _projectNameDraft = "Untitled Simulation";
     private AtmosTransportModel _projectTransportModelDraft;
-    private bool _removeChunkModalOpen;
     private bool _requestOpenCloseProject;
 
     private bool _requestOpenCreateProject;
-    private bool _requestRemoveChunk;
     private int _newProjectTickRateDraft = AtmosWorld.DefaultTickRate;
-    private bool _requestResetConfiguration;
-    private bool _resetConfigurationModalOpen;
-
-    /// <summary>
-    ///     Tick reached by the last Step press. Cleared by Run and by anything else that moves the world away from that
-    ///     tick, so the "Stepped to" line never describes a state the user is no longer looking at.
-    /// </summary>
-    private long? _steppedToTick;
-
-    private Int3? _toolChunkPosition;
-    private int _toolClassificationDraft;
     private int _voxelClassificationDraft;
-    private FeedbackMessage? _voxelFeedback;
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _session.World == null
+        _projectNameDraft = !_frame.HasProject
             ? Locale.GetString("common-untitled-simulation")
-            : Locale.GetString("project-name-copy", ("projectName", _session.ProjectName));
+            : Locale.GetString("project-name-copy", ("projectName", _frame.ProjectName));
 
-        _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
-            ? _session.ChunkDimensions.X
-            : AtmosChunkConstants.DefaultWidth;
+        var dimensions = (_simulation ?? (_frame.Simulations.Count > 0 ? _frame.Simulations[0] : null))
+            ?.ChunkDimensions ?? default;
 
-        _projectChunkHeightDraft = _session.ChunkDimensions.Y > 0
-            ? _session.ChunkDimensions.Y
-            : AtmosChunkConstants.DefaultHeight;
-
-        _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
+        _projectChunkWidthDraft = dimensions.X > 0 ? dimensions.X : AtmosChunkConstants.DefaultWidth;
+        _projectChunkHeightDraft = dimensions.Y > 0 ? dimensions.Y : AtmosChunkConstants.DefaultHeight;
+        _projectChunkDepthDraft = dimensions.Z > 0 ? dimensions.Z : 1;
         _includeDefaultGasesDraft = true;
-        var currentModel = _session.World == null
+        var currentModel = !_frame.HasProject
             ? null
-            : AtmosWorldSolverPipeline.DetectTransportModel(_session.World.Solvers.Steps);
+            : AtmosWorldSolverPipeline.DetectTransportModel(_frame.SolverSteps);
 
         _projectTransportModelDraft = currentModel ?? AtmosTransportModel.Euler;
-        _newProjectTickRateDraft = _session.World?.TickRate ?? AtmosWorld.DefaultTickRate;
+        _newProjectTickRateDraft = _frame.HasProject ? _frame.TickRate : AtmosWorld.DefaultTickRate;
         _createProjectError = null;
+        _closeCreateProjectModal = false;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;
     }
 
     private void RequestCloseProject()
     {
-        if (_session.World == null)
+        if (!_frame.HasProject)
             return;
 
         _requestOpenCloseProject = true;
@@ -137,6 +89,14 @@ public partial class SimulationViewer
         using var modal = ImGuiExtensions.BeginPopupModal(Locale.GetString("create-simulation"), ref _createProjectModalOpen);
         if (!modal.IsVisible)
             return;
+
+        if (_closeCreateProjectModal)
+        {
+            _closeCreateProjectModal = false;
+            _createProjectModalOpen = false;
+            ImGui.CloseCurrentPopup();
+            return;
+        }
 
         if (ImGui.IsWindowAppearing())
             ImGui.SetKeyboardFocusHere();
@@ -166,13 +126,14 @@ public partial class SimulationViewer
                 ? Locale.GetString("default-gases-appended-description")
                 : Locale.GetString("blank-gas-registry-description"));
 
-        if (_session.World != null)
+        if (_frame.HasProject)
         {
+            int branchCount = _frame.Timeline?.Branches.Count ?? 0;
             ImGui.Spacing();
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                _session.Branches?.BranchCount > 1
-                    ? Locale.GetString("create-project-discard-branches", ("branchCount", _session.Branches.BranchCount))
+                branchCount > 1
+                    ? Locale.GetString("create-project-discard-branches", ("branchCount", branchCount))
                     : Locale.GetString("create-project-close-current"));
         }
 
@@ -183,13 +144,18 @@ public partial class SimulationViewer
         }
 
         ImGui.Spacing();
+
+        // The host creates the project. The modal stays open until it answers, so a rejected option can be fixed.
+        ImGui.BeginDisabled(_createProjectPending || IsBusy);
         if (ImGui.Button(Locale.GetString("create"), new Vector2(120, 0)))
         {
-            try
+            if (TimelineTiming.DescribeTickRateError(_newProjectTickRateDraft) is { } tickRateError)
             {
-                if (TimelineTiming.DescribeTickRateError(_newProjectTickRateDraft) is { } tickRateError)
-                    throw new ArgumentException(tickRateError);
-
+                _createProjectError = tickRateError;
+            }
+            else
+            {
+                _createProjectError = null;
                 CreateSimulationProject(
                     _projectNameDraft,
                     _projectChunkWidthDraft,
@@ -198,16 +164,10 @@ public partial class SimulationViewer
                     _includeDefaultGasesDraft,
                     _projectTransportModelDraft,
                     _newProjectTickRateDraft);
-
-                _createProjectModalOpen = false;
-                ImGui.CloseCurrentPopup();
-            }
-            catch (Exception exception) when (
-                exception is ArgumentException or InvalidOperationException)
-            {
-                _createProjectError = exception.Message;
             }
         }
+
+        ImGui.EndDisabled();
 
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
@@ -218,7 +178,7 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Picks the preset that fills the stage list of a new project. The Solver Pipeline panel changes the stages
+    ///     Picks the preset that fills the stage list of a new project. The Solvers properties change the stages
     ///     afterwards.
     /// </summary>
     private void RenderTransportModelCombo()
@@ -242,18 +202,25 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        string branchWarning = _session.Branches?.BranchCount > 1
-            ? Locale.GetString("close-project-branches-warning", ("branchCount", _session.Branches.BranchCount))
+        int branchCount = _frame.Timeline?.Branches.Count ?? 0;
+        string branchWarning = branchCount > 1
+            ? Locale.GetString("close-project-branches-warning", ("branchCount", branchCount))
             : string.Empty;
 
         ImGui.TextWrapped(
-            Locale.GetString("close-project-confirmation", ("projectName", _session.ProjectName), ("branchWarning", branchWarning)));
+            Locale.GetString("close-project-confirmation", ("projectName", _frame.ProjectName), ("branchWarning", branchWarning)));
 
         ImGui.Spacing();
-        if (ImGui.Button(Locale.GetString("close-project"), new Vector2(140, 0)))
+        ImGui.BeginDisabled(IsBusy);
+        bool close = ImGui.Button(Locale.GetString("close-project"), new Vector2(140, 0));
+        ImGui.EndDisabled();
+        if (close)
         {
-            _session.CloseProject();
-            RequestNextFrame();
+            Send(static session =>
+            {
+                session.CloseProject();
+                return true;
+            });
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
@@ -270,28 +237,28 @@ public partial class SimulationViewer
 
     private void RequestRemoveChunk(AtmosChunkHandle chunk)
     {
-        _chunkPendingRemoval = chunk;
-        _requestRemoveChunk = true;
-        _removeChunkModalOpen = true;
+        _document.ChunkPendingRemoval = chunk;
+        _document.RequestRemoveChunk = true;
+        _document.RemoveChunkModalOpen = true;
     }
 
     private void DrawRemoveChunkModal()
     {
-        ImGuiExtensions.OpenPopupWhenRequested(Locale.GetString("remove-chunk-tools"), ref _requestRemoveChunk);
+        ImGuiExtensions.OpenPopupWhenRequested(Locale.GetString("remove-chunk-tools"), ref _document.RequestRemoveChunk);
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(Locale.GetString("remove-chunk-tools"), ref _removeChunkModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal(Locale.GetString("remove-chunk-tools"), ref _document.RemoveChunkModalOpen);
         if (!modal.IsVisible)
             return;
 
         if (_simulation == null ||
-            _chunkPendingRemoval is not { } chunk ||
+            _document.ChunkPendingRemoval is not { } chunk ||
             !_liveChunkPositions.Contains(chunk.Position))
         {
             ImGui.TextWrapped(Locale.GetString("selected-chunk-no-longer-exists"));
             if (ImGui.Button(Locale.GetString("common-close"), new Vector2(120, 0)))
             {
-                _removeChunkModalOpen = false;
-                _chunkPendingRemoval = null;
+                _document.RemoveChunkModalOpen = false;
+                _document.ChunkPendingRemoval = null;
                 ImGui.CloseCurrentPopup();
             }
 
@@ -302,12 +269,12 @@ public partial class SimulationViewer
         ImGui.TextWrapped(Locale.GetString("remove-chunk-confirmation", ("chunkPosition", FormatChunkPosition(chunk.Position))));
 
         ImGui.Spacing();
-        ImGui.BeginDisabled(_session.Timeline?.IsInspecting == true);
+        ImGui.BeginDisabled(IsEditingBlocked);
         if (ImGui.Button(Locale.GetString("remove-chunk"), new Vector2(140, 0)))
         {
             RemoveProjectChunk(chunk);
-            _chunkPendingRemoval = null;
-            _removeChunkModalOpen = false;
+            _document.ChunkPendingRemoval = null;
+            _document.RemoveChunkModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
 
@@ -315,8 +282,8 @@ public partial class SimulationViewer
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
-            _chunkPendingRemoval = null;
-            _removeChunkModalOpen = false;
+            _document.ChunkPendingRemoval = null;
+            _document.RemoveChunkModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
 
@@ -325,20 +292,20 @@ public partial class SimulationViewer
 
     private void RequestResetConfiguration()
     {
-        _requestResetConfiguration = true;
-        _resetConfigurationModalOpen = true;
+        _document.RequestResetConfiguration = true;
+        _document.ResetConfigurationModalOpen = true;
     }
 
     private void DrawResetConfigurationModal()
     {
         ImGuiExtensions.OpenPopupWhenRequested(
             Locale.GetString("reset-atmosphere-settings-configuration"),
-            ref _requestResetConfiguration);
+            ref _document.RequestResetConfiguration);
 
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
         using var modal = ImGuiExtensions.BeginPopupModal(
             Locale.GetString("reset-atmosphere-settings-configuration"),
-            ref _resetConfigurationModalOpen);
+            ref _document.ResetConfigurationModalOpen);
 
         if (!modal.IsVisible)
             return;
@@ -346,11 +313,11 @@ public partial class SimulationViewer
         ImGui.TextWrapped(Locale.GetString("reset-atmosphere-settings-confirmation"));
 
         ImGui.Spacing();
-        ImGui.BeginDisabled(_session.Config == null || _session.Timeline?.IsInspecting == true);
+        ImGui.BeginDisabled(_document.ConfigDraft.Value == null || IsEditingBlocked);
         if (ImGui.Button(Locale.GetString("reset"), new Vector2(120, 0)))
         {
             ResetConfigurationValues();
-            _resetConfigurationModalOpen = false;
+            _document.ResetConfigurationModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
 
@@ -358,7 +325,7 @@ public partial class SimulationViewer
         ImGui.SameLine();
         if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
-            _resetConfigurationModalOpen = false;
+            _document.ResetConfigurationModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
 
@@ -368,143 +335,18 @@ public partial class SimulationViewer
     /// <summary>
     ///     Draws the shared read-only notice while the Timeline is inspecting history.
     /// </summary>
-    /// <returns><see langword="true" /> when the caller should disable its editing controls.</returns>
+    /// <returns>
+    ///     <see langword="true" /> when the caller should disable its editing controls, which is also the case while
+    ///     the host is busy.
+    /// </returns>
     private bool DrawInspectionNotice()
     {
-        if (_session.Timeline is not { IsInspecting: true } timeline)
-            return false;
+        if (_frame.Timeline is not { IsInspecting: true } timeline)
+            return IsBusy;
 
         ImGuiExtensions.ReadOnlyNotice(Locale.GetString("read-only-inspection-notice", ("tick", timeline.Position.Tick)));
 
         return true;
-    }
-
-    private void RenderSolutionPanel()
-    {
-        if (!_showSolutionPanel || _simulation == null || _session.Config == null)
-            return;
-
-        using var window = ImGuiExtensions.BeginWindow(
-            "Solution##solution",
-            ref _showSolutionPanel,
-            new Vector2(10, 40),
-            new Vector2(300, 290));
-
-        if (!window.IsVisible)
-            return;
-
-        bool inspecting = DrawInspectionNotice();
-        long currentTick = _session.World?.TickCount ?? 0;
-        if (inspecting || !_isPaused || _steppedToTick != currentTick)
-            _steppedToTick = null;
-
-        ImGui.TextUnformatted(_session.ProjectName ?? Locale.GetString("common-untitled-simulation"));
-        if (ImGui.BeginTable(
-                "ProjectStatus##solution",
-                2,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
-        {
-            ImGui.TableNextColumn();
-            ImGui.TextDisabled(Locale.GetString("common-state-heading"));
-            if (inspecting)
-                ImGui.TextUnformatted(Locale.GetString("common-inspecting-history"));
-            else if (_isPaused)
-                ImGui.TextUnformatted(Locale.GetString("paused"));
-            else
-                ImGui.TextColored(ViewerTheme.Running, Locale.GetString("running"));
-
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("active-simulation"), GetSimulationName(_simulation.Id));
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(
-                Locale.GetString("common-simulations-heading"),
-                (_session.World?.Simulations.Count ?? 0).ToString());
-
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("common-chunks-heading"), _simulation.ChunkCount.ToString());
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("gases"), _session.Config.GasRegistry.Count.ToString());
-            ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("current-tick"), currentTick.ToString());
-            ImGui.EndTable();
-        }
-
-        ImGui.SeparatorText(Locale.GetString("simulation-controls"));
-
-        // Step ticks the world directly, which must not happen to inspected history; the Timeline has its own
-        // transport for that.
-        ImGui.BeginDisabled(inspecting);
-        if (_isPaused)
-        {
-            if (ImGui.Button(Locale.GetString("run"), new Vector2(90, 0)))
-            {
-                _isPaused = false;
-                _steppedToTick = null;
-            }
-        }
-        else if (ImGui.Button(Locale.GetString("common-pause"), new Vector2(90, 0)))
-        {
-            _isPaused = true;
-        }
-
-        ImGui.SameLine();
-        ImGui.BeginDisabled(!_isPaused);
-        if (ImGui.Button(Locale.GetString("step"), new Vector2(90, 0)))
-        {
-            _steppedToTick = _session.Tick();
-        }
-
-        ImGui.EndDisabled();
-        ImGui.EndDisabled();
-
-        if (_steppedToTick is { } steppedTick)
-            ImGui.TextDisabled(Locale.GetString("stepped-to-tick", ("tick", steppedTick)));
-
-        RenderSolutionDetails();
-        RenderFlowDiagnostics();
-
-        ImGui.Separator();
-        if (ImGui.Button(Locale.GetString("close-project"), new Vector2(130, 0)))
-            RequestCloseProject();
-    }
-
-    private bool TryGetDetailChunk(out AtmosChunkSnapshot snapshot, out string source)
-    {
-        if (_focusedChunk is { } focused && TryGetUsableSnapshot(focused.Position, out snapshot))
-        {
-            source = Locale.GetString("focused-chunk");
-            return true;
-        }
-
-        if (_selectedCell is { } selected && TryGetUsableSnapshot(selected.Chunk.Position, out snapshot))
-        {
-            source = Locale.GetString("selected-voxel-chunk");
-            return true;
-        }
-
-        if (_toolChunkPosition is { } tool && TryGetUsableSnapshot(tool, out snapshot))
-        {
-            source = Locale.GetString("selected-in-tools");
-            return true;
-        }
-
-        foreach (var handle in _liveChunkHandles)
-        {
-            if (TryGetUsableSnapshot(handle.Position, out snapshot))
-            {
-                source = Locale.GetString("first-chunk");
-                return true;
-            }
-        }
-
-        snapshot = default;
-        source = string.Empty;
-        return false;
-    }
-
-    private bool TryGetUsableSnapshot(Int3 position, out AtmosChunkSnapshot snapshot)
-    {
-        return _snapshotCache.TryGetValue(position, out snapshot) && snapshot.Dimensions.X > 0;
     }
 
     private void SetProjectMessage(string message, bool isError)
@@ -517,147 +359,41 @@ public partial class SimulationViewer
         ImGuiExtensions.Feedback(feedback?.Message, feedback?.IsError == true);
     }
 
-    private void RenderProjectChunkControls(bool inspecting)
+    /// <summary>
+    ///     Draws the new chunk form for the active simulation.
+    /// </summary>
+    /// <param name="inspecting">Whether editing is blocked.</param>
+    /// <param name="focus">Whether to scroll to the form and focus its first field.</param>
+    private void RenderNewChunkForm(bool inspecting, bool focus = false)
     {
-        ImGui.TextDisabled(
-            Locale.GetString(
-                "chunk-size",
-                ("x", _session.ChunkDimensions.X),
-                ("y", _session.ChunkDimensions.Y),
-                ("z", _session.ChunkDimensions.Z)));
-
-        if (_liveChunkHandles.Count == 0)
-        {
-            if (!inspecting)
-                _toolChunkPosition = null;
-
-            ImGui.TextDisabled(Locale.GetString("no-chunks"));
-        }
-        else
-        {
-            // Keep a selection that is missing from an inspected tick, so returning to the head restores it.
-            if (!inspecting &&
-                (!_toolChunkPosition.HasValue || !_liveChunkPositions.Contains(_toolChunkPosition.Value)))
-                _toolChunkPosition = _liveChunkHandles[0].Position;
-
-            RenderToolChunkTable(inspecting);
-            RenderSelectedChunkActions(inspecting);
-        }
-
         ImGui.SeparatorText(Locale.GetString("new-chunk"));
         bool newChunkChanged = false;
         ImGui.BeginDisabled(inspecting);
+        FocusFormHere(focus);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-x"), ref _newChunkX);
+        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-x"), ref _document.Chunk.NewX);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-y"), ref _newChunkY);
+        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-y"), ref _document.Chunk.NewY);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-z"), ref _newChunkZ);
+        newChunkChanged |= ImGui.InputInt(Locale.GetString("new-chunk-z"), ref _document.Chunk.NewZ);
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("chunk-grid-position-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        newChunkChanged |= ImGui.InputInt(Locale.GetString("initial-room-id"), ref _newChunkRoomId);
+        newChunkChanged |= ImGui.InputInt(Locale.GetString("initial-room-id"), ref _document.Chunk.NewRoomId);
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("new-chunk-classification-tooltip"));
 
         if (newChunkChanged)
-            _chunkFeedback = null;
+            _document.ChunkFeedback = null;
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button(Locale.GetString("add-chunk"), new Vector2(120, 0)))
-            AddProjectChunk(new Int3(_newChunkX, _newChunkY, _newChunkZ), _newChunkRoomId);
+            AddProjectChunk(new Int3(_document.Chunk.NewX, _document.Chunk.NewY, _document.Chunk.NewZ), _document.Chunk.NewRoomId);
 
         ImGui.EndDisabled();
-        DrawFeedback(_chunkFeedback);
-    }
-
-    private void RenderToolChunkTable(bool inspecting)
-    {
-        const int maximumVisibleRows = 8;
-        const ImGuiTableFlags flags =
-            ImGuiTableFlags.Borders |
-            ImGuiTableFlags.RowBg |
-            ImGuiTableFlags.SizingStretchProp |
-            ImGuiTableFlags.ScrollY;
-
-        // Header plus up to eight rows; longer chunk lists scroll inside the table instead of pushing the panel.
-        float rowHeight = ImGui.GetTextLineHeight() + ImGui.GetStyle().CellPadding.Y * 2f + 1f;
-        int visibleRows = Math.Min(_liveChunkHandles.Count, maximumVisibleRows) + 1;
-        var outerSize = new Vector2(0f, rowHeight * visibleRows + 4f);
-        if (!ImGui.BeginTable("ToolChunks##tools", 2, flags, outerSize))
-            return;
-
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn(Locale.GetString("chunk-column"));
-        ImGui.TableSetupColumn(Locale.GetString("common-state-heading"), ImGuiTableColumnFlags.WidthFixed, 80f);
-        ImGui.TableHeadersRow();
-
-        AtmosChunkHandle? chunkToSeal = null;
-        AtmosChunkHandle? chunkToUnsleep = null;
-        foreach (var handle in _liveChunkHandles)
-        {
-            var position = handle.Position;
-            ImGui.PushID($"chunk-{position.X}-{position.Y}-{position.Z}");
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            if (ImGui.Selectable(
-                    FormatChunkPosition(position),
-                    _toolChunkPosition == position,
-                    ImGuiSelectableFlags.SpanAllColumns))
-                SelectToolChunk(position);
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
-                SelectToolChunk(position);
-
-            if (ImGui.BeginPopupContextItem(Locale.GetString("chunk-actions")))
-            {
-                if (ImGui.MenuItem(Locale.GetString("move-camera"), null, false, _drawData?.Chunks.ContainsKey(position) == true))
-                    MoveCameraToToolChunk(position);
-
-                if (ImGui.MenuItem(Locale.GetString("seal-with-walls"), null, false, !inspecting))
-                    chunkToSeal = handle;
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(Locale.GetString("seal-with-walls-tooltip"));
-
-                if (ImGui.MenuItem(Locale.GetString("unsleep"), null, false, !inspecting))
-                    chunkToUnsleep = handle;
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(Locale.GetString("unsleep-tooltip"));
-
-                if (ImGui.MenuItem(Locale.GetString("remove-chunk-menu"), null, false, !inspecting))
-                    RequestRemoveChunk(handle);
-
-                ImGui.EndPopup();
-            }
-
-            ImGui.TableSetColumnIndex(1);
-            ImGui.TextUnformatted(
-                TryGetUsableSnapshot(position, out var snapshot)
-                    ? snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping")
-                    : Locale.GetString("unknown"));
-
-            ImGui.PopID();
-        }
-
-        ImGui.EndTable();
-
-        if (chunkToSeal.HasValue)
-            SealProjectChunk(chunkToSeal.Value);
-        else if (chunkToUnsleep.HasValue)
-            UnsleepProjectChunk(chunkToUnsleep.Value);
-    }
-
-    private void SelectToolChunk(Int3 position)
-    {
-        if (_toolChunkPosition == position)
-            return;
-
-        _toolChunkPosition = position;
-        _chunkFeedback = null;
+        DrawFeedback(_document.ChunkFeedback);
     }
 
     private void MoveCameraToToolChunk(Int3 position)
@@ -668,7 +404,7 @@ public partial class SimulationViewer
 
     private void RenderSelectedChunkActions(bool inspecting)
     {
-        if (_toolChunkPosition is not { } position || !_liveChunkPositions.Contains(position))
+        if (GetSelectedChunkPosition() is not { } position || !_liveChunkPositions.Contains(position))
         {
             ImGui.TextDisabled(Locale.GetString("select-chunk-to-act"));
             return;
@@ -705,68 +441,74 @@ public partial class SimulationViewer
         ImGui.Spacing();
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        if (ImGui.InputInt(Locale.GetString("classification-chunk-fill"), ref _toolClassificationDraft))
-            _chunkFeedback = null;
+        if (ImGui.InputInt(Locale.GetString("classification-chunk-fill"), ref _document.Chunk.ToolClassification))
+            _document.ChunkFeedback = null;
 
         ImGui.EndDisabled();
         ImGui.TextDisabled(Locale.GetString("common-classification-values-description"));
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button(Locale.GetString("fill-selected-chunk")))
-            FillProjectChunk(chunk, _toolClassificationDraft);
+            FillProjectChunk(chunk, _document.Chunk.ToolClassification);
 
         ImGui.EndDisabled();
     }
 
-    private void RenderProjectGasControls(bool inspecting)
+    /// <summary>
+    ///     Draws the gas registry table and the add-gas form.
+    /// </summary>
+    /// <param name="inspecting">Whether editing is blocked.</param>
+    /// <param name="focusNewGas">Whether to scroll to the add-gas form and focus its first field.</param>
+    private void RenderProjectGasControls(bool inspecting, bool focusNewGas = false)
     {
-        if (_session.Config!.GasRegistry.Count == 0)
+        if (Gases.Count == 0)
             ImGui.TextDisabled(Locale.GetString("blank-gas-registry"));
         else
             RenderGasRegistryTable(inspecting);
 
-        DrawFeedback(_gasRegistryFeedback);
+        DrawFeedback(_document.GasRegistryFeedback);
 
         ImGui.SeparatorText(Locale.GetString("add-gas-definition"));
         bool formChanged = false;
         ImGui.BeginDisabled(inspecting);
-        formChanged |= ImGui.InputText(Locale.GetString("new-gas-name"), ref _newGasName, 64);
+        FocusFormHere(focusNewGas);
+        formChanged |= ImGui.InputText(Locale.GetString("new-gas-name"), ref _document.Gas.Name, 64);
         ImGui.SetNextItemWidth(NumericInputWidth);
         formChanged |= ImGui.InputFloat(
             Locale.GetString("new-gas-molar-cv"),
-            ref _newGasMolarHeatCapacityAtConstantVolume);
+            ref _document.Gas.MolarHeatCapacityAtConstantVolume);
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-boiling-point"), ref _newGasBoilingPoint);
+        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-boiling-point"), ref _document.Gas.BoilingPoint);
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-boiling-point-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
-        formChanged |= ImGui.Checkbox(Locale.GetString("new-gas-condensation-enabled"), ref _newGasCondensationEnabled);
+        formChanged |= ImGui.Checkbox(Locale.GetString("new-gas-condensation-enabled"), ref _document.Gas.CondensationEnabled);
         ImGui.SetNextItemWidth(NumericInputWidth);
         formChanged |= ImGui.InputFloat(
             Locale.GetString("new-gas-vaporization-enthalpy"),
-            ref _newGasEnthalpyOfVaporization);
+            ref _document.Gas.EnthalpyOfVaporization);
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        formChanged |= ImGui.InputInt(Locale.GetString("new-gas-liquid-id"), ref _newGasLiquidId);
+        formChanged |= ImGui.InputInt(Locale.GetString("new-gas-liquid-id"), ref _document.Gas.LiquidId);
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-liquid-id-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-diffusion-coefficient"), ref _newGasDiffusionCoefficient);
+        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-diffusion-coefficient"), ref _document.Gas.DiffusionCoefficient);
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-diffusion-coefficient-tooltip"));
 
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-molar-mass"), ref _newGasMolarMass, 0f, 0f, "%.6f");
+        formChanged |= ImGui.InputFloat(Locale.GetString("new-gas-molar-mass"), ref _document.Gas.MolarMass, 0f, 0f, "%.6f");
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(Locale.GetString("new-gas-molar-mass-tooltip"));
 
         if (formChanged)
-            _newGasFeedback = null;
+            _document.NewGasFeedback = null;
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button(Locale.GetString("add-gas"), new Vector2(120, 0)))
@@ -774,19 +516,19 @@ public partial class SimulationViewer
             AddProjectGas(
                 new GasProperties
                 {
-                    Name = _newGasName,
-                    MolarHeatCapacityAtConstantVolume = _newGasMolarHeatCapacityAtConstantVolume,
-                    BoilingPoint = _newGasBoilingPoint,
-                    CondensationEnabled = _newGasCondensationEnabled,
-                    MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
-                    LiquidId = _newGasLiquidId,
-                    DiffusionCoefficient = _newGasDiffusionCoefficient,
-                    MolarMass = _newGasMolarMass
+                    Name = _document.Gas.Name,
+                    MolarHeatCapacityAtConstantVolume = _document.Gas.MolarHeatCapacityAtConstantVolume,
+                    BoilingPoint = _document.Gas.BoilingPoint,
+                    CondensationEnabled = _document.Gas.CondensationEnabled,
+                    MolarEnthalpyOfVaporization = _document.Gas.EnthalpyOfVaporization,
+                    LiquidId = _document.Gas.LiquidId,
+                    DiffusionCoefficient = _document.Gas.DiffusionCoefficient,
+                    MolarMass = _document.Gas.MolarMass
                 });
         }
 
         ImGui.EndDisabled();
-        DrawFeedback(_newGasFeedback);
+        DrawFeedback(_document.NewGasFeedback);
     }
 
     private void RenderGasRegistryTable(bool inspecting)
@@ -796,7 +538,7 @@ public partial class SimulationViewer
             ImGuiTableFlags.RowBg |
             ImGuiTableFlags.SizingFixedFit;
 
-        var registry = _session.Config!.GasRegistry;
+        var registry = Gases;
         int gasToRemove = -1;
         using (var table = ImGuiExtensions.BeginTable("GasRegistry##configuration", 6, flags))
         {
@@ -863,40 +605,17 @@ public partial class SimulationViewer
             ("molar-mass", QuantityFormat.Format(gas.MolarMass, "kg/mol", 6)));
     }
 
+    /// <summary>
+    ///     Draws the inject-by-coordinates form. It injects into the selected chunk node.
+    /// </summary>
     private void RenderProjectInjectionControls(bool inspecting)
     {
-        if (_liveChunkHandles.Count == 0)
-        {
-            _injectionChunkPosition = null;
-            ImGui.TextDisabled(Locale.GetString("add-chunk-before-injecting"));
-            return;
-        }
-
-        if (!_injectionChunkPosition.HasValue ||
-            !_liveChunkPositions.Contains(_injectionChunkPosition.Value))
-            _injectionChunkPosition = _liveChunkHandles[0].Position;
+        var injectionChunk = GetSelectedChunkPosition() is { } chosen && _liveChunkPositions.Contains(chosen)
+            ? chosen
+            : (Int3?)null;
 
         bool inputChanged = false;
         ImGui.BeginDisabled(inspecting);
-        string chunkLabel = FormatChunkPosition(_injectionChunkPosition.Value);
-        if (ImGui.BeginCombo(Locale.GetString("injection-chunk"), chunkLabel))
-        {
-            foreach (var handle in _liveChunkHandles)
-            {
-                bool selected = handle.Position == _injectionChunkPosition.Value;
-                if (ImGui.Selectable(FormatChunkPosition(handle.Position), selected))
-                {
-                    _injectionChunkPosition = handle.Position;
-                    inputChanged = true;
-                }
-
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-            }
-
-            ImGui.EndCombo();
-        }
-
         if (_selectedCell.HasValue &&
             _drawData != null &&
             _drawData.Chunks.TryGetValue(_selectedCell.Value.Chunk.Position, out var selectedChunk) &&
@@ -905,38 +624,39 @@ public partial class SimulationViewer
             if (ImGui.Button(Locale.GetString("use-selected-cell")))
             {
                 var coordinates = selectedChunk.GetCoordinates(_selectedCell.Value.LocalIndex);
-                _injectionChunkPosition = selectedChunk.ChunkPosition;
-                _injectionX = coordinates.X;
-                _injectionY = coordinates.Y;
-                _injectionZ = coordinates.Z;
+                SelectChunk(selectedChunk.ChunkPosition);
+                injectionChunk = selectedChunk.ChunkPosition;
+                _document.Chunk.InjectionX = coordinates.X;
+                _document.Chunk.InjectionY = coordinates.Y;
+                _document.Chunk.InjectionZ = coordinates.Z;
                 inputChanged = true;
             }
         }
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-x"), ref _injectionX);
+        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-x"), ref _document.Chunk.InjectionX);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-y"), ref _injectionY);
+        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-y"), ref _document.Chunk.InjectionY);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-z"), ref _injectionZ);
+        inputChanged |= ImGui.InputInt(Locale.GetString("injection-voxel-z"), ref _document.Chunk.InjectionZ);
         ImGui.EndDisabled();
 
         if (ImGui.Button(Locale.GetString("move-camera-to-voxel"), new Vector2(180, 0)) &&
-            _injectionChunkPosition.HasValue &&
+            injectionChunk.HasValue &&
             _drawData != null &&
-            _drawData.Chunks.TryGetValue(_injectionChunkPosition.Value, out var cameraChunk))
+            _drawData.Chunks.TryGetValue(injectionChunk.Value, out var cameraChunk))
         {
-            MoveCameraToVoxel(cameraChunk, _injectionX, _injectionY, _injectionZ);
+            MoveCameraToVoxel(cameraChunk, _document.Chunk.InjectionX, _document.Chunk.InjectionY, _document.Chunk.InjectionZ);
         }
 
-        bool canInject = _session.Config!.GasRegistry.Count > 0;
+        bool canInject = Gases.Count > 0;
         if (canInject)
         {
-            _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
+            _injectionGasId = Math.Clamp(_injectionGasId, 0, Gases.Count - 1);
             ImGui.BeginDisabled(inspecting);
             if (ImGui.BeginCombo(Locale.GetString("injection-gas"), FormatGas(_injectionGasId)))
             {
-                for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
+                for (int gasId = 0; gasId < Gases.Count; gasId++)
                 {
                     bool selected = gasId == _injectionGasId;
                     if (ImGui.Selectable(FormatGas(gasId), selected))
@@ -965,15 +685,15 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         inputChanged |= ImGui.InputFloat(Locale.GetString("injection-temperature"), ref _injectionTemperature);
 
-        ImGui.BeginDisabled(!canInject);
+        ImGui.BeginDisabled(!canInject || !injectionChunk.HasValue);
         if (ImGui.Button(Locale.GetString("inject-gas"), new Vector2(120, 0)) &&
-            _injectionChunkPosition.HasValue)
+            injectionChunk.HasValue)
         {
             InjectProjectGas(
-                new AtmosChunkHandle(_injectionChunkPosition.Value),
-                _injectionX,
-                _injectionY,
-                _injectionZ,
+                new AtmosChunkHandle(injectionChunk.Value),
+                _document.Chunk.InjectionX,
+                _document.Chunk.InjectionY,
+                _document.Chunk.InjectionZ,
                 _injectionGasId,
                 _injectionMoles,
                 _injectionTemperature);
@@ -982,98 +702,16 @@ public partial class SimulationViewer
         ImGui.EndDisabled();
         ImGui.EndDisabled();
 
-        inputChanged |= RenderProjectIgnitionControls(inspecting);
-
         if (inputChanged)
-            _injectionFeedback = null;
+            _document.InjectionFeedback = null;
 
-        DrawFeedback(_injectionFeedback);
-    }
-
-    /// <summary>
-    ///     Draws the ignition source controls under the gas injection ones. Ignition mode is a toggle: while it is
-    ///     on, clicking a cell in the viewport ignites that cell for one tick. Nothing is ignited by the controls
-    ///     themselves, so there is no default voxel that can be hit by accident.
-    /// </summary>
-    /// <returns><see langword="true" /> when one of the ignition inputs changed.</returns>
-    private bool RenderProjectIgnitionControls(bool inspecting)
-    {
-        bool inputChanged = false;
-        ImGui.SeparatorText(Locale.GetString("ignition-source"));
-
-        ImGui.BeginDisabled(inspecting);
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        inputChanged |= ImGui.InputFloat(Locale.GetString("ignition-temperature"), ref _ignitionTemperature);
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        inputChanged |= ImGui.InputFloat(Locale.GetString("ignition-volume"), ref _ignitionVolume, 0f, 0f, "%g");
-        ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("ignition-source-tooltip"));
-
-        // The cell the user has selected in the viewport, if it can be resolved to a chunk and voxel.
-        (Int3 Chunk, int X, int Y, int Z)? selection = null;
-        if (_selectedCell.HasValue &&
-            _drawData != null &&
-            _drawData.Chunks.TryGetValue(_selectedCell.Value.Chunk.Position, out var selectedChunk) &&
-            selectedChunk.Identity == _selectedCell.Value.Chunk)
-        {
-            var coordinates = selectedChunk.GetCoordinates(_selectedCell.Value.LocalIndex);
-            selection = (selectedChunk.ChunkPosition, coordinates.X, coordinates.Y, coordinates.Z);
-        }
-
-        int frame = ImGui.GetFrameCount();
-        bool drawnLastFrame = _lastIgnitionControlsFrame == frame - 1;
-        _lastIgnitionControlsFrame = frame;
-
-        ImGui.BeginDisabled(inspecting);
-        bool modeToggled = ImGui.Checkbox(Locale.GetString("ignition-mode"), ref _igniteOnCellClick);
-        ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("ignition-mode-tooltip"));
-
-        // Only a change of selection while the controls were visible on the previous frame is a click.
-        // Turning the mode on, the first draw, and a hidden panel only move the baseline, so none of them can
-        // ignite whatever happens to be selected (or the first voxel of the first chunk).
-        bool clicked =
-            _igniteOnCellClick &&
-            !modeToggled &&
-            drawnLastFrame &&
-            !inspecting &&
-            selection.HasValue &&
-            !Nullable.Equals(selection, _lastIgnitionSelection);
-
-        _lastIgnitionSelection = selection;
-        if (clicked)
-        {
-            var target = selection!.Value;
-            IgniteVoxelFromInputs(target.Chunk, target.X, target.Y, target.Z);
-        }
-
-        if (_igniteOnCellClick)
-            ImGui.TextColored(ViewerTheme.Caution, Locale.GetString("ignition-mode-on"));
-
-        return inputChanged;
-    }
-
-    private void IgniteVoxelFromInputs(Int3 chunkPosition, int x, int y, int z)
-    {
-        if (!(_ignitionTemperature > 0f) || !(_ignitionVolume > 0f))
-        {
-            _injectionFeedback = Report(Locale.GetString("ignition-positive-temperature-volume-required"), true);
-            return;
-        }
-
-        IgniteProjectSource(
-            new AtmosChunkHandle(chunkPosition),
-            x,
-            y,
-            z,
-            _ignitionTemperature,
-            _ignitionVolume);
+        DrawFeedback(_document.InjectionFeedback);
     }
 
     private void ClearConfigurationDrafts()
     {
-        _configFloatDrafts.Clear();
-        _configIntDrafts.Clear();
-        _configFieldErrors.Clear();
+        _document.ConfigFloatDrafts.Clear();
+        _document.ConfigIntDrafts.Clear();
+        _document.ConfigFieldErrors.Clear();
     }
 }

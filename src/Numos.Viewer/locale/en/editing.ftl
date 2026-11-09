@@ -19,7 +19,7 @@ start-portal-here = Start Portal Here
 create-portal-to-here = Create Portal to Here
 portal-first-endpoint = From: { $cell }
 portal-first-endpoint-instruction = Start a portal at its first endpoint.
-enable-transport-mode-in-world-topology = Enable a transport mode in World & Topology.
+enable-transport-mode-in-topology = Enable a transport mode in the Topology properties.
 
 inject = Inject
 no-gases-registered = No gases registered

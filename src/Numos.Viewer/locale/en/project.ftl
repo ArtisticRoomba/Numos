@@ -1,6 +1,7 @@
 ﻿message-project-add-chunk = Added chunk { $position }.
 message-project-add-chunk-failed = Could not add chunk { $position }: { $message }
 message-project-remove-chunk = Removed chunk { $position }.
+message-project-remove-chunk-failed = Could not remove chunk { $position }: { $message }
 message-project-remove-chunk-not-found = Chunk { $position } no longer exists.
 message-project-seal-chunk = Replaced the outer faces of chunk { $position } with solid walls.
 message-project-seal-chunk-failed = Could not seal chunk { $position }: { $message }
@@ -12,4 +13,4 @@ message-project-remove-gas = Removed gas { $name }.
 message-project-inject-gas-not-selected = No gas selected for injection.
 message-project-inject-gas = Injected { $moles } moles of { $name } at ({ $pos }).
 message-project-inject-gas-failed = Could not inject gas: { $message }
-message-project-ignite-source-success = Did it
+message-project-ignite-source-success = Ignited voxel ({ $pos }) of chunk { $chunk } at { $temperature } K.

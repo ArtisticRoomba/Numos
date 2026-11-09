@@ -68,9 +68,9 @@ class ViewerAssetTests(unittest.TestCase):
     CONTENT = "contentFiles/any/any"
     BASE = {
         f"{CONTENT}/assets/icon.png",
-        f"{CONTENT}/assets/imgui-default.ini",
         f"{CONTENT}/assets/ProggyClean.ttf",
         f"{CONTENT}/assets/NumosFixedCyrillic-6x13.ttf",
+        f"{CONTENT}/assets/icons.png",
         f"{CONTENT}/locale/en/common.ftl",
     }
 
@@ -88,7 +88,11 @@ class ViewerAssetTests(unittest.TestCase):
         self.check(names, {"en": ["common.ftl"], "ru": ["common.ftl"]})
 
     def test_rejects_missing_font(self) -> None:
-        for font in ("ProggyClean.ttf", "NumosFixedCyrillic-6x13.ttf"):
+        for font in (
+                "ProggyClean.ttf",
+                "NumosFixedCyrillic-6x13.ttf",
+                "icons.png",
+        ):
             with self.subTest(font=font), self.assertRaisesRegex(ValueError, font):
                 self.check(self.BASE - {f"{self.CONTENT}/assets/{font}"})
 

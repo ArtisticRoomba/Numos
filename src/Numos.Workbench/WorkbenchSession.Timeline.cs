@@ -117,6 +117,31 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
+    ///     Simulates one tick on the live head without the per-call work of <see cref="Tick" />.
+    /// </summary>
+    /// <param name="observe">Whether to sample checkpoints after the tick.</param>
+    /// <remarks>
+    ///     <see cref="WorkbenchHost" /> calls this once per tick, so it allocates nothing. A failure is logged and
+    ///     rethrown.
+    /// </remarks>
+    internal void TickLive(bool observe)
+    {
+        var world = RequireWorld();
+        ThrowIfInspecting();
+        try
+        {
+            world.Tick();
+            if (observe)
+                Timeline!.ObserveLiveState();
+        }
+        catch (Exception exception)
+        {
+            Failed("Could not tick the world", exception);
+            throw;
+        }
+    }
+
+    /// <summary>
     ///     Advances the live world by wall-clock time. The world runs as many fixed ticks as the time allows.
     /// </summary>
     /// <param name="elapsedSeconds">Frame time in seconds.</param>
@@ -288,7 +313,9 @@ public sealed partial class WorkbenchSession
 
     private void Move(string action, Action body)
     {
-        RequireWorld();
+        var before = RequireWorld();
+        var configBefore = before.Config;
+        var stepsBefore = before.Solvers.Steps.ToArray();
         try
         {
             body();
@@ -301,8 +328,34 @@ public sealed partial class WorkbenchSession
         finally
         {
             TimelineRevision++;
+            if (DefinitionChanged(before, configBefore, stepsBefore))
+                DefinitionRevision++;
+
             ReconcileSimulations();
             SyncConfigFromWorld();
         }
+    }
+
+    /// <summary>
+    ///     Tells whether a timeline move changed what <see cref="DefinitionRevision" /> covers: the configuration or
+    ///     the solver layout.
+    /// </summary>
+    /// <remarks>
+    ///     A restore that brings back an equal configuration must not bump the revision, because every bump makes
+    ///     the front end rebuild its configuration draft and solver list on each scrub.
+    /// </remarks>
+    private bool DefinitionChanged(
+        AtmosWorld worldBefore,
+        AtmosConfigSnapshot configBefore,
+        AtmosWorldSolverStep[] stepsBefore)
+    {
+        var world = World;
+        if (!ReferenceEquals(world, worldBefore))
+            return true;
+
+        if (!ReferenceEquals(world.Config, configBefore))
+            return true;
+
+        return !stepsBefore.AsSpan().SequenceEqual(world.Solvers.Steps.ToArray());
     }
 }

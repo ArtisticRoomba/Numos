@@ -288,7 +288,7 @@ explains the physics behind them.
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
 | `WakePressureDelta`       | 50 Pa     | Pressure difference across a chunk face that activates the inactive side (§5.6). 50 Pa sits above the acoustic pressure of slow residual ringing (0.12 m/s or less), so that ringing does not keep re-waking neighbours that just fell asleep. A sleeping chunk keeps smaller differences frozen in until something wakes it (§9). 0 wakes on any difference.                                                                                       |
 | `AllMachCorrection`       | off       | Scales the pressure-dissipation term of the face flux by the local Mach number. Godunov fluxes dissipate at the sound speed, which smears slow flow. The fix keeps it sharp but removes the acoustic damping sleep relies on and admits checkerboards, so it is off until a scene needs it.                 |
-| `Reconstruction`          | `FirstOrder` | How face states are built. Second-order reconstruction is planned. Only `FirstOrder` exists today.                                                                                                                                                                                         |
+| `Reconstruction`          | `FirstOrder` | How face states are built.                                                                                                                                                                                         |
 | `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum on each call of the stage, `max(0, 1 − α·Δt_call)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
 | `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1), under either transport model. Clamped to [0, 1]. 0 closes such links to gas transport.                                                                                                                                                       |
 | `MaxSoundSpeedReduction`  | 1         | Largest factor α by which a calm group of chunks slows its sound speed to take α times fewer substeps (§5.11). 1 runs the unscaled solver. Values below 1 and non-finite values normalize to 1. Above 16 clamps to 16. |
@@ -304,7 +304,7 @@ explains the physics behind them.
 - `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
 - `WakePressureDelta` (50 Pa), the boundary activation threshold.
 - `AllMachCorrection` (off).
-- `Reconstruction` (`FirstOrder`). Second-order reconstruction is planned.
+- `Reconstruction` (`FirstOrder`).
 - `MomentumDamping` (0/s).
 - `DefaultLinkAreaFraction` (1), the open fraction assumed for links without an area.
 
@@ -1564,9 +1564,10 @@ behind a sleeping peer. After that, explicit links interact with sleep the same 
 ### 11.3 Seeing links in the Viewer
 
 The Viewer shows every registered simulation in its own dockable 3D surface with an independent camera. One active
-simulation supplies the shared 2D slice, which cuts a plane through all of its chunks, and the editing panels. Its World & Topology panel creates or removes simulations
-and captures two selected voxels for portals. It also maps complete rectangular chunk faces into docks, with
-quarter-turn and axis-flip controls.
+simulation supplies the shared 2D slice, which cuts a plane through all of its chunks, and the voxel tools. The World
+node's properties create simulations, and a Simulation node's properties remove that simulation. The Topology node's
+properties create portals from two voxels picked in the viewports. They also map complete rectangular chunk faces into
+docks, with quarter-turn and axis-flip controls.
 
 Inter-simulation connections use matching colored endpoint markers. Intra-simulation connections also draw a local
 line. These displays do not imply shared chunk ownership. Every chunk belongs to exactly one simulation, and a dock
@@ -2127,7 +2128,7 @@ nothing currently uses.
   develops the constant-volume mixing pressure of §5.9 over the cells the contact smears across. It is physical, but it
   happens at the numerical mixing rate rather than the molecular one.
 - First-order smearing. Piecewise-constant reconstruction smears a contact over about ten cells and a shock over
-  four or five at `Δx = 1 m`. Second-order reconstruction is planned.
+  four or five at `Δx = 1 m`.
 - Float32 at high Mach. Conserved variables and fluxes are `float`. Only the energy is `double`. Strong blasts
   push the ratio of thermal to kinetic energy and of star to ambient pressure into the range where single precision
   rounding shows up as the negative-moles and negative-internal-energy counters ticking over (§5.7).

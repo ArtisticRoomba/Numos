@@ -37,6 +37,7 @@ public sealed partial class WorkbenchSession
         var world = RequireWorld();
         ThrowIfInspecting();
         var simulation = world.CreateSimulation(chunkWidth, chunkHeight, chunkDepth);
+        DefinitionRevision++;
         if (!string.IsNullOrWhiteSpace(name))
             _simulationNames[simulation.Id] = name.Trim();
 
@@ -67,6 +68,7 @@ public sealed partial class WorkbenchSession
 
         string name = GetSimulationName(id);
         bool removed = world.DestroySimulation(simulation!);
+        DefinitionRevision++;
         ReconcileSimulations();
         if (removed)
             Info($"Removed {name}.");
@@ -117,6 +119,8 @@ public sealed partial class WorkbenchSession
             _simulationNames.Remove(id);
         else
             _simulationNames[id] = name.Trim();
+
+        DefinitionRevision++;
     }
 
     /// <summary>
