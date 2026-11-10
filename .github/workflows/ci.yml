@@ -162,7 +162,7 @@ jobs:
             --source https://api.nuget.org/v3/index.json
           dotnet build "$consumer" -c Release --no-restore -warnaserror
           test -f "$consumer/bin/Release/net10.0/assets/icon.png"
-          test -f "$consumer/bin/Release/net10.0/assets/imgui-default.ini"
+          test -f "$consumer/bin/Release/net10.0/assets/icons.png"
 
       - name: Verify NativeAOT publication
         run: |
