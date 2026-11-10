@@ -127,7 +127,8 @@ internal sealed partial class AtmosKernel : IDisposable
             // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
             // kernel has no topology for. A stage runs when the tick count is a multiple of its interval, which is
             // the cadence a world gives a stage that never changes interval. As in the world, every stage but
-            // euler-flow first marks the awake chunks changed, because only euler-flow marks its own writes.
+            // euler-flow and vacuum-cleanup first marks the awake chunks changed, because only those two mark their
+            // own writes.
             int eulerInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.EulerRunsPerSecond, TickRate);
             int gasInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.GasRunsPerSecond, TickRate);
             int thermalInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.ThermalRunsPerSecond, TickRate);
@@ -138,12 +139,21 @@ internal sealed partial class AtmosKernel : IDisposable
                     context.BeginStage(eulerInterval, BuiltInStageSchedule.GapTime(eulerInterval, TickRate));
                     SolveEulerFlow(context);
                 }
+
+                if (context.TickCount % gasInterval == 0)
+                {
+                    context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
+                    SolveVacuumCleanup(context);
+                }
             }
             else if (context.TickCount % gasInterval == 0)
             {
                 context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
                 context.MarkAwakeChunksChanged();
+                SolveDerivedRefresh(context);
+                context.MarkAwakeChunksChanged();
                 SolveAdvection(context);
+                SolveVacuumCleanup(context);
                 context.MarkAwakeChunksChanged();
                 SolveBoundaryFlow(context);
             }
@@ -234,6 +244,11 @@ internal sealed partial class AtmosKernel : IDisposable
         }
     }
 
+    internal void SolveDerivedRefresh(AtmosSolverExecutionContext context)
+    {
+        DefaultAtmosSolvers.SolveDerivedRefresh(context);
+    }
+
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _defaultSolvers.SolveAdvection(context);
@@ -242,6 +257,11 @@ internal sealed partial class AtmosKernel : IDisposable
     internal void SolveEulerFlow(AtmosSolverExecutionContext context)
     {
         LastFlowDiagnostics = _defaultSolvers.SolveEulerFlow(context);
+    }
+
+    internal void SolveVacuumCleanup(AtmosSolverExecutionContext context)
+    {
+        DefaultAtmosSolvers.SolveVacuumCleanup(context);
     }
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)

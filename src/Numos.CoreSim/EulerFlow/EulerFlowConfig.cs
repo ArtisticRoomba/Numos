@@ -111,7 +111,7 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         The velocity floor, species diffusion, vacuum cleanup, momentum settling, and the sleep decision run once
+    ///         The velocity floor, species diffusion, momentum settling, and the sleep decision run once
     ///         per settle pass, not on every call. The stage converts this to ticks as
     ///         <c>max(1, round(SettlePeriod · TickRate))</c>. At a tick rate of 20 Hz or less the default of 0.05 s
     ///         settles on every call. At 960 Hz it settles every 48 ticks, which is every third call at the default

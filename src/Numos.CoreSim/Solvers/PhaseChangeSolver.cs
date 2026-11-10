@@ -74,7 +74,7 @@ internal sealed class PhaseChangeSolver
 
             // See the awakeChunkCount doc above.
             // Add per-voxel parallelism only when ThermodynamicsSolver's per-chunk dispatch leaves workers idle.
-            int workerCount = Math.Max(1, Environment.ProcessorCount);
+            int workerCount = ParallelPhase.WorkerCount;
             if (awakeChunkCount < workerCount)
             {
                 ParallelPhase.Run(chunk.ActiveAirCount, action);

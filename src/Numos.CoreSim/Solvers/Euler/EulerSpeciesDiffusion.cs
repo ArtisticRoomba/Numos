@@ -62,24 +62,16 @@ internal static class EulerSpeciesDiffusion
             return;
 
         VoxelWorkItem[]? workItems = null;
-        int workItemCount = 0;
         try
         {
-            if (activeCount >= workerCount)
+            workItems = VoxelTiling.Plan(new ActiveAirCounts(active), activeCount, workerCount, out int workItemCount);
+            if (workItems == null)
             {
                 ParallelPhase.Run(activeCount, new DiffuseChunkAction(active, config, deltaTime));
             }
             else
             {
                 ParallelPhase.Run(activeCount, new InitializeAction(active));
-
-                int totalActiveAirCount = 0;
-                for (int index = 0; index < activeCount; index++)
-                    totalActiveAirCount = checked(totalActiveAirCount + active[index].Chunk.ActiveAirCount);
-
-                int tileSize = VoxelTiling.GetTileSize(totalActiveAirCount, workerCount);
-                workItems = VoxelTiling.Rent(new ActiveAirCounts(active), activeCount, tileSize, out workItemCount);
-
                 ParallelPhase.Run(workItemCount, new ResolveAndPrepareAction(active, workItems, config, deltaTime));
                 ParallelPhase.Run(workItemCount, new GatherAction(active, workItems, config));
                 ParallelPhase.Run(workItemCount, new ApplyAction(active, workItems, config));

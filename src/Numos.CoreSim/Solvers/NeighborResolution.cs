@@ -75,14 +75,19 @@ internal static class NeighborResolution
     /// <param name="neighborKinds">The destination buffer classifying air, void, and blocked directions.</param>
     /// <param name="slotBase">The first direction slot owned by the active voxel.</param>
     /// <returns>The number of non-solid neighbors, including void neighbors.</returns>
+    /// <remarks>
+    ///     The method takes spans so that a caller with a small stack buffer can use it. Pass
+    ///     <paramref name="slotBase" /> zero for a buffer of one voxel. A direction that is solid or outside the chunk
+    ///     leaves its index entry untouched and gets <see cref="NeighborKind.Blocked" />.
+    /// </remarks>
     internal static int ResolveNeighbors(
         AtmosChunk chunk,
         Int3 position,
-        ushort[] neighborIndices,
-        NeighborKind[] neighborKinds,
+        Span<ushort> neighborIndices,
+        Span<NeighborKind> neighborKinds,
         int slotBase)
     {
-        Array.Clear(neighborKinds, slotBase, NeighborDirections.Length);
+        neighborKinds.Slice(slotBase, NeighborDirections.Length).Clear();
         int count = 0;
         var dimensions = chunk.Dimensions;
         for (int direction = 0; direction < NeighborDirections.Length; direction++)
@@ -102,6 +107,41 @@ internal static class NeighborResolution
         }
 
         return count;
+    }
+
+    /// <summary>
+    ///     Resolves the neighbors of a range of active-air voxels.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxels.</param>
+    /// <param name="start">The first index into <see cref="AtmosChunk.ActiveAirIndices" />.</param>
+    /// <param name="length">The number of active-air voxels to resolve.</param>
+    /// <param name="neighborIndices">The destination buffer indexed by active voxel and direction.</param>
+    /// <param name="neighborKinds">The destination buffer classifying air, void, and blocked directions.</param>
+    /// <param name="neighborCounts">The destination buffer for each voxel's non-solid neighbor count.</param>
+    /// <remarks>
+    ///     The direction slots of an active voxel start at its active index times the length of
+    ///     <see cref="NeighborDirections" />. The counts are indexed by voxel, because a diffusion gather reads a
+    ///     neighbor's count and knows that neighbor only by voxel index.
+    /// </remarks>
+    internal static void ResolveActiveRange(
+        AtmosChunk chunk,
+        int start,
+        int length,
+        ushort[] neighborIndices,
+        NeighborKind[] neighborKinds,
+        int[] neighborCounts)
+    {
+        int end = start + length;
+        for (int activeIndex = start; activeIndex < end; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            neighborCounts[voxelIndex] = ResolveNeighbors(
+                chunk,
+                chunk.GetXyzInt3(voxelIndex),
+                neighborIndices,
+                neighborKinds,
+                activeIndex * NeighborDirections.Length);
+        }
     }
 
     /// <summary>
@@ -133,8 +173,8 @@ internal static class NeighborResolution
         AtmosChunk chunk,
         Int3 neighborPosition,
         int direction,
-        ushort[] neighborIndices,
-        NeighborKind[] neighborKinds,
+        Span<ushort> neighborIndices,
+        Span<NeighborKind> neighborKinds,
         int slotBase,
         ref int count)
     {

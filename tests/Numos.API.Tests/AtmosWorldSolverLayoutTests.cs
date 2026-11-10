@@ -188,6 +188,90 @@ public sealed class AtmosWorldSolverLayoutTests
     }
 
     [Test]
+    public void ConvertTransportModel_WithoutExplicitGasTransport_PutsBoundaryFlowAfterVacuumCleanup()
+    {
+        AtmosWorldSolverLayoutEntry[] euler =
+        [
+            new(AtmosBuiltInSolvers.EulerFlow, true),
+            new(AtmosBuiltInSolvers.VacuumCleanup, true),
+            new(AtmosBuiltInSolvers.Thermodynamics, true)
+        ];
+
+        var legacy = AtmosWorldSolverPipeline.ConvertTransportModel(euler, AtmosTransportModel.Legacy);
+
+        Assert.That(
+            legacy.Select(static entry => entry.Name),
+            Is.EqualTo(new[]
+            {
+                AtmosBuiltInSolvers.DerivedRefresh,
+                AtmosBuiltInSolvers.Advection,
+                AtmosBuiltInSolvers.VacuumCleanup,
+                AtmosBuiltInSolvers.BoundaryFlow,
+                AtmosBuiltInSolvers.Thermodynamics
+            }));
+    }
+
+    [Test]
+    public void ConvertTransportModel_DerivedRefreshFollowsAdvection()
+    {
+        AtmosWorldSolverLayoutEntry[] euler =
+        [
+            new(AtmosBuiltInSolvers.EulerFlow, false),
+            new(AtmosBuiltInSolvers.Thermodynamics, true)
+        ];
+
+        AtmosWorldSolverLayoutEntry[] legacyWithoutRefresh =
+        [
+            new(AtmosBuiltInSolvers.Advection, true, 4),
+            new(AtmosBuiltInSolvers.BoundaryFlow, true, 4)
+        ];
+
+        AtmosWorldSolverLayoutEntry[] legacyWithMovedRefresh =
+        [
+            new(AtmosBuiltInSolvers.Advection, true),
+            new(AtmosBuiltInSolvers.BoundaryFlow, true),
+            new(AtmosBuiltInSolvers.DerivedRefresh, false)
+        ];
+
+        var legacy = AtmosWorldSolverPipeline.ConvertTransportModel(euler, AtmosTransportModel.Legacy);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                legacy,
+                Is.EqualTo(new AtmosWorldSolverLayoutEntry[]
+                {
+                    new(AtmosBuiltInSolvers.DerivedRefresh, false),
+                    new(AtmosBuiltInSolvers.Advection, false),
+                    new(AtmosBuiltInSolvers.BoundaryFlow, false),
+                    new(AtmosBuiltInSolvers.Thermodynamics, true)
+                }),
+                "added before advection, with its enabled flag");
+
+            Assert.That(
+                AtmosWorldSolverPipeline.ConvertTransportModel(legacyWithoutRefresh, AtmosTransportModel.Legacy),
+                Is.EqualTo(new AtmosWorldSolverLayoutEntry[]
+                {
+                    new(AtmosBuiltInSolvers.DerivedRefresh, true, 4),
+                    new(AtmosBuiltInSolvers.Advection, true, 4),
+                    new(AtmosBuiltInSolvers.BoundaryFlow, true, 4)
+                }),
+                "a legacy layout without it gains it, with the interval of advection");
+
+            Assert.That(
+                AtmosWorldSolverPipeline.ConvertTransportModel(legacyWithMovedRefresh, AtmosTransportModel.Legacy),
+                Is.EqualTo(legacyWithMovedRefresh),
+                "a present stage keeps its place and flag");
+
+            Assert.That(
+                AtmosWorldSolverPipeline.ConvertTransportModel(legacyWithMovedRefresh, AtmosTransportModel.Euler)
+                    .Select(static entry => entry.Name),
+                Is.EqualTo(new[] { AtmosBuiltInSolvers.EulerFlow }),
+                "the Euler model drops it");
+        });
+    }
+
+    [Test]
     public void DetectTransportModel_ReadsTheTransportStages()
     {
         static AtmosWorldSolverStep Step(string name, bool enabled = true)

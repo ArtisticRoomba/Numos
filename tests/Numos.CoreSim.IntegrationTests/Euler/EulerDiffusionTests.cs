@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 
@@ -38,14 +39,14 @@ public sealed class EulerDiffusionTests
         FillSplit(control, config, controlChunk, width, height);
         var initial = control.GetChunkSnapshot(controlChunk);
 
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         try
         {
             euler.Tick();
         }
         finally
         {
-            EulerFlowSolver.WorkerCountOverride = null;
+            ParallelPhase.WorkerCountOverride = null;
         }
 
         legacy.Tick();

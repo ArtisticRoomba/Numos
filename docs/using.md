@@ -242,7 +242,7 @@ that simulation's owning world. Use the world directly when it contains multiple
 
 The built-in stages do not all run every tick. Each stage has an interval, the number of ticks between its runs. The
 defaults are set in runs per second. `euler-flow` runs 60 times a second (16 ticks at 960 Hz), the gas stages 20 times
-(48 ticks), and the thermal stages 10 times (96 ticks). A frame at 30 TPS covers 32 ticks.
+(48 ticks), and the thermal stages 10 times (96 ticks). `derived-refresh` and `vacuum-cleanup` count as gas stages. A frame at 30 TPS covers 32 ticks.
 
 `euler-flow` does not run every tick by default, because each run pays a fixed cost to gather and write back its
 chunks. At 960 Hz a run on every tick costs up to twice as much for the same gas time. Its CFL substeps follow fast gas
@@ -268,7 +268,8 @@ The tick rate is fixed when the world is created. A checkpoint restore adopts th
 registration. Two rules apply to intervals:
 
 - A producer and its consumer must share an interval, because they pass data within one tick. The pairs are
-  `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. Numos does not check this.
+  `derived-refresh` with `advection`, `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`.
+  Numos does not check this.
 - A custom stage defaults to interval 1. A stage written for the old 20 Hz tick therefore now runs 48 times as often
   at 960 Hz. Scale its rates by `DeltaTime`, or register it with `interval: 48`.
 
@@ -304,7 +305,13 @@ world. The four counters indicate bugs and are normally zero. The diagnostics ke
 runs. They are a measurement, not state: they read all zeros before the first run, under the legacy model, and after a
 restore.
 
-The older pressure-relaxation stages (`advection` and `boundary-flow`) are `AtmosTransportModel.Legacy`. Pick the model
+The default Euler layout runs `euler-flow`, `vacuum-cleanup`, `explicit-gas-transport`, `thermodynamics`,
+`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. Vacuum cleanup is its own stage, so a host can
+move, disable, or replace it. `euler-flow` does not run it.
+
+The older pressure-relaxation stages (`derived-refresh`, `advection`, and `boundary-flow`) are `AtmosTransportModel.Legacy`.
+Its layout is `derived-refresh`, `advection`, `vacuum-cleanup`, `explicit-gas-transport`, `boundary-flow`, and the same
+last four stages. Pick the model
 when the world or simulation is constructed, or switch it later with `SetLayout`, which also works during recording.
 `ResetToDefaults()` with no argument installs the Euler stages:
 
@@ -321,7 +328,8 @@ world.Solvers.SetLayout(
 ```
 
 `SetLayout` takes every stage in order with its enabled flag. A built-in name that the world does not hold is created, and
-a built-in stage that the list omits is dropped. Every registered custom stage must appear. The stage list is part of
+a built-in stage that the list omits is dropped. Every registered custom stage must appear. `SetLayout` does not pair stages, so a legacy list names `derived-refresh`
+before `advection` itself. `ConvertTransportModel` adds or drops the two together. The stage list is part of
 the world checkpoint, and `RestoreCheckpoint` installs the checkpoint's layout, so a legacy archive restores into a world
 that started on Euler. Only the custom stages have to match.
 
@@ -507,7 +515,7 @@ usable. The settings most hosts touch:
 - `CourantNumber` (0.5): the positivity bound. 0.8 is faster but can go negative next to vacuum.
 - `MaxSubstepsPerSecond` (1280): caps the cost per second of gas time, at the price of the gas falling behind. A 50 ms
   call gets 64 substeps, the default 16-tick call at 960 Hz gets 22, and a 1 ms call gets 2.
-- `SettlePeriod` (0.05 s): how often the velocity floor, species diffusion, vacuum cleanup, and the sleep decision run.
+- `SettlePeriod` (0.05 s): how often the velocity floor, species diffusion, and the sleep decision run.
   Momentum settling and the sleep decision run on this period, not on every tick. The sweep axis order is checkpointed,
   so a replay sweeps the same way.
 - `VelocityFloor` (0.005 m/s): lets a settled room sleep.
@@ -1004,6 +1012,51 @@ Mixture cells have no transport pass that would repair them later, so the solver
 written through the view is recorded, so the write must be deterministic solver work.
 
 The dangerous surface can bypass validation. It can also change faster than the supported API. Keep its use behind a small adapter in your engine integration. Document every assumption it relies on. Prefer the safe API whenever it does the job.
+
+### Reusing built-in solver work
+
+`advection` reads the pressure and heat capacity caches and does not recompute them. The `derived-refresh` stage
+recomputes them just before it. Every built-in stage leaves the caches current to within a few ULP, which is why the
+Euler layout has no refresh stage. A custom stage that edits gas or temperature before `advection` or `vacuum-cleanup`
+must refresh the caches. `AtmosDangerousChunk.RefreshDerivedState()` does that with the same arithmetic as the built-in
+stage. It also clears or sets the vacuum flag of each voxel. Call `MarkChanged` afterwards when the refresh runs outside
+a custom stage.
+
+`advection` also reuses the mole totals `derived-refresh` summed. A custom stage placed between the two stages makes
+`advection` sum the moles again. The result is the same, and the extra sum is the only cost.
+
+The dangerous chunk also offers `ResolveNeighbors`, `IsBoundary`, and `NeighborDirections`. They find the non-solid
+neighbors of a voxel inside its chunk, in the slot order the built-in solvers sum in. Each slot is an
+`AtmosVoxelNeighborKind`: `Blocked`, `Air`, or `Void`. `context.Dangerous().ApplyVacuumCleanup(simulation)` runs the
+`vacuum-cleanup` pass on one simulation. A custom stage that replaces `vacuum-cleanup` calls it and disables the
+built-in stage.
+
+`AtmosParallel.Run` runs a phase on the scheduler that the built-in stages use. Prefer it to `Parallel.For` in a custom
+stage. A steady-state phase allocates nothing, and its worker limit follows the one that tests and benchmarks set for the
+built-in stages. `AtmosParallel.WorkerCount` gives that limit. An item implements `IAtmosParallelAction`, must write
+only its own outputs, and cannot rely on item order. Use `Parallel.For` for work that does not fit this shape.
+
+```csharp
+readonly struct RefreshAction(AtmosSolverChunks chunks) : IAtmosParallelAction
+{
+    public void Invoke(int index) => chunks[index].Dangerous().RefreshDerivedState();
+}
+
+world.Solvers.Register(
+    "game/heater-refresh",
+    context =>
+    {
+        foreach (AtmosSimulation simulation in context.Simulations)
+        {
+            var chunks = context.Chunks(simulation);
+            // ...raw temperature writes through chunks[i].Dangerous() go here...
+            AtmosParallel.Run(chunks.Count, new RefreshAction(chunks));
+        }
+    },
+    before: AtmosBuiltInSolvers.VacuumCleanup);
+```
+
+These writes are not recorded. They are deterministic solver work, so they replay correctly inside a stage.
 
 ## Recording and deterministic replay
 

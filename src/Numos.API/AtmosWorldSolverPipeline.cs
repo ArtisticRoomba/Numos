@@ -31,8 +31,10 @@ public sealed class AtmosWorldSolverPipeline
     // The one source of truth for built-in stages. The order is the canonical order that BuiltInStageNames reports.
     private static readonly (string Name, Action<AtmosSolverTickScope> Factory)[] BuiltInStages =
     [
+        (AtmosBuiltInSolvers.DerivedRefresh, static scope => scope.World.SolveDerivedRefreshStage(scope)),
         (AtmosBuiltInSolvers.EulerFlow, static scope => scope.World.SolveEulerFlowStage(scope)),
         (AtmosBuiltInSolvers.Advection, static scope => scope.World.SolveAdvectionStage(scope)),
+        (AtmosBuiltInSolvers.VacuumCleanup, static scope => scope.World.SolveVacuumCleanupStage(scope)),
         (AtmosBuiltInSolvers.ExplicitGasTransport, static scope => scope.World.SolveExplicitGasTransportStage(scope)),
         (AtmosBuiltInSolvers.BoundaryFlow, static scope => scope.World.SolveBoundaryFlowStage(scope)),
         (AtmosBuiltInSolvers.Thermodynamics, static scope => scope.World.SolveThermodynamicsStage(scope)),
@@ -48,6 +50,7 @@ public sealed class AtmosWorldSolverPipeline
     private static readonly ReadOnlyCollection<string> EulerLayout = Array.AsReadOnly(
     [
         AtmosBuiltInSolvers.EulerFlow,
+        AtmosBuiltInSolvers.VacuumCleanup,
         AtmosBuiltInSolvers.ExplicitGasTransport,
         AtmosBuiltInSolvers.Thermodynamics,
         AtmosBuiltInSolvers.ExplicitThermalTransport,
@@ -57,7 +60,9 @@ public sealed class AtmosWorldSolverPipeline
 
     private static readonly ReadOnlyCollection<string> LegacyLayout = Array.AsReadOnly(
     [
+        AtmosBuiltInSolvers.DerivedRefresh,
         AtmosBuiltInSolvers.Advection,
+        AtmosBuiltInSolvers.VacuumCleanup,
         AtmosBuiltInSolvers.ExplicitGasTransport,
         AtmosBuiltInSolvers.BoundaryFlow,
         AtmosBuiltInSolvers.Thermodynamics,
@@ -78,8 +83,8 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <remarks>
     ///     The list covers both transport models, so it includes <c>euler-flow</c> and the legacy-only
-    ///     <c>advection</c> and <c>boundary-flow</c> stages. Numos can recreate any of these by name, which is why
-    ///     <see cref="SetLayout" /> accepts them without a registration.
+    ///     <c>derived-refresh</c>, <c>advection</c>, and <c>boundary-flow</c> stages. Numos can recreate any of these
+    ///     by name, which is why <see cref="SetLayout" /> accepts them without a registration.
     /// </remarks>
     [PublicAPI]
     public static IReadOnlyList<string> BuiltInStageNames => BuiltInNames;
@@ -119,14 +124,19 @@ public sealed class AtmosWorldSolverPipeline
     ///     <para>
     ///         Converting to <see cref="AtmosTransportModel.Legacy" /> replaces <c>euler-flow</c> with
     ///         <c>advection</c> at the same position. It adds <c>boundary-flow</c> after
-    ///         <c>explicit-gas-transport</c>, or after <c>advection</c> when that stage is absent. The new stages
-    ///         inherit the enabled flag of the stage they replace.
+    ///         <c>explicit-gas-transport</c>. When that stage is absent, <c>boundary-flow</c> goes after the later of
+    ///         <c>advection</c> and <c>vacuum-cleanup</c>. The new stages inherit the enabled flag of the stage they
+    ///         replace. A layout without <c>derived-refresh</c> gains it right before <c>advection</c>, with the
+    ///         enabled flag and interval of the <c>advection</c> entry.
     ///     </para>
     ///     <para>
-    ///         Converting to <see cref="AtmosTransportModel.Euler" /> replaces <c>advection</c> and
-    ///         <c>boundary-flow</c> with one <c>euler-flow</c> at the position of the first of them. A transport stage
-    ///         that the target model already has stays as it is. A layout with no transport stage at all gains the
-    ///         target model's stages at the front.
+    ///         Converting to <see cref="AtmosTransportModel.Euler" /> removes <c>derived-refresh</c>. It replaces
+    ///         <c>advection</c> and <c>boundary-flow</c> with one <c>euler-flow</c> at the position of the first of
+    ///         them. A transport stage that the target model already has stays as it is. A layout with no transport
+    ///         stage at all gains the target model's stages at the front.
+    ///     </para>
+    ///     <para>
+    ///         Both models run <c>vacuum-cleanup</c>, so a conversion keeps it in place and never adds it.
     ///     </para>
     ///     <para>
     ///         This method only builds a list. Pass the result to <see cref="SetLayout" /> to apply it.
@@ -170,11 +180,22 @@ public sealed class AtmosWorldSolverPipeline
             if (!placed)
                 result.Insert(0, new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.Advection, true));
 
+            if (!result.Any(static e => e.Name == AtmosBuiltInSolvers.DerivedRefresh))
+            {
+                // The two stages hand data over within a tick, so the new stage takes the interval of advection too.
+                int advection = result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.Advection);
+                result.Insert(advection, result[advection] with { Name = AtmosBuiltInSolvers.DerivedRefresh });
+            }
+
             if (!hasBoundary)
             {
                 int after = result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.ExplicitGasTransport);
                 if (after < 0)
-                    after = result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.Advection);
+                {
+                    after = Math.Max(
+                        result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.Advection),
+                        result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.VacuumCleanup));
+                }
 
                 result.Insert(after + 1, new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.BoundaryFlow, anchorEnabled));
             }
@@ -185,6 +206,9 @@ public sealed class AtmosWorldSolverPipeline
         bool emitted = hasEuler;
         foreach (var entry in layout)
         {
+            if (entry.Name == AtmosBuiltInSolvers.DerivedRefresh)
+                continue;
+
             if (entry.Name is not (AtmosBuiltInSolvers.Advection or AtmosBuiltInSolvers.BoundaryFlow))
             {
                 result.Add(entry);
@@ -454,8 +478,9 @@ public sealed class AtmosWorldSolverPipeline
     ///         the real elapsed time.
     ///     </para>
     ///     <para>
-    ///         Producer and consumer stages must share an interval. <c>advection</c> and <c>boundary-flow</c> hand
-    ///         data over within a tick, and so do <c>thermodynamics</c> and <c>thermal-boundary</c>. Numos does not
+    ///         Producer and consumer stages must share an interval. <c>derived-refresh</c> and <c>advection</c> hand
+    ///         data over within a tick. So do <c>advection</c> and <c>boundary-flow</c>, and <c>thermodynamics</c>
+    ///         and <c>thermal-boundary</c>. Numos does not
     ///         check this, because a host can replace the producer.
     ///     </para>
     ///     <para>
@@ -533,7 +558,9 @@ public sealed class AtmosWorldSolverPipeline
     ///     <code>
     ///     world.Solvers.SetLayout(
     ///     [
+    ///         new(AtmosBuiltInSolvers.DerivedRefresh, true),
     ///         new(AtmosBuiltInSolvers.Advection, true),
+    ///         new(AtmosBuiltInSolvers.VacuumCleanup, true),
     ///         new(AtmosBuiltInSolvers.ExplicitGasTransport, true),
     ///         new(AtmosBuiltInSolvers.BoundaryFlow, true),
     ///         new(AtmosBuiltInSolvers.Thermodynamics, true),
@@ -767,10 +794,10 @@ public sealed class AtmosWorldSolverPipeline
     /// <remarks>
     ///     <para>
     ///         <see cref="AtmosTransportModel.Euler" />, the default, installs <c>euler-flow</c>,
-    ///         <c>explicit-gas-transport</c>, <c>thermodynamics</c>, <c>explicit-thermal-transport</c>,
-    ///         <c>thermal-boundary</c>, and <c>gas-reactions</c>. <see cref="AtmosTransportModel.Legacy" /> replaces
-    ///         <c>euler-flow</c> with <c>advection</c> ahead of <c>explicit-gas-transport</c> and
-    ///         <c>boundary-flow</c> after it.
+    ///         <c>vacuum-cleanup</c>, <c>explicit-gas-transport</c>, <c>thermodynamics</c>,
+    ///         <c>explicit-thermal-transport</c>, <c>thermal-boundary</c>, and <c>gas-reactions</c>.
+    ///         <see cref="AtmosTransportModel.Legacy" /> replaces <c>euler-flow</c> with <c>derived-refresh</c> and
+    ///         <c>advection</c>. It also adds <c>boundary-flow</c> after <c>explicit-gas-transport</c>.
     ///     </para>
     ///     <para>
     ///         A restore adopts the checkpoint's stage layout, so restoring a legacy archive needs no call to this
@@ -1063,7 +1090,8 @@ internal sealed class WorldSolverRegistration
         Interval = interval;
         Name = name;
         Kind = kind;
-        MarksOwnChanges = kind == AtmosWorldSolverKind.BuiltIn && name == AtmosBuiltInSolvers.EulerFlow;
+        MarksOwnChanges = kind == AtmosWorldSolverKind.BuiltIn &&
+                          name is AtmosBuiltInSolvers.EulerFlow or AtmosBuiltInSolvers.VacuumCleanup;
         _builtInSolver = builtInSolver;
         CustomSolver = customSolver;
         Selection = selection;
@@ -1080,9 +1108,11 @@ internal sealed class WorldSolverRegistration
     ///     revision bump of every awake chunk before it runs.
     /// </summary>
     /// <remarks>
-    ///     Only the built-in <c>euler-flow</c> stage sets it. A chunk that the stage skips as static keeps its
-    ///     revision, so a renderer does not copy it again. The stage also reuses its static test of a chunk while
-    ///     the revision holds, so a blanket bump would force a rescan of every awake chunk on every call.
+    ///     Only the built-in <c>euler-flow</c> and <c>vacuum-cleanup</c> stages set it. A chunk that
+    ///     <c>euler-flow</c> skips as static keeps its revision, so a renderer does not copy it again. That stage
+    ///     also reuses its static test of a chunk while the revision holds, so a blanket bump would force a rescan of
+    ///     every awake chunk on every call. <c>vacuum-cleanup</c> advances the revision of each chunk it empties
+    ///     voxels in and of each sleeping chunk whose timer it clears. It leaves the rest alone for the same reason.
     /// </remarks>
     internal bool MarksOwnChanges { get; }
 

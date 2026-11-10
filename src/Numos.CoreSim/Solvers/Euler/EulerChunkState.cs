@@ -1127,8 +1127,8 @@ internal sealed class EulerChunkWorkspace
     /// <remarks>
     ///     <para>
     ///         The sweeps summed the mixture in ascending gas id, but the heat capacity and total moles written
-    ///         here are summed in the chunk's channel order, the order <see cref="AdvectionSolver.RefreshPressureAndHeatCapacity" />
-    ///         and every other stage use, so the cached values match a later refresh bit for bit. The temperature
+    ///         here are summed in the chunk's channel order, the order <see cref="DerivedStateRefresh" /> and every
+    ///         other stage use, so the cached values match a later refresh bit for bit. The temperature
     ///         divides by the same sum formed in double, so a heat capacity the float cache saturates to infinity
     ///         still gives a finite temperature.
     ///     </para>

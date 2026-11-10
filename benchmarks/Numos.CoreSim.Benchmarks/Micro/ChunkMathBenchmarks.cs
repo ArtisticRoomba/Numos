@@ -80,7 +80,7 @@ public class ChunkMathBenchmarks
     [Benchmark]
     public void Vectorized()
     {
-        AdvectionSolver.RefreshPressureAndHeatCapacity(_workload.Chunks[0], _workload.Config);
+        DerivedStateRefresh.RefreshChunk(_workload.Chunks[0], _workload.Config);
     }
 
     /// <summary>

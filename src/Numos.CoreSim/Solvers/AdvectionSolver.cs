@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Numerics.Tensors;
-using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -15,12 +14,25 @@ namespace Numos.CoreSim.Solvers;
 ///     The separation stops either pass from observing partially applied work from the other.
 ///     A gas can therefore move once through bulk flow and once through diffusion in the same tick.
 ///     The bulk-flow phases live here.
-///     Other transport solvers share neighbor resolution, the diffusion phases, vacuum cleanup, and sleep bookkeeping
-///     through <see cref="NeighborResolution" />, <see cref="SpeciesDiffusionKernel" />,
-///     <see cref="VacuumCleanup" />, and <see cref="ChunkSleepPolicy" />.
+///     Other transport solvers share neighbor resolution, the diffusion phases, and sleep bookkeeping through
+///     <see cref="NeighborResolution" />, <see cref="SpeciesDiffusionKernel" />, and <see cref="ChunkSleepPolicy" />.
+///     Vacuum cleanup is the separate <c>vacuum-cleanup</c> stage (<see cref="VacuumCleanup" />). The pressure and
+///     heat capacity caches come from the <c>derived-refresh</c> stage (<see cref="DerivedStateRefresh" />).
 /// </remarks>
-internal sealed class AdvectionSolver : IAtmosSolverStage
+internal sealed partial class AdvectionSolver : IAtmosSolverStage
 {
+    /// <summary>
+    ///     Whether the stage takes the mole totals that <c>derived-refresh</c> kept (see
+    ///     <see cref="RefreshedMoleTotals" />). Tests clear it to compare against summing on every run. The hand-off
+    ///     changes no bit, so it is not a configuration field.
+    /// </summary>
+    internal static bool UseRefreshedTotals = true;
+
+    /// <summary>
+    ///     How many chunks the most recent run took refreshed totals for. Tests read it to see which path ran.
+    /// </summary>
+    internal static int LastRefreshedChunkCount;
+
     private readonly int _maximumBoundaryEvents;
 
     /// <summary>
@@ -47,8 +59,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///         including the bulk and diffusion delta gathers.
     ///     </para>
     ///     <para>
-    ///         Each barrier guards a real cross-tile read-after-write, so none can be dropped.
-    ///         Conductance needs the neighbor's refreshed pressure.
+    ///         The stage reads the pressure and heat capacity caches that <c>derived-refresh</c> rebuilt before it. A
+    ///         host that disables that stage must keep both caches current itself.
+    ///         Every barrier from the conductance phase on guards a real cross-tile read-after-write.
     ///         The incident reduction needs the neighbor's edge conductance.
     ///         Bulk flow needs the neighbor's incident conductance.
     ///         The bulk gather needs the neighbor's outgoing fractions.
@@ -63,12 +76,14 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             BoundaryEventBatches<BoundaryFlowEvent>.Get(context);
 
         boundaryBatches.BeginTick(context.TickCount);
+        RefreshedMoleTotals refreshedTotals = RefreshedMoleTotals.Get(context);
+        int refreshedCursor = 0;
+        int refreshedCount = 0;
 
         ChunkWorkspace[] workspaces = ArrayPool<ChunkWorkspace>.Shared.Rent(Math.Max(1, context.Chunks.Length));
         VoxelWorkItem[]? voxelWorkItems = null;
         int workspaceCount = 0;
         int voxelWorkItemCount = 0;
-        int totalActiveAirCount = 0;
         bool workspacesReleased = false;
 
         try
@@ -95,18 +110,30 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                         chunk.GridPosition,
                         Math.Min(chunk.ActiveAirCount, _maximumBoundaryEvents));
 
+                Mole[]? totals = UseRefreshedTotals
+                    ? refreshedTotals.TryGet(chunk, context.TickCount, ref refreshedCursor)
+                    : null;
+                workspaces[workspaceCount].RefreshedTotalMoles = totals;
+                if (totals != null)
+                    refreshedCount++;
+
                 workspaceCount++;
-                totalActiveAirCount = checked(totalActiveAirCount + chunk.ActiveAirCount);
             }
 
+            LastRefreshedChunkCount = refreshedCount;
             if (workspaceCount == 0)
                 return;
 
-            // Whole chunks already fill the worker pool here.
-            // Keeping each chunk on one worker avoids global barriers and shortens scratch-buffer lifetimes.
+            // When whole chunks fill the worker pool, each chunk stays on one worker.
+            // That avoids global barriers and shortens scratch-buffer lifetimes.
             // The per-chunk operation order stays the same as in the tiled schedule below.
-            int workerCount = Math.Max(1, Environment.ProcessorCount);
-            if (workspaceCount > 1 && workspaceCount >= workerCount)
+            voxelWorkItems = VoxelTiling.Plan(
+                new WorkspaceActiveAirCounts(workspaces),
+                workspaceCount,
+                ParallelPhase.WorkerCount,
+                out voxelWorkItemCount);
+
+            if (voxelWorkItems == null)
             {
                 ParallelPhase.Run(
                     workspaceCount,
@@ -118,21 +145,14 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                         context.SleepDelayTicks));
 
                 workspacesReleased = true;
-                VacuumCleanup.Apply(context);
                 return;
             }
 
             ParallelPhase.Run(workspaceCount, new InitializeWorkspaceAction(workspaces));
-            int voxelTileSize = VoxelTiling.GetTileSize(totalActiveAirCount, workerCount);
-            voxelWorkItems = VoxelTiling.Rent(
-                new WorkspaceActiveAirCounts(workspaces),
-                workspaceCount,
-                voxelTileSize,
-                out voxelWorkItemCount);
 
             ParallelPhase.Run(
                 voxelWorkItemCount,
-                new RefreshAndResolveAction(workspaces, voxelWorkItems, context.TickConfig));
+                new ResolveWorkspaceAction(workspaces, voxelWorkItems));
 
             ParallelPhase.Run(
                 voxelWorkItemCount,
@@ -167,8 +187,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 new ApplyDiffusionDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
 
             ParallelPhase.Run(workspaceCount, new PublishBoundaryEventsAction(workspaces));
-
-            VacuumCleanup.Apply(context);
         }
         finally
         {
@@ -201,7 +219,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     {
         var chunk = workspace.Chunk!;
         var workItem = new VoxelWorkItem(workspaceIndex, 0, chunk.ActiveAirCount);
-        RefreshAndResolve(ref workspace, workItem, config);
+        ResolveWorkspace(ref workspace, workItem);
         ComputeConductance(ref workspace, workItem, config);
         ReduceIncidentConductance(ref workspace, workItem, config);
         ComputeBulkFlow(ref workspace, workItem, config);
@@ -218,15 +236,17 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Refreshes derived thermodynamic state and resolves reusable neighbor geometry for a voxel tile.
+    ///     Fills the tile's moles, capacitance, and neighbor buffers from the refreshed chunk caches.
     /// </summary>
     /// <param name="workspace">The workspace containing the tile's chunk and scratch buffers.</param>
     /// <param name="workItem">The active-air range owned by this invocation.</param>
-    /// <param name="config">The immutable configuration snapshot for the tick.</param>
-    private static void RefreshAndResolve(
-        ref ChunkWorkspace workspace,
-        VoxelWorkItem workItem,
-        AtmosSolverConfigSnapshot config)
+    /// <remarks>
+    ///     The stage reads <see cref="AtmosChunk.TotalPressure" /> as <c>derived-refresh</c> left it and does not
+    ///     recompute it. The mole totals come from the refresh when <see cref="RefreshedMoleTotals" /> still vouches
+    ///     for them. Otherwise the stage sums them in channel order, the order the refresh uses, so both paths give
+    ///     the same bits.
+    /// </remarks>
+    private static void ResolveWorkspace(ref ChunkWorkspace workspace, VoxelWorkItem workItem)
     {
         var chunk = workspace.Chunk!;
         int end = workItem.Start + workItem.Length;
@@ -243,49 +263,37 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             }
 
             Span<Mole> totalMoles = workspace.TotalMoles!.AsSpan(start, length);
-            totalMoles.Clear();
+            if (workspace.RefreshedTotalMoles == null)
+            {
+                totalMoles.Clear();
 
-            // Keep gas-channel order and each voxel's addition order.
-            // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
-            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-                TensorPrimitives.Add<float>(totalMoles, chunk.ActiveGases[gas].Moles.AsSpan(start, length), totalMoles);
+                // Keep gas-channel order and each voxel's addition order.
+                // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
+                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                    TensorPrimitives.Add<float>(totalMoles, chunk.ActiveGases[gas].Moles.AsSpan(start, length), totalMoles);
+            }
 
             for (int index = 0; index < length; index++)
             {
                 ushort voxelIndex = (ushort)(start + index);
-                chunk.TotalPressure[voxelIndex] =
-                    AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles[index]);
-
-                if (chunk.TotalPressure[voxelIndex] > 0f && totalMoles[index] > 0f)
-                    workspace.Capacitance![voxelIndex] = totalMoles[index] / chunk.TotalPressure[voxelIndex];
-            }
-
-            Span<JoulePerKelvin> heatCapacity = chunk.TotalHeatCapacity.AsSpan().Slice(start, length);
-            Span<Mole> heatScratch = workspace.HeatScratch!.AsSpan(start, length);
-            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-            {
-                JoulePerMoleKelvin molarHeatCapacity =
-                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-
-                TensorPrimitives.MaxNumber(chunk.ActiveGases[gas].Moles.AsSpan(start, length), 0f, heatScratch);
-                TensorPrimitives.MultiplyAdd<float>(heatScratch, molarHeatCapacity, heatCapacity, heatCapacity);
+                Pascal pressure = chunk.TotalPressure[voxelIndex];
+                if (pressure > 0f && totalMoles[index] > 0f)
+                    workspace.Capacitance![voxelIndex] = totalMoles[index] / pressure;
             }
         }
 
+        NeighborResolution.ResolveActiveRange(
+            chunk,
+            workItem.Start,
+            workItem.Length,
+            workspace.Diffusion.NeighborIndices!,
+            workspace.Diffusion.NeighborKinds!,
+            workspace.Diffusion.NeighborCounts!);
+
         for (activeIndex = workItem.Start; activeIndex < end; activeIndex++)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            var position = chunk.GetXyzInt3(voxelIndex);
+            var position = chunk.GetXyzInt3(chunk.ActiveAirIndices[activeIndex]);
             workspace.BoundaryEligible![activeIndex] = NeighborResolution.IsBoundary(chunk, position);
-
-            // Voxel-indexed. A diffusion gather needs a neighboring source's neighbor count
-            // and knows that neighbor only by voxel index.
-            workspace.Diffusion.NeighborCounts![voxelIndex] = NeighborResolution.ResolveNeighbors(
-                chunk,
-                position,
-                workspace.Diffusion.NeighborIndices!,
-                workspace.Diffusion.NeighborKinds!,
-                activeIndex * NeighborResolution.NeighborDirections.Length);
         }
     }
 
@@ -679,78 +687,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Rebuilds pressure and heat capacity, clearing vacuum species before accumulating heat capacity.
-    /// </summary>
-    /// <param name="chunk">The chunk whose derived thermodynamic state will be rebuilt.</param>
-    /// <param name="config">The immutable configuration snapshot used for gas properties and pressure.</param>
-    /// <remarks>
-    ///     Gas channels are accumulated in their existing order.
-    ///     Changing the reduction order changes floating-point rounding and can break deterministic replay
-    ///     compatibility.
-    /// </remarks>
-    internal static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
-    {
-        chunk.TotalPressure.Clear();
-        chunk.TotalHeatCapacity.Clear();
-
-        Mole[]? buffer = null;
-        try
-        {
-            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount;)
-            {
-                int start = chunk.ActiveAirIndices[activeIndex++];
-                int length = 1;
-                while (activeIndex < chunk.ActiveAirCount && chunk.ActiveAirIndices[activeIndex] == start + length)
-                {
-                    activeIndex++;
-                    length++;
-                }
-
-                buffer ??= ArrayPool<Mole>.Shared.Rent(chunk.VoxelCount);
-                Span<Mole> scratch = buffer.AsSpan(0, length);
-                scratch.Clear();
-
-                // Keep gas-channel order and each voxel's addition order.
-                // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
-                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-                    TensorPrimitives.Add<float>(scratch, chunk.ActiveGases[gas].Moles.AsSpan(start, length), scratch);
-
-                for (int index = 0; index < length; index++)
-                {
-                    ushort voxelIndex = (ushort)(start + index);
-                    chunk.TotalPressure[voxelIndex] =
-                        AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, scratch[index]);
-                }
-
-                Span<JoulePerKelvin> heatCapacity = chunk.TotalHeatCapacity.AsSpan().Slice(start, length);
-                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-                {
-                    JoulePerMoleKelvin molarHeatCapacity =
-                        config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-
-                    // MaxNumber preserves the positive-moles guard for negative and NaN values.
-                    TensorPrimitives.MaxNumber(chunk.ActiveGases[gas].Moles.AsSpan(start, length), 0f, scratch);
-                    // MultiplyAdd deliberately retains separate multiply/add rounding instead of FMA rounding.
-                    TensorPrimitives.MultiplyAdd<float>(scratch, molarHeatCapacity, heatCapacity, heatCapacity);
-                }
-            }
-        }
-        finally
-        {
-            if (buffer != null)
-                ArrayPool<Mole>.Shared.Return(buffer);
-        }
-    }
-
-    private readonly struct WorkspaceActiveAirCounts(ChunkWorkspace[] workspaces) : IActiveAirCounts
-    {
-        public int GetActiveAirCount(int index)
-        {
-            return workspaces[index].Chunk!.ActiveAirCount;
-        }
-    }
-
-    /// <summary>
     ///     One gas-independent bulk-flow contribution to a destination voxel.
     /// </summary>
     /// <param name="Source">The voxel the moles come from, which is the destination itself for a debit.</param>
@@ -762,259 +698,4 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         Scalar Fraction,
         Kelvin Temperature,
         bool IsDebit);
-
-    private readonly struct SolveChunkWorkspaceAction(
-        ChunkWorkspace[] workspaces,
-        AtmosSolverConfigSnapshot config,
-        Second deltaTime,
-        int interval,
-        int sleepDelayTicks) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var chunk = workspaces[index].Chunk;
-            BoundaryEventBatch<BoundaryFlowEvent> boundaryBatch = workspaces[index].BoundaryBatch;
-            try
-            {
-                workspaces[index].Initialize(chunk, boundaryBatch);
-                SolveChunkWorkspace(ref workspaces[index], index, config, deltaTime, interval, sleepDelayTicks);
-            }
-            finally
-            {
-                workspaces[index].Release();
-            }
-        }
-    }
-
-    private readonly struct InitializeWorkspaceAction(ChunkWorkspace[] workspaces) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var chunk = workspaces[index].Chunk;
-            BoundaryEventBatch<BoundaryFlowEvent> boundaryBatch = workspaces[index].BoundaryBatch;
-            workspaces[index].Initialize(chunk, boundaryBatch);
-        }
-    }
-
-    private readonly struct ReleaseWorkspaceAction(ChunkWorkspace[] workspaces) : IAction
-    {
-        public void Invoke(int index)
-        {
-            workspaces[index].Release();
-        }
-    }
-
-    /// <summary>
-    ///     Holds one chunk's pooled scratch buffers for a single tick.
-    /// </summary>
-    /// <remarks>
-    ///     <para>
-    ///         Every phase partitions destination voxels, so no two workers write the same scratch element.
-    ///         The workspace stays alive across phase barriers, so later phases reuse resolved geometry and
-    ///         derived values.
-    ///     </para>
-    ///     <para>
-    ///         Buffers that a voxel reads only for itself stay active-indexed.
-    ///         Anything a gather reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is
-    ///         known only by voxel index.
-    ///         These buffers are <see cref="BulkMoleFractions" />, <see cref="DiffusionWorkspace.NeighborCounts" />,
-    ///         and <see cref="DiffusionWorkspace.DiffusionTransfers" />.
-    ///     </para>
-    ///     <para>
-    ///         Resolved neighbors and the destination delta buffers live in <see cref="Diffusion" />.
-    ///         <see cref="SpeciesDiffusionKernel" /> can then run on them directly.
-    ///         Bulk flow gathers into the same delta buffers and applies them with
-    ///         <see cref="SpeciesDiffusionKernel.ApplyDeltas" />.
-    ///     </para>
-    /// </remarks>
-    private struct ChunkWorkspace
-    {
-        public BoundaryEventBatch<BoundaryFlowEvent> BoundaryBatch;
-        public AtmosChunk Chunk;
-        public bool[] BoundaryEligible;
-        public Scalar[] BulkMoleFractions;
-        public MolePerPascal[] Capacitance;
-        public DiffusionWorkspace Diffusion;
-        public MolePerPascal[] EdgeConductance;
-        public Mole[] HeatScratch;
-        public MolePerPascal[] IncidentConductance;
-        public Scalar[] MaximumRelativePressureDeltas;
-        public Mole[] TotalMoles;
-
-        /// <summary>
-        ///     Rents and clears the scratch storage required to solve one chunk.
-        /// </summary>
-        /// <param name="chunk">The chunk that will own this workspace for the tick.</param>
-        /// <param name="boundaryBatch">The reusable batch exclusively owned by this workspace.</param>
-        public void Initialize(AtmosChunk chunk, BoundaryEventBatch<BoundaryFlowEvent> boundaryBatch)
-        {
-            this = default;
-            BoundaryBatch = boundaryBatch;
-            Chunk = chunk;
-            int voxelCount = chunk.VoxelCount;
-            int activeAirCount = chunk.ActiveAirCount;
-            int edgeSlotCount = checked(voxelCount * NeighborResolution.NeighborDirections.Length);
-
-            try
-            {
-                BoundaryEligible = ArrayPool<bool>.Shared.Rent(Math.Max(1, activeAirCount));
-                BulkMoleFractions = ArrayPool<Scalar>.Shared.Rent(edgeSlotCount);
-                Capacitance = ArrayPool<MolePerPascal>.Shared.Rent(voxelCount);
-                Diffusion.Initialize(chunk);
-                EdgeConductance = ArrayPool<MolePerPascal>.Shared.Rent(edgeSlotCount);
-                HeatScratch = ArrayPool<Mole>.Shared.Rent(voxelCount);
-                IncidentConductance = ArrayPool<MolePerPascal>.Shared.Rent(voxelCount);
-                MaximumRelativePressureDeltas = ArrayPool<Scalar>.Shared.Rent(Math.Max(1, activeAirCount));
-                TotalMoles = ArrayPool<Mole>.Shared.Rent(voxelCount);
-
-                Array.Clear(Capacitance, 0, voxelCount);
-                Array.Clear(IncidentConductance, 0, voxelCount);
-                chunk.TotalPressure.Clear();
-                chunk.TotalHeatCapacity.Clear();
-            }
-            catch
-            {
-                Release();
-                throw;
-            }
-        }
-
-        /// <summary>
-        ///     Returns every rented buffer and clears references held by the workspace.
-        /// </summary>
-        public void Release()
-        {
-            Return(BoundaryEligible);
-            Return(BulkMoleFractions);
-            Return(Capacitance);
-            Diffusion.Release();
-            Return(EdgeConductance);
-            Return(HeatScratch);
-            Return(IncidentConductance);
-            Return(MaximumRelativePressureDeltas);
-            Return(TotalMoles);
-            this = default;
-        }
-
-        /// <summary>
-        ///     Returns an optional workspace buffer to its shared pool.
-        /// </summary>
-        /// <typeparam name="T">The buffer element type.</typeparam>
-        /// <param name="buffer">The buffer to return, or <see langword="null" />.</param>
-        private static void Return<T>(T[]? buffer)
-        {
-            if (buffer != null)
-                ArrayPool<T>.Shared.Return(buffer);
-        }
-    }
-
-    private readonly struct RefreshAndResolveAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            RefreshAndResolve(ref workspaces[workItem.WorkspaceIndex], workItem, config);
-        }
-    }
-
-    private readonly struct ReduceConductanceAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            ReduceIncidentConductance(ref workspaces[workItem.WorkspaceIndex], workItem, config);
-        }
-    }
-
-    private readonly struct ComputeConductanceAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            ComputeConductance(ref workspaces[workItem.WorkspaceIndex], workItem, config);
-        }
-    }
-
-    private readonly struct ComputeBulkFlowAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            ComputeBulkFlow(ref workspaces[workItem.WorkspaceIndex], workItem, config);
-        }
-    }
-
-    private readonly struct GatherBulkDeltasAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            GatherBulkDeltas(ref workspaces[workItem.WorkspaceIndex], workItem, config);
-        }
-    }
-
-    private readonly struct ApplyBulkDeltasAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config,
-        Second deltaTime) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            ref DiffusionWorkspace diffusion = ref workspaces[workItem.WorkspaceIndex].Diffusion;
-            SpeciesDiffusionKernel.ApplyDeltas(ref diffusion, workItem.Start, workItem.Length, config);
-            SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, workItem.Start, workItem.Length, config, deltaTime);
-        }
-    }
-
-    private readonly struct ApplyDiffusionDeltasAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            SpeciesDiffusionKernel.ApplyDeltas(
-                ref workspaces[workItem.WorkspaceIndex].Diffusion, workItem.Start, workItem.Length, config);
-        }
-    }
-
-    private readonly struct PublishBoundaryEventsAction(
-        ChunkWorkspace[] workspaces) : IAction
-    {
-        public void Invoke(int index)
-        {
-            PublishBoundaryEvents(ref workspaces[index]);
-        }
-    }
-
-    private readonly struct GatherDiffusionDeltasAction(
-        ChunkWorkspace[] workspaces,
-        VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            var workItem = workItems[index];
-            SpeciesDiffusionKernel.GatherDiffusionDeltas(
-                ref workspaces[workItem.WorkspaceIndex].Diffusion, workItem.Start, workItem.Length, config);
-        }
-    }
 }

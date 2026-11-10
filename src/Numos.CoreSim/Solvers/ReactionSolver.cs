@@ -387,7 +387,7 @@ internal class ReactionSolver : IAtmosSolverStage
         // Wake() rebuilds ActiveAirIndices.
         // The parallel branch only runs on an awake chunk, so Wake() cannot fire.
         // The branch also creates every missing channel serially before any worker touches a voxel.
-        int workerCount = Math.Max(1, Environment.ProcessorCount);
+        int workerCount = ParallelPhase.WorkerCount;
         if (awakeChunkCount < workerCount && chunk.IsAwake)
         {
             // Same discovery order as the serial branch below (voxel-major, then ascending gas id).

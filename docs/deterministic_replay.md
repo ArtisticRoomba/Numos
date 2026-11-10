@@ -495,6 +495,8 @@ state. Numos fixes the order wherever concurrent scheduling could otherwise beco
 
 - Solver stages run in their configured pipeline order.
 - Each tick receives chunks ordered by grid X, then Y, then Z.
+- `derived-refresh` computes each voxel from that voxel's own gas and temperature. `vacuum-cleanup` classifies the
+  whole pressure field before it writes. Tiling therefore cannot change either result.
 - Advection runs ordered phases. A voxel tile owns both its delta accumulation and its persistent voxel writes, and
   shared values are gathered in fixed source and gas order.
 - Euler sweeps are independent of worker count and tiling: each pencil writes only its own cells and reduction slot,
@@ -695,6 +697,12 @@ custom stage with an interval stays rejected during recording, like any registra
 The operation stores resolved intervals, never zero. A checkpoint stores them too. A replay or restore therefore keeps the
 original schedule even when a later Numos version changes a default interval. For example, an archive from before
 `euler-flow` defaulted to 60 runs per second still runs it on every tick.
+
+The same rule applies to the stage list. Vacuum cleanup became its own `vacuum-cleanup` stage, and the legacy layout
+gained a `derived-refresh` stage before `advection`. A checkpoint or archive saved before that change keeps its saved
+list, with no `vacuum-cleanup` and, for a legacy world, no `derived-refresh`. Replaying it is not guaranteed to match
+the original run. The format version did not change. A sleeping chunk saved before the change has a positive sleep
+timer, so a `vacuum-cleanup` stage covers it once after loading (technical documentation §9).
 
 Custom stages are different. The checkpoint stores a custom stage's name but not its delegate, so a replay can only
 reuse a registration that already exists. `SetLayout` therefore requires every registered custom stage in the list and

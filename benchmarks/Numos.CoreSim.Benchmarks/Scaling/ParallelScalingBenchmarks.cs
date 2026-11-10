@@ -106,9 +106,10 @@ public class DenseChunkParallelScalingBenchmarks : ScalingBenchmarkBase
 ///     Measures Euler transport scaling across enough chunks that every configured worker sweeps whole chunks.
 /// </summary>
 /// <remarks>
-///     The Euler stage sizes its schedule from <see cref="Environment.ProcessorCount" /> like advection does, so the
-///     <c>DOTNET_PROCESSOR_COUNT</c> jobs drive both the thread count and the whole-chunk-versus-tiled choice;
-///     <see cref="Numos.CoreSim.Solvers.Euler.EulerFlowSolver.WorkerCountOverride" /> stays unset here. Every chunk
+///     The Euler stage sizes its schedule from <see cref="Numos.CoreSim.Solvers.ParallelPhase.WorkerCount" /> like
+///     advection does, so the <c>DOTNET_PROCESSOR_COUNT</c> jobs drive both the thread count and the
+///     whole-chunk-versus-tiled choice. <see cref="Numos.CoreSim.Solvers.ParallelPhase.WorkerCountOverride" /> stays
+///     unset here. Every chunk
 ///     starts with the workload's pressure and temperature checkerboard, so the whole grid is live.
 /// </remarks>
 [ParallelScalingConfig]

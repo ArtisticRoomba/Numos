@@ -46,6 +46,24 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Gets the configuration snapshot that solver helpers read, caught up with the applied configuration when no
+    ///     tick is running.
+    /// </summary>
+    /// <remarks>
+    ///     The returned object is the kernel's own snapshot, so later captures update it in place.
+    /// </remarks>
+    internal AtmosSolverConfigSnapshot GetConfigSnapshotForDangerousAccess()
+    {
+        lock (StateGate)
+        {
+            if (!_isTickExecuting)
+                CurrentTickConfig.Capture(_config);
+
+            return CurrentTickConfig;
+        }
+    }
+
+    /// <summary>
     ///     Returns registered positions only when the chunk collection changed.
     /// </summary>
     internal bool TryGetChunkPositions(

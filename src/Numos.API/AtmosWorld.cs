@@ -1510,6 +1510,12 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
+    internal void SolveDerivedRefreshStage(AtmosSolverTickScope scope)
+    {
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveDerivedRefresh(scope.Contexts[index]);
+    }
+
     internal void SolveAdvectionStage(AtmosSolverTickScope scope)
     {
         for (int index = 0; index < scope.Simulations.Length; index++)
@@ -1520,6 +1526,12 @@ public sealed partial class AtmosWorld : IDisposable
     {
         for (int index = 0; index < scope.Simulations.Length; index++)
             scope.Simulations[index].Kernel.SolveEulerFlow(scope.Contexts[index]);
+    }
+
+    internal void SolveVacuumCleanupStage(AtmosSolverTickScope scope)
+    {
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveVacuumCleanup(scope.Contexts[index]);
     }
 
     internal void SolveExplicitGasTransportStage(AtmosSolverTickScope scope)

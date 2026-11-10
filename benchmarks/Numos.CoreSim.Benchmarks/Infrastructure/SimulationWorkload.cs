@@ -66,18 +66,30 @@ internal sealed class SimulationWorkload : IDisposable
         ThermodynamicsStep = new BenchmarkSolverStep("thermodynamics", _solvers.SolveThermodynamics);
         ThermalBoundaryStep = new BenchmarkSolverStep("thermal-boundary", _solvers.SolveThermalBoundary);
         ReactionsStep = new BenchmarkSolverStep("gas-reactions", _solvers.SolveGasReactions);
+        var vacuumCleanupStep = new BenchmarkSolverStep("vacuum-cleanup", DefaultAtmosSolvers.SolveVacuumCleanup);
         switch (options.TransportModel)
         {
             case AtmosTransportModel.Legacy:
-                FlowStep = new BenchmarkSolverStep("advection", _solvers.SolveAdvection);
+                // Advection reads the caches derived-refresh rebuilds, so the step times the two stages together.
+                FlowStep = new BenchmarkSolverStep(
+                    "advection",
+                    context =>
+                    {
+                        DefaultAtmosSolvers.SolveDerivedRefresh(context);
+                        _solvers.SolveAdvection(context);
+                    });
                 _boundaryFlowStep = new BenchmarkSolverStep("boundary-flow", _solvers.SolveBoundaryFlow);
-                Steps = [FlowStep, _boundaryFlowStep.Value, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
+                Steps =
+                [
+                    FlowStep, vacuumCleanupStep, _boundaryFlowStep.Value, ThermodynamicsStep, ThermalBoundaryStep,
+                    ReactionsStep
+                ];
                 break;
             case AtmosTransportModel.Euler:
                 FlowStep = new BenchmarkSolverStep(
                     "euler-flow",
                     context => LastFlowDiagnostics = _solvers.SolveEulerFlow(context));
-                Steps = [FlowStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
+                Steps = [FlowStep, vacuumCleanupStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(options), options.TransportModel, "Unknown transport model.");
@@ -103,8 +115,8 @@ internal sealed class SimulationWorkload : IDisposable
     internal BenchmarkSolverStep[] Steps { get; }
 
     /// <summary>
-    ///     The stage that moves gas inside chunks: <c>advection</c> under the legacy model, <c>euler-flow</c> under
-    ///     Euler.
+    ///     The stage that moves gas inside chunks: <c>derived-refresh</c> then <c>advection</c> under the legacy
+    ///     model, <c>euler-flow</c> under Euler.
     /// </summary>
     internal BenchmarkSolverStep FlowStep { get; }
 

@@ -1,3 +1,5 @@
+using Numos.CoreSim;
+
 namespace Numos.API.Dangerous;
 
 /// <summary>
@@ -57,7 +59,7 @@ public static class AtmosWorldSolverDangerousExtensions
     /// </example>
     public static AtmosDangerousChunk Dangerous(this AtmosSolverChunk chunk)
     {
-        return new AtmosDangerousChunk(chunk.Chunk);
+        return new AtmosDangerousChunk(chunk.Chunk, chunk.TickConfig);
     }
 
     /// <summary>
@@ -131,6 +133,36 @@ public readonly ref struct AtmosDangerousWorldSolverApi
             throw new ArgumentException("The cell does not identify a live chunk in this world.", nameof(cell));
 
         return chunk.Dangerous();
+    }
+
+    /// <summary>
+    ///     Runs the vacuum cleanup pass over one simulation, as the built-in <c>vacuum-cleanup</c> stage does.
+    /// </summary>
+    /// <param name="simulation">A simulation from <see cref="AtmosWorldSolverContext.Simulations" />.</param>
+    /// <remarks>
+    ///     <para>
+    ///         The pass empties every awake air voxel whose pressure is below <see cref="AtmosConfig.VacuumThreshold" />
+    ///         when no neighboring air voxel reaches the threshold. It reads the pressure cache, so refresh the cache
+    ///         first when a custom stage has written gas or temperature. A chunk that loses gas advances its revision.
+    ///     </para>
+    ///     <para>
+    ///         It also covers a sleeping chunk whose <see cref="AtmosDangerousChunk.SleepTimer" /> is positive. That is
+    ///         a chunk a sleep decision put to sleep since the pass last covered it. The pass leaves the chunk asleep,
+    ///         sets its timer to zero, and advances its revision.
+    ///     </para>
+    ///     <para>
+    ///         The call covers one simulation. A custom stage that stands in for <c>vacuum-cleanup</c> calls it once per
+    ///         simulation and disables the built-in stage. The pass follows chunk adjacency inside the simulation and
+    ///         never reads another simulation. The write is not recorded. It is deterministic, so it replays correctly
+    ///         inside a callback. Call it on the callback thread, because it runs its own parallel phases.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not part of this tick.</exception>
+    /// <exception cref="InvalidOperationException">The callback's tick has ended.</exception>
+    public void ApplyVacuumCleanup(AtmosSimulation simulation)
+    {
+        _context.ApplyVacuumCleanup(simulation);
     }
 
     /// <summary>

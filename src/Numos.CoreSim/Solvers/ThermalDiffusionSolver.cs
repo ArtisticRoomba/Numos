@@ -50,7 +50,7 @@ internal sealed class ThermalDiffusionSolver
         {
             int boundaryCount;
             var applyEnergyDeltas = new ApplyEnergyDeltaAction(chunk, config, energyDeltas);
-            if (awakeChunkCount < Math.Max(1, Environment.ProcessorCount))
+            if (awakeChunkCount < ParallelPhase.WorkerCount)
             {
                 boundaryCount = DetectBoundaries(chunk, config, boundaryBuffer);
                 ParallelPhase.Run(chunk.ActiveAirCount, new GatherIncidentConductanceAction(chunk, config, incidentConductances));

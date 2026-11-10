@@ -12,6 +12,14 @@ namespace Numos.API;
 public static class AtmosBuiltInSolvers
 {
     /// <summary>
+    ///     Rebuilds each awake chunk's pressure, heat capacity, and vacuum flags from its gas moles and temperatures.
+    ///     Part of the <see cref="AtmosTransportModel.Legacy" /> model, right before <see cref="Advection" />, which
+    ///     reads those caches. The two stages must share an interval. The Euler model leaves it out, because its
+    ///     stages keep the caches current.
+    /// </summary>
+    public const string DerivedRefresh = "derived-refresh";
+
+    /// <summary>
     ///     Intra-chunk pressure-relaxation gas advection. Part of the <see cref="AtmosTransportModel.Legacy" />
     ///     model, installed by
     ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> with that model. A new world
@@ -26,6 +34,13 @@ public static class AtmosBuiltInSolvers
     ///     and reported on through <see cref="AtmosSimulation.LastFlowDiagnostics" />.
     /// </summary>
     public const string EulerFlow = "euler-flow";
+
+    /// <summary>
+    ///     Empties air voxels whose pressure is below <see cref="AtmosConfig.VacuumThreshold" /> when every
+    ///     neighboring air voxel is below it too. Present under both transport models, right after the intra-chunk
+    ///     flow stage. Without it, trace gas that transport leaves behind stays in the grid.
+    /// </summary>
+    public const string VacuumCleanup = "vacuum-cleanup";
 
     /// <summary>
     ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include

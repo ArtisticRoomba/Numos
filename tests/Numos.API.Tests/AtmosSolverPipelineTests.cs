@@ -39,7 +39,7 @@ public sealed class AtmosWorldPipelineTests
         world.Solvers.Register(
             AtmosBuiltInSolvers.EulerFlow,
             _ => calls++,
-            before: AtmosBuiltInSolvers.ExplicitGasTransport);
+            before: AtmosBuiltInSolvers.VacuumCleanup);
 
         world.Tick();
 
@@ -70,7 +70,7 @@ public sealed class AtmosWorldPipelineTests
                 () => world.Solvers.Register("orphan", _ => { }, after: "missing"),
                 Throws.TypeOf<KeyNotFoundException>());
 
-            Assert.That(world.Solvers.Steps, Has.Count.EqualTo(6));
+            Assert.That(world.Solvers.Steps, Has.Count.EqualTo(7));
         });
     }
 
@@ -178,6 +178,7 @@ public sealed class AtmosWorldPipelineTests
             ?
             [
                 AtmosBuiltInSolvers.EulerFlow,
+                AtmosBuiltInSolvers.VacuumCleanup,
                 AtmosBuiltInSolvers.ExplicitGasTransport,
                 AtmosBuiltInSolvers.Thermodynamics,
                 AtmosBuiltInSolvers.ExplicitThermalTransport,
@@ -186,7 +187,9 @@ public sealed class AtmosWorldPipelineTests
             ]
             :
             [
+                AtmosBuiltInSolvers.DerivedRefresh,
                 AtmosBuiltInSolvers.Advection,
+                AtmosBuiltInSolvers.VacuumCleanup,
                 AtmosBuiltInSolvers.ExplicitGasTransport,
                 AtmosBuiltInSolvers.BoundaryFlow,
                 AtmosBuiltInSolvers.Thermodynamics,

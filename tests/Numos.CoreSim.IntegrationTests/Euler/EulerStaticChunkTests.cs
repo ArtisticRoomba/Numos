@@ -2,6 +2,7 @@ using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 
@@ -30,7 +31,7 @@ public sealed class EulerStaticChunkTests
     public void RestoreSwitches()
     {
         EulerFlowSolver.SkipStaticChunks = true;
-        EulerFlowSolver.WorkerCountOverride = null;
+        ParallelPhase.WorkerCountOverride = null;
     }
 
     [Test]
@@ -81,7 +82,7 @@ public sealed class EulerStaticChunkTests
     [TestCase(null)]
     public void SkippingStaticChunks_ChangesNoBitInAnyTick(int? workerCount)
     {
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         using var skipping = CreateLine();
         using var sweeping = CreateLine();
         int skippedTotal = 0;
@@ -326,8 +327,8 @@ public sealed class EulerStaticChunkTests
     }
 
     /// <summary>
-    ///     A skipped chunk below the vacuum threshold is emptied by the settle pass on tick 32, where
-    ///     <c>euler-flow</c> runs alone. Its sleep timer stays at zero, so only the cleanup can advance its revision.
+    ///     A chunk that <c>euler-flow</c> skips as static on tick 48 is then emptied by <c>vacuum-cleanup</c>, which
+    ///     runs on the same tick. Its sleep timer stays at zero, so only the cleanup can advance its revision.
     /// </summary>
     [Test]
     public void VacuumCleanupOfASkippedChunk_AdvancesItsRevision()
@@ -341,17 +342,17 @@ public sealed class EulerStaticChunkTests
         for (int x = 0; x < ChunkSize; x++)
             simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
 
-        TickTo(simulation, 16);
-        int skipped = EulerFlowSolver.LastSkippedCount;
+        TickTo(simulation, 47);
         var before = simulation.GetChunkSnapshot(chunk);
-        TickTo(simulation, 32);
+        TickTo(simulation, 48);
+        int skipped = EulerFlowSolver.LastSkippedCount;
         var after = simulation.GetChunkSnapshot(chunk);
 
         Assert.Multiple(() =>
         {
             Assert.That(skipped, Is.EqualTo(1), "the chunk is skipped as static");
-            Assert.That(SimTestHelpers.TotalMoles(before), Is.GreaterThan(0f), "gas before the settle pass");
-            Assert.That(SimTestHelpers.TotalMoles(after), Is.Zero, "emptied by the settle pass");
+            Assert.That(SimTestHelpers.TotalMoles(before), Is.GreaterThan(0f), "gas before vacuum-cleanup runs");
+            Assert.That(SimTestHelpers.TotalMoles(after), Is.Zero, "emptied by vacuum-cleanup");
             Assert.That(after.SleepTimer, Is.EqualTo(before.SleepTimer), "sleep timer");
             Assert.That(after.Version, Is.Not.EqualTo(before.Version), "revision");
         });

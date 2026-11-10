@@ -108,7 +108,8 @@ internal class AtmosChunk
 
     /// <summary>
     ///     Whether this chunk is eligible to be processed by the simulation.
-    ///     A sleeping chunk is skipped during simulation ticks.
+    ///     A sleeping chunk is skipped during simulation ticks, except for one <c>vacuum-cleanup</c> run after it
+    ///     falls asleep (see <see cref="SleepTimer" />).
     /// </summary>
     [NumosSerialize]
     public bool IsAwake;
@@ -117,7 +118,8 @@ internal class AtmosChunk
     ///     Whether each voxel currently represents vacuum.
     /// </summary>
     /// <remarks>
-    ///     The advection stage derives this state from the complete pressure field before vacuum cleanup.
+    ///     The <c>vacuum-cleanup</c> stage derives this state from the complete pressure field before it empties a
+    ///     voxel. Every pressure refresh also sets it for a voxel without gas and clears it for a voxel with gas.
     ///     Consumers should use it instead of interpreting a vacuum voxel's temperature.
     /// </remarks>
     public FlatArray<bool> IsVacuum;
@@ -126,8 +128,14 @@ internal class AtmosChunk
     ///     Number of simulation ticks for which this chunk has remained below the sleep epsilon.
     /// </summary>
     /// <remarks>
-    ///     A stage that runs every <c>n</c> ticks adds <c>n</c> per run. The chunk sleeps when the count exceeds the
-    ///     sleep delay converted to ticks.
+    ///     <para>
+    ///         A stage that runs every <c>n</c> ticks adds <c>n</c> per run. The chunk sleeps when the count exceeds
+    ///         the sleep delay converted to ticks.
+    ///     </para>
+    ///     <para>
+    ///         <see cref="Sleep" /> keeps the count, so a sleeping chunk with a positive count has fallen asleep since
+    ///         <c>vacuum-cleanup</c> last covered it. That stage covers the chunk once and sets the count to zero.
+    ///     </para>
     /// </remarks>
     /// <seealso cref="AtmosConfig.SleepDelay" />
     [NumosSerialize]

@@ -251,9 +251,9 @@ public sealed class AtmosWorldSolverPipelineTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(checkpoint.Solvers, Has.Count.EqualTo(7));
-            Assert.That(checkpoint.Solvers[6].Name, Is.EqualTo("authoritative-custom"));
-            Assert.That(checkpoint.Solvers[6].NeighborSelectionKey, Is.EqualTo("tests/authoritative-custom-v1"));
+            Assert.That(checkpoint.Solvers, Has.Count.EqualTo(8));
+            Assert.That(checkpoint.Solvers[7].Name, Is.EqualTo("authoritative-custom"));
+            Assert.That(checkpoint.Solvers[7].NeighborSelectionKey, Is.EqualTo("tests/authoritative-custom-v1"));
             Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
         });
 

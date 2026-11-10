@@ -133,6 +133,7 @@ public static class SolverPipelineEditor
         if (boundary && !advection)
             warnings.Add("boundary-flow is enabled without advection. Euler-flow already crosses chunk faces.");
 
+        WarnOnMismatch(steps, AtmosBuiltInSolvers.DerivedRefresh, AtmosBuiltInSolvers.Advection, warnings);
         WarnOnMismatch(steps, AtmosBuiltInSolvers.Advection, AtmosBuiltInSolvers.BoundaryFlow, warnings);
         WarnOnMismatch(steps, AtmosBuiltInSolvers.Thermodynamics, AtmosBuiltInSolvers.ThermalBoundary, warnings);
         return warnings;
@@ -165,8 +166,12 @@ public static class SolverPipelineEditor
         {
             AtmosBuiltInSolvers.EulerFlow =>
                 "Compressible Euler gas transport inside and between chunks, with CFL substeps.",
+            AtmosBuiltInSolvers.DerivedRefresh =>
+                "Rebuilds pressure, heat capacity, and vacuum flags from the gas. Pairs with advection.",
             AtmosBuiltInSolvers.Advection =>
                 "Legacy pressure-relaxation gas advection inside each chunk.",
+            AtmosBuiltInSolvers.VacuumCleanup =>
+                "Empties voxels below the vacuum threshold when every air neighbor is below it too.",
             AtmosBuiltInSolvers.ExplicitGasTransport =>
                 "Gas transport across portals, docks, and other explicit links.",
             AtmosBuiltInSolvers.BoundaryFlow =>

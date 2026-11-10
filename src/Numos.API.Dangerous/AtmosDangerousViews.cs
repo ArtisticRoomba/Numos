@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using Numos.CoreSim;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.API.Dangerous;
@@ -27,12 +29,35 @@ namespace Numos.API.Dangerous;
 /// </remarks>
 public readonly ref struct AtmosDangerousChunk
 {
-    private readonly AtmosChunk _chunk;
+    /// <summary>
+    ///     The number of directions in <see cref="NeighborDirections" />, and the minimum length of the spans that
+    ///     <see cref="ResolveNeighbors" /> fills.
+    /// </summary>
+    public const int NeighborDirectionCount = 6;
 
-    internal AtmosDangerousChunk(AtmosChunk chunk)
+    private readonly AtmosChunk _chunk;
+    private readonly AtmosSolverConfigSnapshot? _config;
+
+    internal AtmosDangerousChunk(AtmosChunk chunk, AtmosSolverConfigSnapshot? config = null)
     {
         _chunk = chunk;
+        _config = config;
     }
+
+    /// <summary>
+    ///     The six in-chunk neighbor offsets, in the slot order of <see cref="ResolveNeighbors" />.
+    /// </summary>
+    /// <remarks>
+    ///     The order is -X, +X, -Y, +Y, -Z, +Z. Built-in solvers sum per-direction results in this order, so a
+    ///     custom solver that must reproduce their rounding keeps it. This is not the order of
+    ///     <see cref="Int3.CardinalOffsets" />.
+    /// </remarks>
+    public static ReadOnlySpan<Int3> NeighborDirections => NeighborResolution.NeighborDirections;
+
+    /// <summary>
+    ///     For each slot of <see cref="NeighborDirections" />, the slot that holds the opposite offset.
+    /// </summary>
+    public static ReadOnlySpan<int> OppositeNeighborDirections => NeighborResolution.OppositeNeighborDirections;
 
     /// <summary>
     ///     The chunk's position in the chunk grid.
@@ -58,7 +83,9 @@ public readonly ref struct AtmosDangerousChunk
     ///     The number of consecutive ticks the chunk has stayed below the sleep threshold.
     /// </summary>
     /// <remarks>
-    ///     The setter writes the raw counter without validation. The counter is part of checkpointed state.
+    ///     The setter writes the raw counter without validation. The counter is part of checkpointed state. On a
+    ///     sleeping chunk a positive value tells <c>vacuum-cleanup</c> to cover the chunk once, so that stage sets
+    ///     it to zero.
     /// </remarks>
     public int SleepTimer
     {
@@ -172,6 +199,98 @@ public readonly ref struct AtmosDangerousChunk
     }
 
     /// <summary>
+    ///     Recomputes <see cref="TotalPressure" /> and <see cref="TotalHeatCapacity" /> from the gas moles and
+    ///     temperatures.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Both caches are cleared over the whole chunk first, so a solid or void voxel reads zero. Active-air voxels
+    ///         then get the sum over gas channels in channel order, which is the same arithmetic the legacy
+    ///         <c>derived-refresh</c> stage uses. A voxel whose moles sum to zero or less is emptied through the chunk's vacuum path,
+    ///         and every other active-air voxel has its <c>IsVacuum</c> flag cleared. The call does not touch the
+    ///         revision or sleep state. Call <see cref="MarkChanged" /> afterwards when the refresh runs outside a custom stage.
+    ///     </para>
+    ///     <para>
+    ///         The pressure law and gas heat capacities come from the configuration that was applied when this view was
+    ///         obtained. The write is not recorded. It is deterministic, so it replays correctly inside a callback.
+    ///         It reads the active-air index, so call <see cref="RebuildActiveAirIndices" /> after raw classification
+    ///         edits. It uses no simulation lock, so it can run on a worker thread of a callback.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     The view comes from a gas mixture page. A mixture's pressure depends on its cell volume, which this call
+    ///     does not model.
+    /// </exception>
+    public void RefreshDerivedState()
+    {
+        if (_config == null)
+        {
+            throw new InvalidOperationException(
+                "A gas mixture page cell derives its pressure from its volume. Refresh it through the mixture pool instead.");
+        }
+
+        DerivedStateRefresh.RefreshChunk(_chunk, _config);
+    }
+
+    /// <summary>
+    ///     Finds the non-solid in-chunk neighbors of a voxel and classifies each direction.
+    /// </summary>
+    /// <param name="position">The voxel's local position, inside <see cref="Dimensions" />.</param>
+    /// <param name="neighborIndices">
+    ///     Receives the flat voxel index of each non-solid neighbor, indexed by slot of <see cref="NeighborDirections" />.
+    ///     At least <see cref="NeighborDirectionCount" /> entries. A slot whose kind is
+    ///     <see cref="AtmosVoxelNeighborKind.Blocked" /> keeps its previous value.
+    /// </param>
+    /// <param name="neighborKinds">
+    ///     Receives the classification of each slot. At least <see cref="NeighborDirectionCount" /> entries. Slots
+    ///     beyond the first six are not written.
+    /// </param>
+    /// <returns>The number of non-solid neighbors, void neighbors included.</returns>
+    /// <remarks>
+    ///     Only neighbors inside this chunk are resolved. A direction that leaves the chunk reports
+    ///     <see cref="AtmosVoxelNeighborKind.Blocked" />. Use <see cref="IsBoundary" /> to find voxels whose neighbors
+    ///     may live in another chunk. The method reads <see cref="VoxelRoomMap" /> and writes only the two spans.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     A span is shorter than <see cref="NeighborDirectionCount" />.
+    /// </exception>
+    public int ResolveNeighbors(
+        Int3 position,
+        Span<ushort> neighborIndices,
+        Span<AtmosVoxelNeighborKind> neighborKinds)
+    {
+        if (neighborIndices.Length < NeighborDirectionCount)
+            throw new ArgumentException("The span must hold one entry per neighbor direction.", nameof(neighborIndices));
+
+        if (neighborKinds.Length < NeighborDirectionCount)
+            throw new ArgumentException("The span must hold one entry per neighbor direction.", nameof(neighborKinds));
+
+        // The public enum repeats the internal enum's byte values, which a test checks, so the cast is a no-op.
+        return NeighborResolution.ResolveNeighbors(
+            _chunk,
+            position,
+            neighborIndices,
+            MemoryMarshal.Cast<AtmosVoxelNeighborKind, NeighborKind>(neighborKinds),
+            0);
+    }
+
+    /// <summary>
+    ///     Reports whether a voxel lies on a face of the chunk.
+    /// </summary>
+    /// <param name="position">The voxel's local position, inside <see cref="Dimensions" />.</param>
+    /// <returns>
+    ///     <see langword="true" /> when any coordinate is zero or the last index of its axis. Such a voxel can have a
+    ///     neighbor in another chunk.
+    /// </returns>
+    /// <remarks>
+    ///     A chunk that is one voxel thick on an axis puts every voxel on both faces of that axis.
+    /// </remarks>
+    public bool IsBoundary(Int3 position)
+    {
+        return NeighborResolution.IsBoundary(_chunk, position);
+    }
+
+    /// <summary>
     ///     Wakes the chunk, resets <see cref="SleepTimer" />, rebuilds the active-air index, and advances the
     ///     chunk revision.
     /// </summary>
@@ -222,6 +341,30 @@ public readonly ref struct AtmosDangerousChunk
     {
         _chunk.MarkChanged();
     }
+}
+
+/// <summary>
+///     How a neighbor direction of a voxel takes part in gas transfer.
+/// </summary>
+/// <remarks>
+///     The values match the kernel's internal neighbor kind, so spans of one cast to the other without a copy.
+/// </remarks>
+public enum AtmosVoxelNeighborKind : byte
+{
+    /// <summary>
+    ///     No transfer. The neighbor is solid, or the direction leaves the chunk.
+    /// </summary>
+    Blocked = 0,
+
+    /// <summary>
+    ///     The neighbor is an air voxel.
+    /// </summary>
+    Air = 1,
+
+    /// <summary>
+    ///     The neighbor is a void voxel, which absorbs gas.
+    /// </summary>
+    Void = 2
 }
 
 /// <summary>

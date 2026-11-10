@@ -1,4 +1,5 @@
 using Numos.CoreSim;
+using Numos.CoreSim.Solvers;
 
 namespace Numos.API;
 
@@ -211,6 +212,24 @@ public sealed class AtmosWorldSolverContext
     {
         _solverScope = solverScope;
         Topology = topology;
+    }
+
+    /// <summary>
+    ///     Runs the vacuum cleanup pass over one simulation of this tick.
+    /// </summary>
+    /// <param name="simulation">A simulation from <see cref="Simulations" />.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not part of this tick.</exception>
+    /// <exception cref="InvalidOperationException">The tick has ended.</exception>
+    internal void ApplyVacuumCleanup(AtmosSimulation simulation)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        _solverScope.ThrowIfClosed();
+        int index = _solverScope.IndexOf(simulation);
+        if (index < 0)
+            throw new ArgumentException("The simulation is not registered in the world running this tick.", nameof(simulation));
+
+        VacuumCleanup.Apply(_solverScope.Contexts[index]);
     }
 
     /// <summary>

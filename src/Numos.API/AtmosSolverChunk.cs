@@ -111,6 +111,12 @@ public readonly struct AtmosSolverChunk
         }
     }
 
+    /// <summary>
+    ///     Gets the configuration snapshot that the owning simulation's kernel captured for this tick, after checking
+    ///     that the view is still usable.
+    /// </summary>
+    internal AtmosSolverConfigSnapshot TickConfig => OpenScope.Contexts[_simulationIndex].TickConfig;
+
     private AtmosSolverTickScope OpenScope
     {
         get

@@ -43,6 +43,9 @@ public readonly struct AtmosDangerousApi
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     public AtmosDangerousChunk GetChunk(AtmosChunkHandle chunk)
     {
-        return new AtmosDangerousChunk(_simulation.Kernel.GetChunkForDangerousAccess(chunk.Position));
+        var kernel = _simulation.Kernel;
+        return new AtmosDangerousChunk(
+            kernel.GetChunkForDangerousAccess(chunk.Position),
+            kernel.GetConfigSnapshotForDangerousAccess());
     }
 }

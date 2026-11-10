@@ -51,6 +51,11 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         _eulerFlow.ForgetStaticPasses();
     }
 
+    internal static void SolveDerivedRefresh(AtmosSolverExecutionContext context)
+    {
+        DerivedStateRefresh.Apply(context);
+    }
+
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _advection.Solve(context);
@@ -63,6 +68,11 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     {
         _eulerFlow.Solve(context);
         return _eulerFlow.LastDiagnostics;
+    }
+
+    internal static void SolveVacuumCleanup(AtmosSolverExecutionContext context)
+    {
+        VacuumCleanup.Apply(context);
     }
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)

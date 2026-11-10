@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 using Numos.Tests;
@@ -12,10 +13,10 @@ namespace Numos.CoreSim.IntegrationTests.Euler;
 ///     the same bits.
 /// </summary>
 /// <remarks>
-///     <see cref="EulerFlowSolver.WorkerCountOverride" /> picks the schedule: 1 makes every active set at least as
-///     large as the pool, so chunks go whole. A count far above the chunk count forces tiles. The real thread count
-///     is whatever <c>DOTNET_PROCESSOR_COUNT</c> says, so running this fixture at 1 and at the default covers the
-///     threading side.
+///     <see cref="ParallelPhase.WorkerCountOverride" /> picks the schedule: 1 makes every active set at least as
+///     large as the pool, so chunks go whole and every phase runs on the calling thread. A count far above the chunk
+///     count forces tiles. Without the override the worker count is whatever <c>DOTNET_PROCESSOR_COUNT</c> says, so
+///     running this fixture at 1 and at the default covers the threading side.
 /// </remarks>
 [TestFixture]
 [NonParallelizable]
@@ -114,7 +115,7 @@ public sealed class EulerParallelDeterminismTests
 
     private static ulong Run(string profile, int? workerCount, int tickRate = SimTestHelpers.PinnedTickRate)
     {
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         try
         {
             using AtmosSimulation simulation = profile switch
@@ -138,7 +139,7 @@ public sealed class EulerParallelDeterminismTests
         }
         finally
         {
-            EulerFlowSolver.WorkerCountOverride = null;
+            ParallelPhase.WorkerCountOverride = null;
         }
     }
 

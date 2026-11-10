@@ -10,9 +10,9 @@ namespace Numos.CoreSim;
 ///         runs the model it was captured with.
 ///     </para>
 ///     <para>
-///         Both models share <c>explicit-gas-transport</c>, <c>thermodynamics</c>, <c>explicit-thermal-transport</c>,
-///         <c>thermal-boundary</c>, and <c>gas-reactions</c>. They differ only in the stages that carry bulk flow
-///         within and between chunks.
+///         Both models share <c>vacuum-cleanup</c>, <c>explicit-gas-transport</c>, <c>thermodynamics</c>,
+///         <c>explicit-thermal-transport</c>, <c>thermal-boundary</c>, and <c>gas-reactions</c>. They differ only in
+///         the stages that carry bulk flow within and between chunks.
 ///     </para>
 ///     <para>
 ///         Only <c>euler-flow</c> reads and writes momentum. The legacy stages leave the momentum arrays untouched
@@ -25,8 +25,8 @@ public enum AtmosTransportModel
 {
     /// <summary>
     ///     Pressure-relaxation transport: <c>advection</c> inside each chunk and <c>boundary-flow</c> across chunk
-    ///     faces, with species diffusion and vacuum cleanup folded into <c>advection</c>. Kept as a selectable
-    ///     alternative. A new world does not run it.
+    ///     faces, with species diffusion folded into <c>advection</c>. The <c>derived-refresh</c> stage rebuilds the
+    ///     caches that <c>advection</c> reads. Kept as a selectable alternative. A new world does not run it.
     /// </summary>
     Legacy = 0,
 

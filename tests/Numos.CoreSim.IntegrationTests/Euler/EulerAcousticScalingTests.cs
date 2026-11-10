@@ -2,6 +2,7 @@ using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 
@@ -32,7 +33,7 @@ public sealed class EulerAcousticScalingTests
     public void ResetStaticOverrides()
     {
         EulerFlowSolver.ForcedSoundSpeedReduction = null;
-        EulerFlowSolver.WorkerCountOverride = null;
+        ParallelPhase.WorkerCountOverride = null;
         EulerFlowSolver.GroupingDisabled = false;
     }
 
@@ -562,7 +563,7 @@ public sealed class EulerAcousticScalingTests
 
     private static AtmosWorldStateHash TwoRoomHash(int workerCount)
     {
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         try
         {
             using var simulation = CreateRooms(Rule(), Violent, Calm);
@@ -571,7 +572,7 @@ public sealed class EulerAcousticScalingTests
         }
         finally
         {
-            EulerFlowSolver.WorkerCountOverride = null;
+            ParallelPhase.WorkerCountOverride = null;
         }
     }
 
@@ -627,7 +628,7 @@ public sealed class EulerAcousticScalingTests
 
     private static AtmosWorldStateHash HashAfter(int workerCount)
     {
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         try
         {
             using var simulation = CreateRoom(Settings(floor: 0f, sleepSpeed: 0f), jump: 2000f);
@@ -636,7 +637,7 @@ public sealed class EulerAcousticScalingTests
         }
         finally
         {
-            EulerFlowSolver.WorkerCountOverride = null;
+            ParallelPhase.WorkerCountOverride = null;
         }
     }
 

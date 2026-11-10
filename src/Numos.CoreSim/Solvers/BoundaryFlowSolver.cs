@@ -46,7 +46,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             // Nothing touches shared or neighbor chunk state (in particular, no neighbor Wake()) until the
             // reservation pass below runs.
             // That makes it safe to compute every chunk concurrently, whatever the chunk-grid topology.
-            int workerCount = Math.Max(1, Environment.ProcessorCount);
+            int workerCount = ParallelPhase.WorkerCount;
             bool runParallel = batchCount > 1 && batchCount >= workerCount;
             if (runParallel)
             {

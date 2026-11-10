@@ -49,7 +49,9 @@ internal static class BuiltInStageSchedule
             case "euler-flow":
                 runsPerSecond = EulerRunsPerSecond;
                 return true;
+            case "derived-refresh":
             case "advection":
+            case "vacuum-cleanup":
             case "explicit-gas-transport":
             case "boundary-flow":
             case "gas-reactions":

@@ -23,11 +23,11 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         A settle pass runs once every <see cref="EulerFlowConfig.SettlePeriod" />, counted in ticks by
 ///         <see cref="AtmosSolverExecutionContext.EulerSettleTicks" />. The pass runs after the write-back, in this
 ///         order: the velocity floor (inside the write-back), <see cref="EulerSpeciesDiffusion" /> over the whole
-///         period, <see cref="VacuumCleanup" />, <see cref="SettleMomentum" />, and last the sleep metric and
-///         <see cref="ChunkSleepPolicy" />, which score the pressures diffusion and cleanup left behind. These steps
-///         wait for a settle pass because their effect is per period, not per tick: at a 1 ms call the floor would
-///         zero a gradient's momentum before it built up. At 20 Hz every call settles. Explicit links are handled
-///         by their own stages, not this one.
+///         period, <see cref="SettleMomentum" />, and last the sleep metric and <see cref="ChunkSleepPolicy" />,
+///         which score the pressures diffusion left behind. These steps wait for a settle pass because their effect
+///         is per period, not per tick: at a 1 ms call the floor would zero a gradient's momentum before it built
+///         up. At 20 Hz every call settles. Explicit links and vacuum cleanup are handled by their own stages, not
+///         this one. Sleep scoring therefore sees the pressures from before <see cref="VacuumCleanup" /> runs.
 ///     </para>
 ///     <para>
 ///         Faces between chunks are ordinary faces. Both chunks solve a shared face from the same two read-buffer
@@ -72,13 +72,6 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// </remarks>
 internal sealed class EulerFlowSolver : IAtmosSolverStage
 {
-    /// <summary>
-    ///     Worker count the schedule arithmetic uses instead of <see cref="Environment.ProcessorCount" />. Tests set
-    ///     it to force the whole-chunk schedule (1) or the tiled one (more than the active chunk count) and compare
-    ///     the results. It changes the schedule only, not which threads run it.
-    /// </summary>
-    internal static int? WorkerCountOverride;
-
     /// <summary>
     ///     The <see cref="SettleMomentum" /> floor that stops every voxel with a finite speed.
     /// </summary>
@@ -207,8 +200,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     internal AtmosFlowDiagnostics LastDiagnostics { get; private set; }
 
-    private static int WorkerCount => Math.Max(1, WorkerCountOverride ?? Environment.ProcessorCount);
-
     public void Solve(AtmosSolverExecutionContext context)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
@@ -270,17 +261,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 LastSkippedCount = staticCount;
             }
 
-            if (_activeCount == 0)
-            {
-                LastDiagnostics = default;
-                // Cleanup normally follows the sweeps, so skipped chunks still owe it when nothing is swept.
-                if (settle && staticCount > 0)
-                    VacuumCleanup.Apply(context);
-            }
-            else
-            {
-                LastDiagnostics = Advance(context, settings, substepCap, pass);
-            }
+            LastDiagnostics = _activeCount == 0 ? default : Advance(context, settings, substepCap, pass);
 
             // An awake chunk that never got a workspace has nothing to move, but its sleep timer still has to
             // advance. Chunks the stage put to sleep are no longer awake here. Like every sleep decision, the
@@ -539,7 +520,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         if (count == 0)
             return;
 
-        bool whole = count >= WorkerCount;
+        bool whole = count >= ParallelPhase.WorkerCount;
         if (!whole)
             ParallelPhase.Run(count, new PrepareGatherAction(_pendingGather, config));
 
@@ -594,7 +575,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         int slabCount = _dimensions.Z;
         int tileSlabs = whole
             ? slabCount
-            : Math.Max(1, ParallelPhase.DivideRoundUp(checked(slabCount * workspaces.Length), WorkerCount));
+            : Math.Max(1, ParallelPhase.DivideRoundUp(checked(slabCount * workspaces.Length), ParallelPhase.WorkerCount));
         int maxTiles = checked(workspaces.Length * ParallelPhase.DivideRoundUp(slabCount, tileSlabs));
         if (_voxelTiles.Length < maxTiles)
         {
@@ -787,7 +768,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     <para>
     ///         A skipped chunk can sit next to an active one behind a sealed face. That face is a wall for the sweep
     ///         whether the neighbour is swept or not. The sweep, the pre-pass, the diffusion boundary pass, and the
-    ///         sleep score read a neighbour only across an open face. <see cref="VacuumCleanup" /> reads every air
+    ///         sleep score read a neighbour only across an open face. The <c>vacuum-cleanup</c> stage reads every air
     ///         neighbour, but a skipped chunk keeps the pressures a sweep would give it.
     ///     </para>
     /// </remarks>
@@ -1049,10 +1030,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         if (pass.Active)
         {
             // Diffusion reads the written-back fields of neighbouring chunks, so it waits for every write-back.
-            // Cleanup compares neighbour pressures the same way and waits for diffusion. Diffusion covers the whole
-            // period since the last pass.
-            EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config, pass.Time);
-            VacuumCleanup.Apply(context);
+            // Diffusion covers the whole period since the last pass.
+            EulerSpeciesDiffusion.Run(_active, _activeCount, ParallelPhase.WorkerCount, config, pass.Time);
 
             ParallelPhase.Run(_activeCount, new SettleMomentumAction(_active, config, settings.VelocityFloor));
 
@@ -1340,7 +1319,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         EulerChunkWorkspace[] members, int count, int axis, Second timeStep, SquareMetre faceArea,
         AtmosSolverConfigSnapshot config)
     {
-        int workerCount = WorkerCount;
+        int workerCount = ParallelPhase.WorkerCount;
         int pencilsPerChunk = EulerSweep.PencilCount(members[0].Chunk, axis);
         if (count >= workerCount)
         {
@@ -1457,7 +1436,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     private void WriteBackActive(
         AtmosSolverConfigSnapshot config, EulerFlowConfig settings, Second deltaTime, bool applyFloor)
     {
-        bool whole = _activeCount >= WorkerCount;
+        bool whole = _activeCount >= ParallelPhase.WorkerCount;
         if (!whole)
             ParallelPhase.Run(_activeCount, new BeginWriteBackAction(_active, config));
 
@@ -1537,9 +1516,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Re-establishes the momentum invariants on the live fields after diffusion and vacuum cleanup: a vacuum or
-    ///     trace voxel carries none, and a voxel slower than <paramref name="floor" /> is brought to rest with its
-    ///     kinetic energy turned into heat, as the pre-write-back floor does.
+    ///     Re-establishes the momentum invariants on the live fields after diffusion: a vacuum or trace voxel carries
+    ///     none, and a voxel slower than <paramref name="floor" /> is brought to rest with its kinetic energy turned
+    ///     into heat, as the pre-write-back floor does.
     /// </summary>
     /// <param name="workspace">The chunk to settle.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
@@ -1553,10 +1532,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///         for the sleep scoring, because the mass it needs is summed here anyway.
     ///     </para>
     ///     <para>
-    ///         Diffusion changes a voxel's mass and cleanup empties voxels outright, so the floor test is repeated on
-    ///         the fields the sleep pass and the next tick's gather read. On a voxel neither pass touched it changes
-    ///         nothing: the mass is summed over the workspace's gas list in the same ascending order as the buffer's,
-    ///         so the comparison repeats bit for bit. The exception is a channel diffusion created for a gas outside
+    ///         Diffusion changes a voxel's mass, so the floor test is repeated on the fields the sleep pass and the
+    ///         next tick's gather read. On a voxel diffusion did not touch it changes nothing: the mass is summed over
+    ///         the workspace's gas list in the same ascending order as the buffer's, so the comparison repeats bit for
+    ///         bit. The exception is a channel diffusion created for a gas outside
     ///         the list, which is summed after it. The pressure a stopped voxel is left with comes from the
     ///         channel-order sum the write-back and every other refresh use, not from the list-order sum, so the
     ///         cache still matches a later refresh bit for bit.

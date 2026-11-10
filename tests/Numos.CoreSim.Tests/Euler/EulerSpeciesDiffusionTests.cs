@@ -46,14 +46,17 @@ public class EulerSpeciesDiffusionTests
             int slotCount = chunk.ActiveAirCount * NeighborResolution.NeighborDirections.Length;
             ushort[] expectedIndices = new ushort[slotCount];
             NeighborKind[] expectedKinds = new NeighborKind[slotCount];
+            int[] expectedCounts = new int[chunk.VoxelCount];
+            NeighborResolution.ResolveActiveRange(
+                chunk, 0, chunk.ActiveAirCount, expectedIndices, expectedKinds, expectedCounts);
+
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
                 int slotBase = activeIndex * NeighborResolution.NeighborDirections.Length;
-                int expectedCount = NeighborResolution.ResolveNeighbors(
-                    chunk, chunk.GetXyzInt3(voxelIndex), expectedIndices, expectedKinds, slotBase);
-
-                Assert.That(actual.NeighborCounts[voxelIndex], Is.EqualTo(expectedCount), $"count of voxel {voxelIndex}");
+                Assert.That(
+                    actual.NeighborCounts[voxelIndex], Is.EqualTo(expectedCounts[voxelIndex]),
+                    $"count of voxel {voxelIndex}");
                 for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
                 {
                     int slot = slotBase + direction;

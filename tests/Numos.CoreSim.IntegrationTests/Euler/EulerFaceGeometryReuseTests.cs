@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 
@@ -20,14 +21,14 @@ public sealed class EulerFaceGeometryReuseTests
     public void RestoreSwitches()
     {
         EulerFlowSolver.ReuseFaceGeometry = true;
-        EulerFlowSolver.WorkerCountOverride = null;
+        ParallelPhase.WorkerCountOverride = null;
     }
 
     [TestCase(1)]
     [TestCase(null)]
     public void TopologyEditsBetweenTicks_MatchARebuildOnEveryCall(int? workerCount)
     {
-        EulerFlowSolver.WorkerCountOverride = workerCount;
+        ParallelPhase.WorkerCountOverride = workerCount;
         var config = SimTestHelpers.CreateEulerConfig();
         using var reusing = CreateRow(config, out var reusingChunks);
         using var rebuilding = CreateRow(config, out var rebuildingChunks);

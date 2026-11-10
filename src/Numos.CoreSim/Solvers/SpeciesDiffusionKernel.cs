@@ -111,24 +111,13 @@ internal struct DiffusionWorkspace
     /// </summary>
     public void Release()
     {
-        Return(DiffusionTransfers);
-        Return(EnergyDeltas);
-        Return(MoleDeltas);
-        Return(NeighborCounts);
-        Return(NeighborIndices);
-        Return(NeighborKinds);
+        PooledBuffer.Return(DiffusionTransfers);
+        PooledBuffer.Return(EnergyDeltas);
+        PooledBuffer.Return(MoleDeltas);
+        PooledBuffer.Return(NeighborCounts);
+        PooledBuffer.Return(NeighborIndices);
+        PooledBuffer.Return(NeighborKinds);
         this = default;
-    }
-
-    /// <summary>
-    ///     Returns an optional workspace buffer to its shared pool.
-    /// </summary>
-    /// <typeparam name="T">The buffer element type.</typeparam>
-    /// <param name="buffer">The buffer to return, or <see langword="null" />.</param>
-    private static void Return<T>(T[]? buffer)
-    {
-        if (buffer != null)
-            ArrayPool<T>.Shared.Return(buffer);
     }
 }
 

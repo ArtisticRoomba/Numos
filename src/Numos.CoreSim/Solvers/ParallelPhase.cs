@@ -28,6 +28,15 @@ internal static class ParallelPhase
     internal static int? WorkerCountOverride;
 
     /// <summary>
+    ///     The participant limit of a phase: <see cref="WorkerCountOverride" /> when set, otherwise
+    ///     <see cref="Environment.ProcessorCount" />, and never below one.
+    /// </summary>
+    /// <remarks>
+    ///     Solvers size their schedules from this value, so a test override moves both the phase and the schedule.
+    /// </remarks>
+    internal static int WorkerCount => Math.Max(1, WorkerCountOverride ?? Environment.ProcessorCount);
+
+    /// <summary>
     ///     Target number of grains per participant. A larger value balances load better and claims more often.
     /// </summary>
     internal static int GrainsPerWorker = 4;
@@ -50,7 +59,7 @@ internal static class ParallelPhase
         if (workItemCount <= 0)
             return;
 
-        int workers = Math.Max(1, WorkerCountOverride ?? Environment.ProcessorCount);
+        int workers = WorkerCount;
         if (workers == 1 || workItemCount == 1)
         {
             for (int i = 0; i < workItemCount; i++)

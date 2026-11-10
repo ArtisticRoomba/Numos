@@ -6,7 +6,8 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Empties voxels whose pressure fell below the configured vacuum threshold after a transport pass.
+///     The <c>vacuum-cleanup</c> stage: empties voxels whose pressure fell below the configured vacuum threshold
+///     after a transport pass.
 /// </summary>
 internal static class VacuumCleanup
 {
@@ -28,8 +29,18 @@ internal static class VacuumCleanup
     ///         Removal reads and writes only its own voxel.
     ///     </para>
     ///     <para>
-    ///         A chunk that loses gas to the pass advances its revision once, on the tick thread after removal. The
-    ///         <c>euler-flow</c> stage relies on this, because the pipeline does not mark its chunks for it.
+    ///         The pass covers every awake chunk and every chunk that fell asleep since it last covered it (see
+    ///         <see cref="IsCovered" />). A transport stage makes its sleep decisions before this stage runs, so
+    ///         without the second group a chunk could fall asleep holding gas the pass would have removed. The pass
+    ///         does not wake such a chunk. It clears the chunk's <see cref="AtmosChunk.SleepTimer" />, so the next
+    ///         run skips the chunk until it wakes and falls asleep again.
+    ///     </para>
+    ///     <para>
+    ///         An awake chunk that loses gas to the pass advances its revision once, on the tick thread after
+    ///         removal. A covered sleeping chunk advances it once whether or not it lost gas, because snapshots
+    ///         carry the sleep timer. The pipeline does not mark awake chunks before this stage, so an untouched
+    ///         awake chunk keeps its revision. That keeps the static-chunk test of <c>euler-flow</c> valid for every
+    ///         chunk the pass leaves alone.
     ///     </para>
     /// </remarks>
     internal static void Apply(AtmosSolverExecutionContext context)
@@ -37,90 +48,102 @@ internal static class VacuumCleanup
         if (context.Chunks.Length == 0)
             return;
 
-        int workerCount = Math.Max(1, Environment.ProcessorCount);
-        int awakeChunkCount = 0;
         int totalActiveAirCount = 0;
         for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
         {
-            if (!context.Chunks[chunkIndex].IsAwake)
-                continue;
-
-            awakeChunkCount++;
-            totalActiveAirCount = checked(totalActiveAirCount + context.Chunks[chunkIndex].ActiveAirCount);
+            if (IsCovered(context.Chunks[chunkIndex]))
+                totalActiveAirCount = checked(totalActiveAirCount + context.Chunks[chunkIndex].ActiveAirCount);
         }
 
-        if (awakeChunkCount == 0)
-            return;
+        if (totalActiveAirCount > 0)
+            Clean(context, totalActiveAirCount);
 
-        // Tiling matters when a few large chunks are awake. One work item per chunk would leave a
-        // single dense chunk on one worker.
-        // Once the awake chunks fill the pool, a tile the size of the whole workload degenerates to one item per chunk.
-        // That is enough.
-        int tileSize = awakeChunkCount >= workerCount
-            ? Math.Max(1, totalActiveAirCount)
-            : Math.Max(1, ParallelPhase.DivideRoundUp(totalActiveAirCount, workerCount));
-
-        int workItemCount = 0;
         for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
         {
-            if (context.Chunks[chunkIndex].IsAwake)
-            {
-                workItemCount = checked(
-                    workItemCount + ParallelPhase.DivideRoundUp(context.Chunks[chunkIndex].ActiveAirCount, tileSize));
-            }
-        }
+            AtmosChunk chunk = context.Chunks[chunkIndex];
+            if (chunk.IsAwake || !IsCovered(chunk))
+                continue;
 
-        VacuumWorkItem[] workItems = ArrayPool<VacuumWorkItem>.Shared.Rent(Math.Max(1, workItemCount));
+            chunk.SleepTimer = 0;
+            chunk.MarkChanged();
+        }
+    }
+
+    /// <summary>
+    ///     Whether the pass covers a chunk: it is awake, or a sleep decision put it to sleep and the pass has not
+    ///     covered it since.
+    /// </summary>
+    /// <param name="chunk">The chunk to test.</param>
+    /// <returns><see langword="true" /> when the pass classifies and empties the chunk's voxels.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         A sleep decision puts a chunk to sleep only once its timer exceeds the sleep delay, and
+    ///         <see cref="AtmosChunk.Sleep" /> keeps the timer. <see cref="AtmosChunk.Wake" /> clears it, and so does
+    ///         this pass for a sleeping chunk it covered. A sleeping chunk with a positive timer has therefore fallen
+    ///         asleep since the pass last covered it.
+    ///     </para>
+    ///     <para>
+    ///         The test reads only checkpointed fields, so a restored or replayed world covers the same chunks. A
+    ///         host that sleeps a chunk with a positive timer through the API has it covered once too.
+    ///     </para>
+    /// </remarks>
+    private static bool IsCovered(AtmosChunk chunk)
+    {
+        return chunk.IsAwake || chunk.SleepTimer > 0;
+    }
+
+    /// <summary>
+    ///     Classifies every covered voxel, then empties the ones classified as vacuum.
+    /// </summary>
+    /// <param name="context">The chunks and configuration snapshot for this stage.</param>
+    /// <param name="totalActiveAirCount">The active-air count summed over the covered chunks.</param>
+    private static void Clean(AtmosSolverExecutionContext context, int totalActiveAirCount)
+    {
+        // Tiles split a dense chunk across workers, and the result does not depend on the split.
+        // The work items index context.Chunks directly, because the pass also covers awake gasless chunks.
+        VoxelWorkItem[] workItems = VoxelTiling.Rent(
+            new CoveredActiveAirCounts(context.Chunks),
+            context.Chunks.Length,
+            VoxelTiling.GetTileSize(totalActiveAirCount, ParallelPhase.WorkerCount),
+            out int workItemCount);
+
         // Every tile writes its own slot, so the rented array needs no clearing.
         bool[] emptied = ArrayPool<bool>.Shared.Rent(Math.Max(1, workItemCount));
         try
         {
-            int workIndex = 0;
-            for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
-            {
-                var chunk = context.Chunks[chunkIndex];
-                if (!chunk.IsAwake)
-                    continue;
-
-                for (int start = 0; start < chunk.ActiveAirCount; start += tileSize)
-                {
-                    workItems[workIndex++] = new VacuumWorkItem(
-                        chunkIndex,
-                        start,
-                        Math.Min(tileSize, chunk.ActiveAirCount - start));
-                }
-            }
-
             ParallelPhase.Run(workItemCount, new ClassifyVacuumAction(context, workItems));
             ParallelPhase.Run(workItemCount, new ApplyVacuumCleanupAction(context.Chunks, workItems, emptied));
 
             // A chunk's tiles are adjacent, so one pass marks each emptied chunk once whatever the tile size.
+            // Apply marks each covered sleeping chunk after this, emptied or not.
             int marked = -1;
             for (int item = 0; item < workItemCount; item++)
             {
-                int chunkIndex = workItems[item].ChunkIndex;
+                int chunkIndex = workItems[item].WorkspaceIndex;
                 if (!emptied[item] || chunkIndex == marked)
                     continue;
 
-                context.Chunks[chunkIndex].MarkChanged();
+                if (context.Chunks[chunkIndex].IsAwake)
+                    context.Chunks[chunkIndex].MarkChanged();
+
                 marked = chunkIndex;
             }
         }
         finally
         {
             ArrayPool<bool>.Shared.Return(emptied);
-            ArrayPool<VacuumWorkItem>.Shared.Return(workItems);
+            VoxelTiling.Return(workItems);
         }
     }
 
     /// <summary>
-    ///     Classifies one tile of an awake chunk's active voxels against the vacuum threshold.
+    ///     Classifies one tile of a covered chunk's active voxels against the vacuum threshold.
     /// </summary>
     /// <param name="context">The chunks, configuration snapshot, and tick state for this solver stage.</param>
     /// <param name="workItem">The chunk and active-air range owned by this invocation.</param>
-    private static void ClassifyVacuumTile(AtmosSolverExecutionContext context, VacuumWorkItem workItem)
+    private static void ClassifyVacuumTile(AtmosSolverExecutionContext context, VoxelWorkItem workItem)
     {
-        var chunk = context.Chunks[workItem.ChunkIndex];
+        var chunk = context.Chunks[workItem.WorkspaceIndex];
         Pascal vacuumThreshold = context.TickConfig.VacuumThreshold;
         int end = workItem.Start + workItem.Length;
         for (int activeIndex = workItem.Start; activeIndex < end; activeIndex++)
@@ -148,9 +171,9 @@ internal static class VacuumCleanup
     /// <param name="chunks">Every chunk in the tick, indexed by the work item.</param>
     /// <param name="workItem">The chunk and active-air range owned by this invocation.</param>
     /// <returns><see langword="true" /> when the tile emptied at least one voxel.</returns>
-    private static bool ApplyVacuumCleanupTile(AtmosChunk[] chunks, VacuumWorkItem workItem)
+    private static bool ApplyVacuumCleanupTile(AtmosChunk[] chunks, VoxelWorkItem workItem)
     {
-        var chunk = chunks[workItem.ChunkIndex];
+        var chunk = chunks[workItem.WorkspaceIndex];
         int end = workItem.Start + workItem.Length;
         bool emptied = false;
         for (int activeIndex = workItem.Start; activeIndex < end; activeIndex++)
@@ -204,18 +227,19 @@ internal static class VacuumCleanup
     }
 
     /// <summary>
-    ///     Identifies one contiguous range of an awake chunk's ordered active-air index list.
+    ///     Reports the active-air count of each covered chunk and zero for any other.
     /// </summary>
-    /// <remarks>
-    ///     The vacuum pass covers every awake chunk in the tick.
-    ///     That includes gasless chunks to which the transport solver gave no workspace.
-    ///     The pass therefore indexes chunks directly instead of reusing the solver's workspace-relative work items.
-    /// </remarks>
-    private readonly record struct VacuumWorkItem(int ChunkIndex, int Start, int Length);
+    private readonly struct CoveredActiveAirCounts(AtmosChunk[] chunks) : IActiveAirCounts
+    {
+        public int GetActiveAirCount(int index)
+        {
+            return IsCovered(chunks[index]) ? chunks[index].ActiveAirCount : 0;
+        }
+    }
 
     private readonly struct ClassifyVacuumAction(
         AtmosSolverExecutionContext context,
-        VacuumWorkItem[] workItems) : IAction
+        VoxelWorkItem[] workItems) : IAction
     {
         public void Invoke(int index)
         {
@@ -225,7 +249,7 @@ internal static class VacuumCleanup
 
     private readonly struct ApplyVacuumCleanupAction(
         AtmosChunk[] chunks,
-        VacuumWorkItem[] workItems,
+        VoxelWorkItem[] workItems,
         bool[] emptied) : IAction
     {
         public void Invoke(int index)

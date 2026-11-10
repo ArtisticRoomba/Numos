@@ -71,7 +71,9 @@ graph TD
     SIM --> KERNEL["AtmosKernel (chunk lifecycle, tick context)"]
     DANGER["Numos.API.Dangerous (opt-in raw views)"] --> CHUNKS
     PIPE --> EULER["EulerFlowSolver (default transport)"]
+    PIPE --> REFRESH["DerivedStateRefresh (legacy)"]
     PIPE --> ADV["AdvectionSolver (legacy)"]
+    PIPE --> VAC["VacuumCleanup"]
     PIPE --> EXPL["ExplicitAtmosTransportSolver (gas and thermal)"]
     PIPE --> BOUNDARY["BoundaryFlowSolver (legacy)"]
     PIPE --> THERMO["ThermodynamicsSolver (diffusion + phase change)"]
@@ -282,7 +284,7 @@ explains the physics behind them.
 |---------------------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `CourantNumber`           | 0.5       | Largest fraction of a voxel a signal may cross per substep (§5.5). 0.5 is the positivity bound of the split first-order scheme: below it a substep cannot drain more gas than a voxel holds. Up to 0.8 is linearly stable with fewer substeps but can go negative next to vacuum. Clamped to (0, 1]. Invalid values normalize to 0.5. |
 | `MaxSubstepsPerSecond`    | 1280      | Cap on substeps per second of gas time. Each call may run `ceil(cap · Interval / TickRate)`: 64 at 20 Hz, 22 at the default 16-tick interval at 960 Hz. 0 removes it. When it engages the call advances less gas time than its span (time dilation, §5.5) and `LastFlowDiagnostics` says so. Negative values normalize to 0. |
-| `SettlePeriod`            | 0.05 s    | How often the velocity floor, species diffusion, vacuum cleanup, and sleep scoring run, as `max(1, round(SettlePeriod · TickRate))` ticks. At 20 Hz every call settles. NaN and negative values normalize to 0. |
+| `SettlePeriod`            | 0.05 s    | How often the velocity floor, species diffusion, and sleep scoring run, as `max(1, round(SettlePeriod · TickRate))` ticks. At 20 Hz every call settles. NaN and negative values normalize to 0. |
 | `VelocityFloor`           | 0.005 m/s | Speed below which a voxel's momentum is zeroed at the end of the tick, its kinetic energy becoming heat (§5.7). Without it a settled room sloshes at microscopic speeds forever and never sleeps. 0 disables it. A chunk slowed by a factor s uses this value divided by s (§5.11).                                                                                            |
 | `SleepSpeed`              | 0.5 m/s   | Speed below which motion no longer holds a chunk awake (§9). A chunk that falls asleep has its momentum stopped and turned into heat. Motion wakes a sleeping neighbour only above `max(VelocityFloor, SleepSpeed)`. 0 keeps any motion above the floor awake. Invalid values normalize to 0. |
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
@@ -298,7 +300,7 @@ explains the physics behind them.
 - `CourantNumber` (0.5), the positivity bound of the split first-order scheme.
 - `MaxSubstepsPerSecond` (1280). Zero removes the cap. When the cap engages, the call advances less than a full step of
   gas time.
-- `SettlePeriod` (0.05 s). The velocity floor, diffusion, cleanup, and sleep scoring run once per period.
+- `SettlePeriod` (0.05 s). The velocity floor, diffusion, and sleep scoring run once per period.
 - `VelocityFloor` (0.005 m/s). Momentum below it is zeroed at tick end.
 - `SleepSpeed` (0.5 m/s). Motion slower than it no longer holds a chunk awake.
 - `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
@@ -425,11 +427,12 @@ and skips the solver work. Most ticks of a thermal-only or gas-only schedule are
 ### 4.2 The default stage order and schedule
 
 A world tick snapshots the enabled stages, then runs each stage that is due once, with every simulation at the same tick
-boundary. The default pipeline (`AtmosTransportModel.Euler`) has six stages. A host can disable, reorder, or replace each one:
+boundary. The default pipeline (`AtmosTransportModel.Euler`) has seven stages. A host can disable, reorder, or replace each one:
 
 | Stage                        | Work performed                                                                                                             |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------|
-| `euler-flow`                 | Compressible Euler transport within and across chunks, then species diffusion and vacuum cleanup (§5)                     |
+| `euler-flow`                 | Compressible Euler transport within and across chunks, then species diffusion (§5)                                         |
+| `vacuum-cleanup`             | Empties isolated cells below the vacuum threshold (§5.8)                                                                   |
 | `explicit-gas-transport`     | Sparse gas transport across explicit links flagged `GasTransport` (§11)                                                    |
 | `thermodynamics`             | Intra-chunk thermal diffusion and phase changes, every 100 ms (§7, §8)                                                |
 | `explicit-thermal-transport` | Sparse thermal transport across explicit links flagged `ThermalTransport`, every 100 ms, like `thermodynamics` |
@@ -444,12 +447,13 @@ stage. `AtmosSimulation.LastFlowDiagnostics` reports what its latest run cost (�
 stages the pipeline holds. The world records that list and a restore adopts it, so a restored world runs the model it
 was captured with. `new AtmosWorld(config, AtmosTransportModel.Legacy)` or
 `world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)` (or `SetLayout`, which also works while recording) installs the pressure-relaxation pipeline that preceded
-`euler-flow`. It has seven stages: `advection` in place of `euler-flow`, `boundary-flow` added after
-`explicit-gas-transport`, and the last four unchanged.
+`euler-flow`. It has eight stages: `derived-refresh` and `advection` in place of `euler-flow`, `boundary-flow` added after
+`explicit-gas-transport`, and the last four unchanged. `vacuum-cleanup` follows `advection`.
 
 | Legacy stage                 | Work performed                                                                                                             |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------|
-| `advection`                  | Intra-chunk bulk flow, species diffusion, and vacuum cleanup (§6.1–§6.4)                                                   |
+| `derived-refresh`            | Recomputes the pressure and heat capacity caches that `advection` reads (§6.3)                                             |
+| `advection`                  | Intra-chunk bulk flow and species diffusion (§6.1–§6.4)                                                                    |
 | `boundary-flow`              | Cartesian gas transport across ordinary chunk boundaries (§6.5)                                                            |
 
 Gas reactions are documented at the configuration level on `GasReactionConfig`. The rest of this document covers the
@@ -482,6 +486,11 @@ simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 
 §12 covers the rest of the extension surface.
 
+Both layouts run `vacuum-cleanup` as its own stage. It is not part of `advection` or `euler-flow`, so a host can move,
+disable, or replace it. Every built-in stage leaves the pressure and heat capacity caches current to within a few ULP.
+That is why the Euler layout has no refresh stage. A custom stage that writes gas or temperature and runs before
+`advection` or `vacuum-cleanup` refreshes the caches itself (§12.4).
+
 Some built-in stages hand boundary work to each other through internal tick-tagged batches: `thermodynamics`
 publishes for `thermal-boundary`, and under the legacy model `advection` publishes for `boundary-flow`. That
 producer/consumer link is an implementation detail, not a public stage boundary. The two stages of each pair must
@@ -499,7 +508,7 @@ The built-in intervals follow from runs per second, so they scale with the rate.
 | Stage                                                              | Runs per second | Ticks at 960 Hz |
 |--------------------------------------------------------------------|-----------------|-----------------|
 | `euler-flow`                                                       | 60              | 16              |
-| `advection`, `explicit-gas-transport`, `boundary-flow`, `gas-reactions` | 20              | 48              |
+| `derived-refresh`, `advection`, `vacuum-cleanup`, `explicit-gas-transport`, `boundary-flow`, `gas-reactions` | 20 | 48 |
 | `thermodynamics`, `explicit-thermal-transport`, `thermal-boundary` | 10              | 96              |
 
 The gas and thermal intervals are exact at every legal tick rate, because the rate is a multiple of 20. The
@@ -512,7 +521,7 @@ A custom stage defaults to interval 1. `SetInterval` changes one stage. The
 schedule is checkpointed, so a restored world runs the same stages on the same ticks.
 
 A producer and its consumer must share an interval, because the consumer drains what the producer published in the
-same tick. The pairs are `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. The world does
+same tick. The pairs are `derived-refresh` with `advection`, `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. The world does
 not check this.
 
 `IgniteVoxel` adds a source that lasts until the next `gas-reactions` pass, so a source added between passes can wait up
@@ -528,8 +537,8 @@ through its gas-transport barrier (`euler-flow`, or `advection` under the legacy
 transport once across the compiled world edge set, advances every simulation through thermodynamics, and applies
 explicit thermal transport on the thermal cadence. A stage that is not due on the tick is skipped.
 
-Explicit gas transport therefore sees the state `euler-flow` left behind: after its last substep, its diffusion
-pass, and its cleanup. A link is applied once per run of its stage (every 50 ms by default) from that state, outside the substep loop, which is why it
+Explicit gas transport therefore sees the state `euler-flow` left behind: after its last substep and its diffusion
+pass. The default layout runs `vacuum-cleanup` between the two. A link is applied once per run of its stage (every 50 ms by default) from that state, outside the substep loop, which is why it
 keeps the bounded duct law instead of a face flux (§11.1). The gas a link moves sits in its destination until the
 next run of `euler-flow` picks it up. At 960 Hz that is at most 16 ticks (about 17 ms) by default.
 
@@ -712,7 +721,7 @@ unaffected, since the scheme has no time history, but the call then advances les
 and everything else still advance a full step, so the flow slows down relative to the rest of the world. That is time
 dilation. `AtmosFlowDiagnostics.SubstepCapEngaged` and `SimulatedSeconds` report it, and §14 covers its limits.
 
-**The settle pass.** Some steps act per period, not per call. The velocity floor, species diffusion, vacuum cleanup,
+**The settle pass.** Some steps act per period, not per call. The velocity floor, species diffusion,
 momentum settling, and the sleep decision run once every `SettlePeriod` (0.05 s, 48 ticks at 960 Hz). At the default
 interval of 16 ticks that is every third call. The floor needs this because a gradient of a pascal or two accelerates
 a voxel by far less than the floor in one short call. Per-call flooring
@@ -812,7 +821,7 @@ the neighbour is swept or not. The sweep, the pre-pass, the diffusion boundary p
 neighbour only across an open face, so they compute the same bits either way. A skipped chunk stays awake. Its sleep
 timer advances with a score of zero at the end of the stage, which is the score the sleep metric gives a static chunk:
 equal pressures on every open face and no motion. Its sound speed still counts toward the shared `Δt`, computed once
-from one cell with the same arithmetic as the gather. `VacuumCleanup` still visits it, because that pass walks chunks
+from one cell with the same arithmetic as the gather. `vacuum-cleanup` still visits it, because that stage walks chunks
 and not workspaces. When every chunk is skipped the stage reports default `AtmosFlowDiagnostics`.
 
 The test is one read-only pass per chunk with an early exit, run in parallel. A grid of 128 resting chunks costs
@@ -822,9 +831,10 @@ Inside the chunk, conditions 1 to 3 read only the chunk's own fields. The stage 
 and revision) at which they last passed and skips them while the version holds. The face checks (condition 4 and void
 across a chunk face) and the sound speed still run on every call, because a neighbour or the configuration can change
 without touching the chunk. The cache is exact only while
-every write to a chunk advances its revision. Supported mutations do. Before every stage but `euler-flow` runs, the
+every write to a chunk advances its revision. Supported mutations do. Before every stage but `euler-flow` and `vacuum-cleanup` runs, the
 pipeline advances the revision of each awake chunk. `euler-flow` marks each chunk it writes itself: the swept
-chunks, chunks emptied by `VacuumCleanup`, and skipped chunks whose sleep timer moved. A raw write through
+chunks and skipped chunks whose sleep timer moved. `vacuum-cleanup` marks only the chunks it empties and the sleeping
+chunks whose timer it clears, so an awake chunk it leaves alone keeps its revision and its cached static test. A raw write through
 `Numos.API.Dangerous` between ticks must call `MarkChanged`. A failed test is not stored, and restores and
 configuration changes clear the cache.
 
@@ -860,8 +870,9 @@ physics. Expansion into hard vacuum tops out at `2c/(γ − 1)`, about 1700 m/s 
 ### 5.8 Diffusion, vacuum cleanup, and momentum settling
 
 The sweeps move species only with the bulk flow, so two gases at equal pressure on either side of a doorway would
-never mix. After the write-back the stage runs species diffusion, vacuum cleanup, and a momentum post-condition, in
-that order, on the chunk fields. The legacy model (§6) runs the first two inside `advection` with the same kernels.
+never mix. After the write-back the stage runs species diffusion and a momentum post-condition, in
+that order, on the chunk fields. The legacy model (§6) runs diffusion inside `advection` with the same kernel. Vacuum
+cleanup is a separate stage in both models.
 
 **Species diffusion.** Each voxel sends a fixed share of each gas to every non-solid neighbour. Both voxels of a pair
 do this, so the net exchange of gas `g` between `i` and `j` is `q_g,i − q_g,j`, from the richer voxel to the poorer.
@@ -898,7 +909,7 @@ any chunk applies them, because the cells one chunk writes are the cells its nei
 A face into a chunk that is not active exchanges nothing and does not wake it (§14). A void voxel across a chunk face
 is a sink, as inside a chunk.
 
-**Vacuum cleanup.** Trace amounts of gas would otherwise keep chunks awake forever as they spread out. Voxels with
+**Vacuum cleanup.** The `vacuum-cleanup` stage runs it, after `euler-flow` or `advection` in the default layouts. Trace amounts of gas would otherwise keep chunks awake forever as they spread out. Voxels with
 `TotalPressure < VacuumThreshold` (1 Pa) have all gas zeroed, but only when every orthogonally adjacent air voxel is
 also below the threshold. Solid walls, void voxels, and missing chunks do not prevent cleanup. The complete pressure
 field is classified before any gas is removed, so traversal order cannot turn neighbouring trace voxels into a
@@ -906,10 +917,13 @@ cascade. A low-pressure expansion front survives while it is next to pressurised
 removed once it and all of its neighbours fall below the threshold. An emptied voxel has its momentum zeroed with the
 rest of its state.
 
-**Momentum settling.** Diffusion changes a voxel's mass and cleanup empties voxels outright, so the stage then
+**Momentum settling.** Diffusion changes a voxel's mass, so the stage then
 re-establishes the two momentum invariants on the live fields: a vacuum or trace voxel carries no momentum, and a voxel
 slower than `VelocityFloor` is brought to rest with its kinetic energy turned into heat, as in the write-back. The
-sleep decision (§9) runs last, so it scores the pressures diffusion and cleanup left behind.
+sleep decision (§9) runs last, so it scores the pressures diffusion left behind. Cleanup runs later, in its own stage, so
+the score does not see it. A chunk the stage just put to sleep can therefore still hold gas that cleanup removes.
+`vacuum-cleanup` covers such a chunk once without waking it (§9). A voxel that cleanup empties carries no momentum,
+because every path that empties a voxel zeroes it.
 
 ### 5.9 Species contacts and the mixing pressure
 
@@ -1021,9 +1035,9 @@ than α.
 ## 6. Legacy transport (`AtmosTransportModel.Legacy`)
 
 The pressure-relaxation stages are still selectable (§4.2). `advection` moves
-gas inside each awake chunk in two passes, bulk flow down pressure gradients and then species diffusion, and finishes
-with vacuum cleanup. `boundary-flow` carries the same bulk law across chunk faces. Diffusion and cleanup are the
-kernels described in §5.8. The model never reads or writes momentum.
+gas inside each awake chunk in two passes, bulk flow down pressure gradients and then species diffusion. The
+`vacuum-cleanup` stage runs after it. `boundary-flow` carries the same bulk law across chunk faces. Diffusion and
+cleanup are the kernels described in §5.8. The model never reads or writes momentum.
 
 Advection is a first-order explicit cellular automaton, and those ring or blow up when a tick moves more than the
 local state can absorb. The bulk-flow coefficient (§6.1) and the shared conductance limiter (§6.2) are what keep each
@@ -1095,10 +1109,22 @@ assigns whole chunks to workers. This avoids global barriers. It also lets a wor
 before taking another. Both schedules use the same source, direction, gas, and reduction order, so the choice never
 changes simulation results.
 
+**Derived state.** The `derived-refresh` stage runs right before `advection`. It clears the pressure and heat capacity
+caches of every awake chunk with gas, then recomputes them for the active-air voxels. It sums gas channels in channel
+order, so its rounding is part of the replay state. Voxels whose moles sum to zero or less are emptied there. `advection`
+reads both caches and does not recompute them. The two stages must share an interval. A host that disables
+`derived-refresh` must keep the caches current itself.
+
+The refresh also keeps each voxel's mole total, so the legacy layout sums the gas channels once per gas run. `advection`
+takes the kept totals only when the refresh ran on the same tick and the chunk's revision has advanced by exactly the one
+bump `advection` itself receives. Any stage between the two advances the revision again, so `advection` then sums the
+moles itself. The same happens when the refresh is disabled or due on another tick. Both paths give the same bits. The
+totals are scratch: a restore or config change drops them, and the next refresh rebuilds them.
+
 **Phases.** Each phase finishes before the next begins:
 
-1. Refresh voxel state and topology. Every tile rebuilds pressure, total moles, heat capacity, capacitance (moles
-   per pascal, `n/P`), and its six fixed neighbor slots. Solid directions stay empty. Void directions are marked as
+1. Resolve voxel state and topology. Every tile reads the refreshed pressure and total moles, derives capacitance
+   (moles per pascal, `n/P`), and fills its six fixed neighbor slots. Solid directions stay empty. Void directions are marked as
    sinks. Fixed slots preserve the order `-X, +X, -Y, +Y, -Z, +Z` even when some directions are unavailable.
 2. Compute and gather conductance. A source tile writes six directed edge conductances indexed by voxel and
    direction. A second phase lets each destination tile gather its own edges and the opposite edge of each active
@@ -1120,8 +1146,7 @@ changes simulation results.
    neighbor. The phase only adds, it does not recompute amounts. Source order and the energy fold match the bulk
    gather.
 7. Apply diffusion and publish boundaries. Tiles apply the second delta set exactly as they applied the first,
-   then run vacuum cleanup (§5.8), classifying the whole pressure field before removing anything so both passes can
-   run as voxel tiles. Each chunk then publishes its boundary voxels into its own batch for `boundary-flow`, in
+   then publish. Each chunk publishes its boundary voxels into its own batch for `boundary-flow`, in
    parallel by chunk. `BoundaryFlowSolver` sorts the batches by chunk position before doing any cross-chunk work, so
    publication order is not observable simulation state.
 
@@ -1339,6 +1364,13 @@ Each chunk keeps a
 3. Otherwise add the stage's interval in ticks to `SleepTimer`. Once it exceeds `SleepDelay` converted to ticks
    (`round(SleepDelay * TickRate)`: 4800 by default at 960 Hz, 100 at 20 Hz), the chunk sleeps and is skipped by every built-in stage.
 
+The transport stage decides sleep before `vacuum-cleanup` runs, so a chunk can fall asleep holding gas that cleanup
+would remove. `vacuum-cleanup` therefore covers each chunk once after it falls asleep. Sleeping keeps the timer above
+the delay, and the stage sets it to zero once it has covered the chunk. A sleeping chunk with a positive timer is one
+the stage still owes. The timer is checkpointed, so a restored or replayed world covers the same chunks. The stage
+does not wake the chunk. It advances the chunk's revision, because snapshots carry the timer. Cleanup does not wake
+neighbours either, since every voxel it empties already had only sub-threshold air neighbours.
+
 An awake chunk with no gas still advances its timer on every run of the transport stage, so an emptied chunk falls asleep on schedule. A
 skipped Euler chunk does the same with a score of zero. The
 criterion is relative, so scaling every pressure in a chunk by the same factor does not change its sleep decision.
@@ -1426,6 +1458,10 @@ flux (§5.6).
   when chunks fill the pool, otherwise voxel tiles with a barrier between phases. The cross-chunk exchange is two
   parallel phases over chunks, compute then apply, because the cells a chunk writes are the cells its neighbour reads
   (§5.8).
+- `derived-refresh` uses the same two schedules as advection: one item per chunk when chunks fill the pool, otherwise
+  voxel tiles. A tile writes only its own voxels. `vacuum-cleanup` always runs voxel tiles, with a barrier between
+  its two phases. It classifies the complete pressure field before it empties a voxel.
+  `AtmosParallel` in `Numos.API.Dangerous` gives a custom stage the same scheduler and worker limit (§12.4).
 - Advection (legacy) dispatches voxel tiles across all awake chunks, so a single dense chunk can use multiple
   workers. Once the awake chunks already saturate the worker pool, it dispatches whole chunks to avoid extra barriers
   (§6.3).
@@ -1968,6 +2004,39 @@ Standalone gas mixtures are pool cells, so they are not in `context.Chunks(simul
 `context.GasMixtures` for their pages. `page.Dangerous()` gives the live page storage plus a `Volumes` span, and
 `context.Dangerous().GetGasMixturePage(cell)` resolves one mixture. Raw writes there must keep each cell's pressure
 and heat-capacity caches equal to what its gas, temperature, and volume imply.
+
+The dangerous chunk also exposes the kernel's derived-state and neighbor helpers. They let a custom stage reuse the
+built-in arithmetic instead of copying it:
+
+- `AtmosDangerousChunk.RefreshDerivedState()` rebuilds the pressure and heat capacity caches with the arithmetic of
+  `derived-refresh`. It also clears or sets `IsVacuum` per voxel, as the built-in refresh does.
+- `ResolveNeighbors`, `IsBoundary`, and `NeighborDirections` resolve the in-chunk neighbors of a voxel in the slot order
+  the built-in solvers use. `AtmosVoxelNeighborKind` classifies each slot as blocked, air, or void.
+- `context.Dangerous().ApplyVacuumCleanup(simulation)` runs the `vacuum-cleanup` pass on one simulation.
+- `AtmosParallel.Run` runs a phase on the scheduler the built-in stages use. `AtmosParallel.WorkerCount` is its worker
+  limit.
+
+A stage that edits temperature and runs before `advection` or `vacuum-cleanup` must refresh the caches those stages read:
+
+```csharp
+readonly struct RefreshAction(AtmosSolverChunks chunks) : IAtmosParallelAction
+{
+    public void Invoke(int index) => chunks[index].Dangerous().RefreshDerivedState();
+}
+
+world.Solvers.Register(
+    "game/heater-refresh",
+    context =>
+    {
+        foreach (AtmosSimulation simulation in context.Simulations)
+        {
+            var chunks = context.Chunks(simulation);
+            // ...raw temperature writes through chunks[i].Dangerous() go here...
+            AtmosParallel.Run(chunks.Count, new RefreshAction(chunks));
+        }
+    },
+    before: AtmosBuiltInSolvers.VacuumCleanup);
+```
 
 ### 12.5 Stages that touch portals and docks
 

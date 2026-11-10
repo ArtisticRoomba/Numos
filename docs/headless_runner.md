@@ -197,7 +197,7 @@ second and velocity is in metres per second.
 `createProject` builds the new project first. The old project stays open if the new one fails.
 
 `transportModel` picks which built-in stages move gas. `"euler"` (the default) is compressible Euler flow. `"legacy"` is
-the pressure-relaxation pair of `advection` and `boundary-flow`. `createProject` and `resetSolvers` read it. Any other
+the pressure-relaxation stages `derived-refresh`, `advection`, and `boundary-flow`. `createProject` and `resetSolvers` read it. Any other
 value fails with `invalidTransportModel`. The model is part of the recorded stage list, so a script that pins legacy
 numbers must say `"legacy"` and not rely on the default.
 
@@ -431,18 +431,19 @@ Defaults change between versions. Set every field a study depends on.
 | `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
 | `listLinkSets` | None | Lists portals and docks with kind, state, link count, flags, and `areaFraction`. |
 
-The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport`, `thermodynamics`,
-`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
-`explicit-gas-transport`, `boundary-flow`, and then the same last four. At 960 Hz `euler-flow` runs every 16 ticks by
+The built-in stages, in default order, are `euler-flow`, `vacuum-cleanup`, `explicit-gas-transport`,
+`thermodynamics`, `explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs
+`derived-refresh`, `advection`, `vacuum-cleanup`, `explicit-gas-transport`, `boundary-flow`, and then the same last
+four. At 960 Hz `euler-flow` runs every 16 ticks by
 default. Send `setSolverInterval` with an `interval` of 1 to run it on every tick.
 
 `setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
 every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
 omits. A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
-records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `advection` and
+records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `derived-refresh`, `advection`, and
 `boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
 `changed: false` when the layout already matches. An `interval` of zero or a missing `interval` keeps the current
-interval of a registered stage and gives a new built-in stage its default. Give `advection` and `boundary-flow` one
+interval of a registered stage and gives a new built-in stage its default. Give `derived-refresh`, `advection`, and `boundary-flow` one
 interval, and give `thermodynamics` and `thermal-boundary` one interval. The stages hand data over within a tick.
 
 `resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
