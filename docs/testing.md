@@ -1,8 +1,8 @@
 # Testing Numos
 
 Most Numos tests assert something physical: moles are conserved, a sealed face blocks flow, two equal pressures stay
-equal. A few exist only to notice that the output changed at all. Those two jobs need different tools, and mixing them
-up is how a suite ends up with hundreds of hand-pasted float literals nobody can explain.
+equal. A few only check that the output hasn't changed. The two kinds are written differently, and this page covers
+both.
 
 ## Physical contracts and characterization baselines
 
@@ -52,9 +52,9 @@ NUMOS_UPDATE_BASELINES=1 dotnet test tests/Numos.CoreSim.Tests/Numos.CoreSim.Tes
 ```
 
 `NUMOS_UPDATE_BASELINES=1` rewrites every baseline the run touches. Any other value is a comma list matched against
-the test's full name, so `NUMOS_UPDATE_BASELINES=GasReactionTests` only rewrites that fixture's files. Updated tests
-warn instead of passing, so a regenerate run is never silently green. Setting the variable with `CI=true` fails every
-baseline test: CI only compares.
+the test's full name, so `NUMOS_UPDATE_BASELINES=GasReactionTests` only rewrites that fixture's files. A test that
+rewrites its baseline warns instead of passing. Setting the variable with `CI=true` fails every baseline test: CI only
+compares.
 
 A test can guard its baseline with `Baseline.Verify(values, guard: "wire-format")`. A guarded baseline only
 regenerates when the variable names the guard (`NUMOS_UPDATE_BASELINES=wire-format`). A blanket `=1` leaves it alone.
@@ -77,4 +77,4 @@ mode writes the current architecture's override. Digests are always stored per a
 
 The only arm64 machine available is the macOS CI leg. To capture its values, let it run (it warns rather than fails on
 a missing arm64 digest), download the `received-baselines-macos-latest` artifact, and copy each `.received.json` over
-the matching baseline. The received file already keeps the x64 values, so nothing else needs merging.
+the matching baseline. The received file keeps the existing x64 values alongside the new arm64 ones.
