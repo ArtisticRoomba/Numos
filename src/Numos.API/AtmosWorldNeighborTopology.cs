@@ -224,10 +224,21 @@ public sealed class AtmosWorldNeighborTopology
         }
     }
 
+    /// <summary>
+    ///     Builds the compiled topology of one stage.
+    /// </summary>
+    /// <param name="world">The world the topology belongs to. The result keeps it for later lookups.</param>
+    /// <param name="selection">The stage's neighbor selection.</param>
+    /// <param name="links">The explicit links to filter with <paramref name="selection" />.</param>
+    /// <param name="chunkDimensions">
+    ///     The chunk dimensions of every simulation a link can name. A simulation missing from it has no adjacency
+    ///     table, like a standalone mixture. A restore passes the dimensions of the simulations it is about to install.
+    /// </param>
     internal static AtmosWorldNeighborTopology Compile(
         AtmosWorld world,
         AtmosNeighborSelection selection,
-        IReadOnlyList<ExplicitLinkDefinition> links)
+        IReadOnlyList<ExplicitLinkDefinition> links,
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
     {
         var selected = new List<ExplicitLinkDefinition>(links.Count);
         foreach (var link in links)
@@ -248,13 +259,10 @@ public sealed class AtmosWorldNeighborTopology
         {
             // A mixture has no simulation and so no chunk adjacency table. The voxel at the other end of the link
             // still lists it.
-            if (!world.TryGetSimulation(key.Simulation, out var simulation) || simulation == null)
+            if (!chunkDimensions.TryGetValue(key.Simulation, out var dimensions))
                 continue;
 
-            int voxelCount = checked(
-                simulation.ChunkDimensions.X *
-                simulation.ChunkDimensions.Y *
-                simulation.ChunkDimensions.Z);
+            int voxelCount = checked(dimensions.X * dimensions.Y * dimensions.Z);
 
             neighbors.Sort(static (left, right) =>
             {

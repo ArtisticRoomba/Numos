@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.State;
 using Numos.Maths;
@@ -88,7 +89,7 @@ internal sealed partial class AtmosKernel
     /// <param name="tickCount">The world's completed-tick count once the restore finishes.</param>
     /// <remarks>
     ///     Configuration and solver enablement belong to the world, which applies its own before or after this call.
-    ///     Transient solver data is discarded either way.
+    ///     Transient solver data is discarded either way. A failure before the swap leaves the grid as it was.
     /// </remarks>
     internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
     {
@@ -96,26 +97,7 @@ internal sealed partial class AtmosKernel
         {
             ThrowIfTickExecuting("restore a checkpoint during a tick");
             ValidateCheckpoint(checkpoint, _dimensions);
-            InstallCheckpoint(checkpoint, tickCount);
-        }
-    }
-
-    /// <summary>
-    ///     Like <see cref="RestoreCheckpoint" />, for a caller that has already passed the checkpoint to
-    ///     <see cref="ValidateCheckpoint" /> with this kernel's dimensions.
-    /// </summary>
-    /// <param name="checkpoint">Grid state to install.</param>
-    /// <param name="tickCount">The world's completed-tick count once the restore finishes.</param>
-    /// <remarks>
-    ///     A world restore validates every simulation before it changes any of them, so each kernel skips the second
-    ///     pass. An unvalidated checkpoint can leave the grid half installed.
-    /// </remarks>
-    internal void RestoreValidatedCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("restore a checkpoint during a tick");
-            InstallCheckpoint(checkpoint, tickCount);
+            InstallPreparedCheckpoint(PrepareCheckpoint(checkpoint), tickCount);
         }
     }
 
@@ -149,7 +131,18 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private void InstallCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
+    /// <summary>
+    ///     Materializes a validated checkpoint's chunks without touching any kernel.
+    /// </summary>
+    /// <param name="checkpoint">Grid state that already passed <see cref="ValidateCheckpoint" />.</param>
+    /// <returns>
+    ///     The chunks, ready for <see cref="InstallPreparedCheckpoint" />. Call <see cref="PreparedCheckpoint.Release" />
+    ///     if they are never installed.
+    /// </returns>
+    /// <remarks>
+    ///     A world restore prepares every grid first, so an allocation failure leaves the world as it was.
+    /// </remarks>
+    internal static PreparedCheckpoint PrepareCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         // Materialize all pooled storage before replacing anything observable.
         var replacement = new ConcurrentDictionary<Int3, AtmosChunk>();
@@ -172,24 +165,89 @@ internal sealed partial class AtmosKernel
             throw;
         }
 
-        ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap;
-        _chunkMap = replacement;
-        // Rebase on the restored chunk count instead of continuing to grow across repeated restores
-        // (e.g. replay scrubbing), which would otherwise leave DenseId-indexed lookup tables oversized.
-        // Ids are reassigned densely as 0..replacement.Count above, so none are free.
-        _nextChunkDenseId = replacement.Count;
-        _freeChunkDenseIds.Clear();
-        CurrentTickConfig.Capture(_config);
-        ClearSolverData();
-        TickCount = tickCount;
-        EulerSettleTicks = checkpoint.EulerSettleTicks;
-        EulerSweepPhase = checkpoint.EulerSweepPhase;
-        _defaultSolvers.ClearTransientState();
-        _chunkCollectionRevision++;
-        LastBoundaryTicks = 0;
-        LastFlowDiagnostics = default;
-        foreach (var chunk in previous.Values)
-            chunk.Release();
+        return new PreparedCheckpoint(checkpoint, replacement);
+    }
+
+    /// <summary>
+    ///     Swaps prepared chunks in for the grid and moves the kernel to the owning world's tick.
+    /// </summary>
+    /// <param name="prepared">Chunks from <see cref="PrepareCheckpoint" /> for a checkpoint of this kernel's dimensions.</param>
+    /// <param name="tickCount">The world's completed-tick count once the restore finishes.</param>
+    /// <remarks>
+    ///     The kernel takes ownership of the prepared chunks. Call <see cref="SetAtmosConfig" /> first, because the
+    ///     swap captures the configuration for the next tick.
+    /// </remarks>
+    internal void InstallPreparedCheckpoint(PreparedCheckpoint prepared, long tickCount)
+    {
+        lock (StateGate)
+        {
+            ThrowIfTickExecuting("restore a checkpoint during a tick");
+            Debug.Assert(prepared.Source.Dimensions == _dimensions);
+
+            var replacement = prepared.TakeChunks();
+            ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap;
+            _chunkMap = replacement;
+            // Rebase on the restored chunk count instead of continuing to grow across repeated restores
+            // (e.g. replay scrubbing), which would otherwise leave DenseId-indexed lookup tables oversized.
+            // Ids are reassigned densely as 0..replacement.Count in PrepareCheckpoint, so none are free.
+            _nextChunkDenseId = replacement.Count;
+            _freeChunkDenseIds.Clear();
+            CurrentTickConfig.Capture(_config);
+            ClearSolverData();
+            TickCount = tickCount;
+            EulerSettleTicks = prepared.Source.EulerSettleTicks;
+            EulerSweepPhase = prepared.Source.EulerSweepPhase;
+            _defaultSolvers.ClearTransientState();
+            _chunkCollectionRevision++;
+            LastBoundaryTicks = 0;
+            LastFlowDiagnostics = default;
+            foreach (var chunk in previous.Values)
+                chunk.Release();
+        }
+    }
+
+    /// <summary>
+    ///     A checkpoint's chunks, materialized and not yet owned by any kernel.
+    /// </summary>
+    internal sealed class PreparedCheckpoint
+    {
+        private ConcurrentDictionary<Int3, AtmosChunk>? _chunks;
+
+        internal PreparedCheckpoint(AtmosSimulationCheckpoint source, ConcurrentDictionary<Int3, AtmosChunk> chunks)
+        {
+            Source = source;
+            _chunks = chunks;
+        }
+
+        /// <summary>
+        ///     The checkpoint the chunks came from.
+        /// </summary>
+        internal AtmosSimulationCheckpoint Source { get; }
+
+        /// <summary>
+        ///     Hands the chunks to the installing kernel.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">The chunks were already installed or released.</exception>
+        internal ConcurrentDictionary<Int3, AtmosChunk> TakeChunks()
+        {
+            var chunks = _chunks ?? throw new InvalidOperationException("The prepared checkpoint was already used.");
+            _chunks = null;
+            return chunks;
+        }
+
+        /// <summary>
+        ///     Releases the chunks of a checkpoint that was never installed. Does nothing after installation.
+        /// </summary>
+        internal void Release()
+        {
+            var chunks = _chunks;
+            _chunks = null;
+            if (chunks == null)
+                return;
+
+            foreach (var chunk in chunks.Values)
+                chunk.Release();
+        }
     }
 
     internal void ApplyRecordedOperation(AtmosOperation operation)

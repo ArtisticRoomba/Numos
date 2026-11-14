@@ -102,6 +102,26 @@ public sealed partial class AtmosSimulation : IDisposable
         int chunkHeight,
         int chunkDepth,
         AtmosSimulationId? requestedRegistration = null)
+        : this(world, ownsWorld, chunkWidth, chunkHeight, chunkDepth, requestedRegistration, true)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes storage for a simulation, registering it in the world only when <paramref name="register" /> is
+    ///     set.
+    /// </summary>
+    /// <remarks>
+    ///     Without registration, <paramref name="requestedRegistration" /> must hold the identifier the world will
+    ///     give the simulation when it takes the slot itself.
+    /// </remarks>
+    private AtmosSimulation(
+        AtmosWorld world,
+        bool ownsWorld,
+        int chunkWidth,
+        int chunkHeight,
+        int chunkDepth,
+        AtmosSimulationId? requestedRegistration,
+        bool register)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
@@ -134,7 +154,29 @@ public sealed partial class AtmosSimulation : IDisposable
         World = world;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(world.Config);
-        Id = world.RegisterSimulation(this, requestedRegistration);
+        Id = register ? world.RegisterSimulation(this, requestedRegistration) : requestedRegistration!.Value;
+    }
+
+    /// <summary>
+    ///     Creates a simulation that the world has not registered, for a restore that installs it later.
+    /// </summary>
+    /// <param name="world">The world that will own the simulation.</param>
+    /// <param name="chunkDimensions">The fixed chunk dimensions.</param>
+    /// <param name="id">The identifier the simulation keeps once the world puts it in that slot.</param>
+    /// <remarks>
+    ///     Nothing in the world refers to the simulation until the caller installs it. A caller that abandons it must
+    ///     call <see cref="DisposeFromWorld" />.
+    /// </remarks>
+    internal static AtmosSimulation CreateUnregistered(AtmosWorld world, Int3 chunkDimensions, AtmosSimulationId id)
+    {
+        return new AtmosSimulation(
+            world,
+            false,
+            chunkDimensions.X,
+            chunkDimensions.Y,
+            chunkDimensions.Z,
+            id,
+            false);
     }
 
     /// <summary>

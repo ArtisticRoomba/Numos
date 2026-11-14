@@ -432,10 +432,21 @@ of the custom stages. A legacy archive therefore restores into a world that star
 runs the legacy stages afterwards. A mismatch in custom stages fails with an `ArgumentException` that lists both stage
 lists.
 
-Numos validates everything before it changes anything, including the framing of each solver state payload. It then
-installs the checkpoint's solver layout and writes solver state back. Next it materializes each simulation's replacement
-chunk storage before making that storage observable. Restore keeps existing simulation objects and host integrations.
-It applies the checkpoint's configuration once, clears transient solver state, and resets profiling data.
+Numos validates everything before it changes anything, including the framing of each solver state payload. The
+restore then runs in two phases, so a restore that fails before `OnRestored()` leaves the world as it was.
+
+The first phase does all the work that can fail. Numos materializes the replacement chunk storage of every simulation
+and the new mixture pool pages. It builds the simulations that the checkpoint adds, but does not register them yet. It
+then adopts the checkpoint's tick rate and solver layout, writes solver state back, and compiles the explicit topology.
+These steps run host code (`[NumosSerialize]` setters and neighbor selection predicates). The setters write into the
+live solver objects, and the selectors must see the restored solver state, so neither can run on a copy. If anything
+in this phase throws, Numos puts the previous rate, layout, and solver state back. It then releases the new storage,
+disposes the new simulations, and rethrows.
+
+The second phase runs no host code. Numos disposes the simulations that the checkpoint lacks and registers the new
+ones. It applies the checkpoint's configuration once and swaps the prepared storage and topology in. Restore keeps
+existing simulation objects and host integrations, clears transient solver state, and resets profiling data. Until the
+swap, a restore holds the old and the new storage at the same time.
 
 Last, restore calls `OnRestored()` on every `IAtmosWorldSolver` in the pipeline, enabled or not. The hook therefore sees
 time, configuration, and topology already restored. An exception from that hook propagates with the restored state

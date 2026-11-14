@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.State.Advanced;
+using Numos.Maths;
 
 namespace Numos.API;
 
@@ -952,15 +953,102 @@ public sealed class AtmosWorldSolverPipeline
         }
     }
 
-    internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition> links)
+    /// <summary>
+    ///     Compiles one topology per stage without changing any stage.
+    /// </summary>
+    /// <param name="links">The explicit links that are active in the topology being built.</param>
+    /// <param name="chunkDimensions">The chunk dimensions of the simulations the links can name.</param>
+    /// <returns>The topologies in stage order, for <see cref="InstallTopologies" />.</returns>
+    /// <remarks>
+    ///     A host selector can throw, and then no stage has changed. The caller holds <see cref="AtmosWorld.Gate" />.
+    /// </remarks>
+    internal AtmosWorldNeighborTopology[] CompileTopologies(
+        IReadOnlyList<ExplicitLinkDefinition> links,
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
     {
         var compiled = new AtmosWorldNeighborTopology[_steps.Count];
         for (int index = 0; index < _steps.Count; index++)
-            compiled[index] = _steps[index].BuildTopology(_world, links);
+            compiled[index] = _steps[index].BuildTopology(_world, links, chunkDimensions);
+
+        return compiled;
+    }
+
+    /// <summary>
+    ///     Gives every stage the topology that <see cref="CompileTopologies" /> built for it.
+    /// </summary>
+    /// <remarks>
+    ///     The stage list must not have changed since the compile. The caller holds <see cref="AtmosWorld.Gate" />.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The stage count differs from the compiled count.</exception>
+    internal void InstallTopologies(AtmosWorldNeighborTopology[] compiled)
+    {
+        if (compiled.Length != _steps.Count)
+            throw new InvalidOperationException("The solver stages changed after the topology was compiled.");
 
         for (int index = 0; index < _steps.Count; index++)
             _steps[index].InstallTopology(compiled[index]);
     }
+
+    /// <summary>
+    ///     Captures the stage list and every stage's schedule, for <see cref="RestoreLayoutSnapshot" />.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    internal LayoutSnapshot CaptureLayoutSnapshot()
+    {
+        var steps = _steps.ToArray();
+        var states = new StepSchedule[steps.Length];
+        for (int index = 0; index < steps.Length; index++)
+        {
+            var step = steps[index];
+            states[index] = new StepSchedule(step.IsEnabled, step.Interval, step.NextDueTick, step.LastRunTick);
+        }
+
+        return new LayoutSnapshot(steps, states);
+    }
+
+    /// <summary>
+    ///     Puts back the stage list and schedules that <see cref="CaptureLayoutSnapshot" /> took.
+    /// </summary>
+    /// <remarks>
+    ///     A layout change can enable or reschedule a stage that it keeps, and it drops the stages it does not list.
+    ///     This brings the same registration objects back with their old fields. The caller holds
+    ///     <see cref="AtmosWorld.Gate" />.
+    /// </remarks>
+    internal void RestoreLayoutSnapshot(LayoutSnapshot snapshot)
+    {
+        for (int index = 0; index < snapshot.Steps.Length; index++)
+        {
+            var step = snapshot.Steps[index];
+            var state = snapshot.Schedules[index];
+            step.IsEnabled = state.IsEnabled;
+            step.Interval = state.Interval;
+            step.NextDueTick = state.NextDueTick;
+            step.LastRunTick = state.LastRunTick;
+        }
+
+        _steps.Clear();
+        _steps.AddRange(snapshot.Steps);
+        _world.InvalidateSolverDependencies();
+        PublishSteps();
+    }
+
+    /// <summary>
+    ///     The stage registrations in execution order and the mutable fields of each.
+    /// </summary>
+    internal sealed class LayoutSnapshot
+    {
+        internal LayoutSnapshot(WorldSolverRegistration[] steps, StepSchedule[] schedules)
+        {
+            Steps = steps;
+            Schedules = schedules;
+        }
+
+        internal WorldSolverRegistration[] Steps { get; }
+
+        internal StepSchedule[] Schedules { get; }
+    }
+
+    internal readonly record struct StepSchedule(bool IsEnabled, int Interval, long NextDueTick, long LastRunTick);
 
     /// <summary>
     ///     Calls <see cref="IAtmosWorldSolver.OnRestored" /> on every custom class solver, enabled or not, in pipeline
@@ -1019,7 +1107,8 @@ public sealed class AtmosWorldSolverPipeline
 
             var registration = WorldSolverRegistration.CreateCustom(name, solver, selection, interval);
             AlignSchedule(registration);
-            registration.InstallTopology(registration.BuildTopology(_world, _world.GetActiveLinksCore()));
+            registration.InstallTopology(
+                registration.BuildTopology(_world, _world.GetActiveLinksCore(), _world.GetChunkDimensionsCore()));
             _steps.Insert(insertionIndex, registration);
             _world.InvalidateSolverDependencies();
             PublishSteps();
@@ -1221,11 +1310,12 @@ internal sealed class WorldSolverRegistration
 
     internal AtmosWorldNeighborTopology BuildTopology(
         AtmosWorld world,
-        IReadOnlyList<ExplicitLinkDefinition> links)
+        IReadOnlyList<ExplicitLinkDefinition> links,
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
     {
         return Selection == null
             ? AtmosWorldNeighborTopology.EmptyFor(world)
-            : AtmosWorldNeighborTopology.Compile(world, Selection, links);
+            : AtmosWorldNeighborTopology.Compile(world, Selection, links, chunkDimensions);
     }
 
     internal void InstallTopology(AtmosWorldNeighborTopology topology)

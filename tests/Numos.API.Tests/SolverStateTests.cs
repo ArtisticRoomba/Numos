@@ -12,6 +12,7 @@ namespace Numos.API.Tests;
 public sealed class SolverStateTests
 {
     private const string Name = "tests/counter";
+    private const string RejectingName = "tests/rejecting";
 
     [Test]
     public void HostEditBetweenTicks_IsRecordedOnceAtTheNextTick()
@@ -149,6 +150,62 @@ public sealed class SolverStateTests
             Assert.That(solver.LabelSeenByOnRestored, Is.EqualTo("checkpointed"));
             Assert.That(solver.Scratch, Is.Zero, "unmarked members are left to OnRestored");
         });
+    }
+
+    [Test]
+    public void Restore_ThatASolverSetterRejects_LeavesTheWorldUnchanged()
+    {
+        // The checkpoint differs from the target in tick rate, layout, schedules, and both solver members.
+        using var source = CreateRejectingWorld(480, out var sourceSolver);
+        var sourceLayout = source.Solvers.Steps
+            .Select(static step => new AtmosWorldSolverLayoutEntry(
+                step.Name,
+                step.Name != AtmosBuiltInSolvers.GasReactions,
+                step.Interval))
+            .ToArray();
+        source.Solvers.SetLayout(sourceLayout);
+        sourceSolver.Limit = -1f;
+        for (int tick = 0; tick < 3; tick++)
+            source.Tick();
+
+        var checkpoint = source.CaptureCheckpoint();
+
+        using var target = CreateRejectingWorld(AtmosWorld.DefaultTickRate, out var targetSolver);
+        targetSolver.Limit = 7f;
+        targetSolver.Reject = true;
+        for (int tick = 0; tick < 5; tick++)
+            target.Tick();
+
+        int tickRate = target.TickRate;
+        long tickCount = target.TickCount;
+        var steps = target.Solvers.Steps.ToArray();
+        int passes = targetSolver.Passes;
+        float limit = targetSolver.Limit;
+        var hash = target.ComputeStateHash();
+        Assert.Multiple(() =>
+        {
+            Assert.That(tickRate, Is.Not.EqualTo(checkpoint.TickRate));
+            Assert.That(steps.Single(static step => step.Name == AtmosBuiltInSolvers.GasReactions).IsEnabled, Is.True);
+            Assert.That(passes, Is.Not.EqualTo(sourceSolver.Passes));
+        });
+
+        Assert.That(
+            () => target.RestoreCheckpoint(checkpoint),
+            Throws.TypeOf<ArgumentOutOfRangeException>().With.Message.Contains("can't be negative"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(target.TickRate, Is.EqualTo(tickRate), "tick rate");
+            Assert.That(target.TickCount, Is.EqualTo(tickCount), "tick count");
+            Assert.That(target.Solvers.Steps, Is.EqualTo(steps), "solver layout and schedules");
+            Assert.That(targetSolver.Passes, Is.EqualTo(passes), "solver member written before the rejected one");
+            Assert.That(targetSolver.Limit, Is.EqualTo(limit), "rejected solver member");
+            Assert.That(target.ComputeStateHash(), Is.EqualTo(hash), "state hash");
+        });
+
+        Assert.That(() => target.Tick(), Throws.Nothing);
+        Assert.That(() => target.CaptureCheckpoint(), Throws.Nothing);
+        Assert.That(target.TickCount, Is.EqualTo(tickCount + 1));
     }
 
     [Test]
@@ -382,6 +439,17 @@ public sealed class SolverStateTests
         return world;
     }
 
+    private static AtmosWorld CreateRejectingWorld(int tickRate, out RejectingSolver solver)
+    {
+        var world = new AtmosWorld(new TestAtmosConfig(), AtmosTransportModel.Euler, tickRate);
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(Int3.Zero);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        solver = new RejectingSolver();
+        world.Solvers.Register(RejectingName, solver);
+        return world;
+    }
+
     private static NumosReplayMetadata Metadata()
     {
         return new NumosReplayMetadata("Solver state", DateTimeOffset.UnixEpoch, "tests", "1.0.0", "1.0.0");
@@ -421,5 +489,37 @@ public sealed partial class CounterSolver : IAtmosWorldSolver
         RateSeenByOnRestored = Rate;
         LabelSeenByOnRestored = Label;
         Scratch = 0;
+    }
+}
+
+/// <summary>
+///     Counts passes and has a validating setter. While <see cref="Reject" /> is set, <see cref="Limit" /> throws for a
+///     negative value. The state walker writes members in field-id order, and <see cref="Passes" /> comes first. A
+///     rejected restore has already written <see cref="Passes" /> when the setter throws.
+/// </summary>
+public sealed partial class RejectingSolver : IAtmosWorldSolver
+{
+    [NumosIgnore] private float _limit;
+
+    [NumosSerialize] public int Passes { get; private set; }
+
+    [NumosSerialize]
+    public float Limit
+    {
+        get => _limit;
+        set
+        {
+            if (Reject && value < 0f)
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The limit can't be negative.");
+
+            _limit = value;
+        }
+    }
+
+    [NumosIgnore] public bool Reject;
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        Passes++;
     }
 }

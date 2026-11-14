@@ -758,7 +758,8 @@ internal sealed class AtmosGasMixturePool : IDisposable
     /// </summary>
     /// <remarks>
     ///     A handle issued before the restore stays valid exactly when the checkpoint holds the same generation in an
-    ///     allocated slot. The pool keeps the configuration the world applied before this call.
+    ///     allocated slot. The pool keeps the configuration the world applied before this call. A failure before the
+    ///     swap leaves the pool as it was.
     /// </remarks>
     /// <exception cref="ArgumentException">The checkpoint is inconsistent.</exception>
     /// <exception cref="InvalidOperationException">A tick is executing.</exception>
@@ -768,33 +769,62 @@ internal sealed class AtmosGasMixturePool : IDisposable
         {
             ThrowIfTickExecuting("restore the gas mixture pool");
             ValidateCheckpoint(checkpoint);
+            InstallPreparedCheckpoint(PrepareCheckpoint(checkpoint));
+        }
+    }
 
-            // Materialize everything before replacing anything observable.
-            var pages = new AtmosChunk[checkpoint.Pages.Count];
-            var pageVolumes = new CubicMetre[pages.Length][];
-            try
+    /// <summary>
+    ///     Materializes a validated checkpoint's pages without touching any pool.
+    /// </summary>
+    /// <param name="checkpoint">A checkpoint that already passed <see cref="ValidateCheckpoint" />.</param>
+    /// <returns>
+    ///     The pages and slot arrays, ready for <see cref="InstallPreparedCheckpoint" />. Call
+    ///     <see cref="PreparedCheckpoint.Release" /> if they are never installed.
+    /// </returns>
+    internal static PreparedCheckpoint PrepareCheckpoint(AtmosGasMixturePoolCheckpoint checkpoint)
+    {
+        // Materialize everything before replacing anything observable.
+        var pages = new AtmosChunk[checkpoint.Pages.Count];
+        var pageVolumes = new CubicMetre[pages.Length][];
+        try
+        {
+            for (int index = 0; index < pages.Length; index++)
             {
-                for (int index = 0; index < pages.Length; index++)
-                {
-                    pages[index] = checkpoint.Pages[index].Materialize();
-                    pageVolumes[index] = new CubicMetre[PageSize];
-                    for (int cell = 0; cell < PageSize; cell++)
-                        pageVolumes[index][cell] = checkpoint.Volumes[index * PageSize + cell];
-                }
+                pages[index] = checkpoint.Pages[index].Materialize();
+                pageVolumes[index] = new CubicMetre[PageSize];
+                for (int cell = 0; cell < PageSize; cell++)
+                    pageVolumes[index][cell] = checkpoint.Volumes[index * PageSize + cell];
             }
-            catch
-            {
-                foreach (var page in pages)
-                    page?.Release();
+        }
+        catch
+        {
+            foreach (var page in pages)
+                page?.Release();
 
-                throw;
-            }
+            throw;
+        }
+
+        return new PreparedCheckpoint(pages, pageVolumes, checkpoint.Generations.ToArray(), checkpoint.Allocated.ToArray());
+    }
+
+    /// <summary>
+    ///     Swaps prepared pages in for the pool and releases the previous ones.
+    /// </summary>
+    /// <param name="prepared">Pages from <see cref="PrepareCheckpoint" />.</param>
+    /// <remarks>The pool takes ownership of the prepared pages.</remarks>
+    /// <exception cref="InvalidOperationException">A tick is executing, or the pages were already used.</exception>
+    internal void InstallPreparedCheckpoint(PreparedCheckpoint prepared)
+    {
+        lock (StateGate)
+        {
+            ThrowIfTickExecuting("restore the gas mixture pool");
+            prepared.Take(out var pages, out var pageVolumes, out var generations, out var allocated);
 
             var previous = _pages;
             _pages = pages;
             _pageVolumes = pageVolumes;
-            _generations = checkpoint.Generations.ToArray();
-            _allocated = checkpoint.Allocated.ToArray();
+            _generations = generations;
+            _allocated = allocated;
 
             AllocatedCount = 0;
             _lowestFree = -1;
@@ -810,6 +840,69 @@ internal sealed class AtmosGasMixturePool : IDisposable
                 _lowestFree = _allocated.Length;
 
             foreach (var page in previous)
+                page.Release();
+        }
+    }
+
+    /// <summary>
+    ///     A checkpoint's pages and slot arrays, materialized and not yet owned by any pool.
+    /// </summary>
+    internal sealed class PreparedCheckpoint
+    {
+        private AtmosChunk[]? _pages;
+        private CubicMetre[][]? _pageVolumes;
+        private uint[]? _generations;
+        private bool[]? _allocated;
+
+        internal PreparedCheckpoint(
+            AtmosChunk[] pages,
+            CubicMetre[][] pageVolumes,
+            uint[] generations,
+            bool[] allocated)
+        {
+            _pages = pages;
+            _pageVolumes = pageVolumes;
+            _generations = generations;
+            _allocated = allocated;
+        }
+
+        /// <summary>
+        ///     Hands the storage to the installing pool.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">The storage was already installed or released.</exception>
+        internal void Take(
+            out AtmosChunk[] pages,
+            out CubicMetre[][] pageVolumes,
+            out uint[] generations,
+            out bool[] allocated)
+        {
+            if (_pages is null || _pageVolumes is null || _generations is null || _allocated is null)
+                throw new InvalidOperationException("The prepared checkpoint was already used.");
+
+            pages = _pages;
+            pageVolumes = _pageVolumes;
+            generations = _generations;
+            allocated = _allocated;
+            _pages = null;
+            _pageVolumes = null;
+            _generations = null;
+            _allocated = null;
+        }
+
+        /// <summary>
+        ///     Releases the pages of a checkpoint that was never installed. Does nothing after installation.
+        /// </summary>
+        internal void Release()
+        {
+            var pages = _pages;
+            _pages = null;
+            _pageVolumes = null;
+            _generations = null;
+            _allocated = null;
+            if (pages == null)
+                return;
+
+            foreach (var page in pages)
                 page.Release();
         }
     }

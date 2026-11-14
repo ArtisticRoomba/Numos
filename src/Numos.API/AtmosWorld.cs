@@ -825,9 +825,11 @@ public sealed partial class AtmosWorld : IDisposable
     ///     identifiers when they use only built-in solvers. Numos cannot recreate a custom solver, because the
     ///     checkpoint does not store its host delegate. Restore resets the elapsed-time accumulator and rebuilds sparse
     ///     indexes from authoritative link slots.
-    ///     <see cref="Services" /> are left untouched. Once the state is in place, every custom
-    ///     <see cref="IAtmosWorldSolver" /> gets <see cref="IAtmosWorldSolver.OnRestored" />. An exception from it
-    ///     propagates to this call with the restored state already installed.
+    ///     <see cref="Services" /> are left untouched. A failure before the state is installed leaves the world as it
+    ///     was. That covers a rejected solver state setter, a neighbor selection that throws, and a failed allocation.
+    ///     Once the state is in place, every custom <see cref="IAtmosWorldSolver" /> gets
+    ///     <see cref="IAtmosWorldSolver.OnRestored" />. An exception from it propagates to this call with the restored
+    ///     state already installed.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The checkpoint is malformed or incompatible with this world.</exception>
@@ -943,20 +945,58 @@ public sealed partial class AtmosWorld : IDisposable
         return states;
     }
 
+    /// <summary>
+    ///     Installs a validated checkpoint in two phases, so a failure leaves the world as it was.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The first phase builds everything that can fail on an allocation or on host code. It materializes every
+    ///         grid and the mixture pool, builds the simulations the checkpoint adds without registering them, and
+    ///         runs <see cref="RestoreSolvers" />. A failure releases what the phase built and rethrows.
+    ///     </para>
+    ///     <para>
+    ///         The second phase swaps the prepared objects in and updates bookkeeping. It runs no host code.
+    ///     </para>
+    /// </remarks>
     private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
     {
-        // Before the layout, because a stage the layout creates takes its default interval from the rate.
-        TickRate = checkpoint.TickRate;
-        Solvers.SetLayoutCore(checkpoint.Solvers
-            .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled, solver.Interval))
-            .ToArray());
-        Solvers.RestoreSchedules(checkpoint.Solvers);
+        var grids = new List<PreparedGrid>(checkpoint.Simulations.Count);
+        var chunkDimensions = new Dictionary<AtmosSimulationId, Int3>(checkpoint.Simulations.Count);
+        AtmosGasMixturePool.PreparedCheckpoint? pool = null;
+        CompiledTopology topology;
+        LinkSetSlot[] linkSlots;
+        try
+        {
+            foreach (var saved in checkpoint.Simulations)
+            {
+                var dimensions = saved.Checkpoint.Dimensions;
+                var simulation = TryGetSimulationCore(saved.Simulation);
+                bool isNew = simulation == null;
+                simulation ??= AtmosSimulation.CreateUnregistered(this, dimensions, saved.Simulation);
 
-        // Right after the layout, so nothing the rest of the restore runs (topology selectors, simulation
-        // construction) can see the solvers' pre-restore state. Validation already matched every entry to a stateful
-        // registration.
-        foreach (var saved in checkpoint.SolverStates)
-            Solvers.Find(saved.Name)!.RestoreState(saved.State.Span, checkpoint.Config.GasRegistry);
+                // Listed before the grid is prepared, so a failure there still disposes the new simulation.
+                var grid = new PreparedGrid(simulation, isNew);
+                grids.Add(grid);
+                grid.Checkpoint = AtmosKernel.PrepareCheckpoint(saved.Checkpoint);
+                chunkDimensions.Add(saved.Simulation, dimensions);
+            }
+
+            pool = AtmosGasMixturePool.PrepareCheckpoint(checkpoint.GasMixtures);
+            linkSlots = ReadLinkSlots(checkpoint.LinkSlots);
+            topology = RestoreSolvers(checkpoint, linkSlots, chunkDimensions);
+        }
+        catch
+        {
+            pool?.Release();
+            foreach (var grid in grids)
+            {
+                grid.Checkpoint?.Release();
+                if (grid.IsNew)
+                    grid.Simulation.DisposeFromWorld();
+            }
+
+            throw;
+        }
 
         foreach (var simulation in _orderedSimulations.ToArray())
         {
@@ -986,31 +1026,29 @@ public sealed partial class AtmosWorld : IDisposable
                 _freeSimulationSlots.Add(index);
         }
 
-        // Simulations recreated below copy the restored configuration in their constructor.
-        ApplyConfig(checkpoint.Config);
-        foreach (var saved in checkpoint.Simulations)
+        // The slots a new simulation takes are free here: the loop above disposed whatever else held them.
+        foreach (var grid in grids)
         {
-            if (TryGetSimulationCore(saved.Simulation) != null)
+            if (!grid.IsNew)
                 continue;
 
-            var dimensions = saved.Checkpoint.Dimensions;
-            _ = new AtmosSimulation(
-                this,
-                false,
-                dimensions.X,
-                dimensions.Y,
-                dimensions.Z,
-                saved.Simulation);
+            int index = grid.Simulation.Id.Index;
+            _simulationSlots[index] = _simulationSlots[index] with { Simulation = grid.Simulation };
+            _freeSimulationSlots.Remove(index);
         }
 
         RebuildOrderedSimulations();
-        foreach (var saved in checkpoint.Simulations)
-            TryGetSimulationCore(saved.Simulation)!.Kernel.RestoreValidatedCheckpoint(saved.Checkpoint, checkpoint.TickCount);
+
+        // After registration, so the new simulations take the restored configuration too, and before the kernels
+        // install, because each one captures it for its next tick.
+        ApplyConfig(checkpoint.Config);
+        foreach (var grid in grids)
+            grid.Simulation.Kernel.InstallPreparedCheckpoint(grid.Checkpoint!, checkpoint.TickCount);
 
         // After the configuration, so the pool also holds the restored one.
-        GasMixtures.RestoreCheckpoint(checkpoint.GasMixtures);
+        GasMixtures.InstallPreparedCheckpoint(pool!);
 
-        RestoreTopology(checkpoint.LinkSlots);
+        InstallLinkSlots(linkSlots, topology);
         TickCount = checkpoint.TickCount;
         _lastWorldOperationSequence = checkpoint.Position.OperationSequence;
         TopologyVersion = checkpoint.TopologyVersion;
@@ -1018,6 +1056,64 @@ public sealed partial class AtmosWorld : IDisposable
         _pendingConfig = null;
         IncrementSimulationCollectionRevision();
         IncrementLinkSetCollectionRevision();
+    }
+
+    /// <summary>
+    ///     Applies the checkpoint's tick rate, solver layout, schedules, and solver state, then compiles the topology
+    ///     its link slots describe. A failure puts the previous values back and rethrows.
+    /// </summary>
+    /// <remarks>
+    ///     This is the host-code part of a restore. A <c>[NumosSerialize]</c> setter, a codec, or a neighbor selection
+    ///     predicate can throw here. The setters write into the live solver objects, and the selectors must see the
+    ///     restored solver state, so neither can run on a copy. The selectors run before the checkpoint's grids are
+    ///     installed. The world's configuration is still the previous one, so the rollback reads the previous state
+    ///     with its gas registry.
+    /// </remarks>
+    private CompiledTopology RestoreSolvers(
+        AtmosWorldCheckpoint checkpoint,
+        LinkSetSlot[] linkSlots,
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
+    {
+        int previousTickRate = TickRate;
+        var previousLayout = Solvers.CaptureLayoutSnapshot();
+        AtmosWorldSolverStateCheckpoint[] previousStates = CaptureSolverStates();
+        try
+        {
+            // Before the layout, because a stage the layout creates takes its default interval from the rate.
+            TickRate = checkpoint.TickRate;
+            Solvers.SetLayoutCore(checkpoint.Solvers
+                .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled, solver.Interval))
+                .ToArray());
+            Solvers.RestoreSchedules(checkpoint.Solvers);
+
+            // Right after the layout, so nothing the rest of the restore runs (topology selectors) can see the
+            // solvers' pre-restore state. Validation already matched every entry to a stateful registration.
+            foreach (var saved in checkpoint.SolverStates)
+                Solvers.Find(saved.Name)!.RestoreState(saved.State.Span, checkpoint.Config.GasRegistry);
+
+            return CompileTopology(linkSlots, false, chunkDimensions);
+        }
+        catch
+        {
+            TickRate = previousTickRate;
+            Solvers.RestoreLayoutSnapshot(previousLayout);
+
+            // The generated reader assigns members one at a time, so a setter that throws leaves the earlier ones
+            // written. Writing the captured state back undoes that. A solver that rejects its own earlier state is
+            // left as it is, and the original failure still propagates.
+            foreach (var previous in previousStates)
+            {
+                try
+                {
+                    Solvers.Find(previous.Name)!.RestoreState(previous.State.Span, _config.GasRegistry);
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -1799,7 +1895,23 @@ public sealed partial class AtmosWorld : IDisposable
         reader.EndObject();
     }
 
-    private void RestoreTopology(IReadOnlyList<AtmosWorldLinkSlotCheckpoint> checkpoints)
+    private static LinkSetSlot[] ReadLinkSlots(IReadOnlyList<AtmosWorldLinkSlotCheckpoint> checkpoints)
+    {
+        var slots = new LinkSetSlot[checkpoints.Count];
+        for (int slotIndex = 0; slotIndex < slots.Length; slotIndex++)
+        {
+            var checkpoint = checkpoints[slotIndex];
+            ExplicitAtmosEdge[] edges = checkpoint.Links
+                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Flags, link.AreaFraction))
+                .ToArray();
+
+            slots[slotIndex] = new LinkSetSlot(checkpoint.Generation, (LinkSetState)checkpoint.State, checkpoint.Kind, edges);
+        }
+
+        return slots;
+    }
+
+    private void InstallLinkSlots(LinkSetSlot[] slots, CompiledTopology topology)
     {
         _linkSlots.Clear();
         _freeLinkSlots.Clear();
@@ -1808,25 +1920,20 @@ public sealed partial class AtmosWorld : IDisposable
         _linkSlotsByChunk.Clear();
         _linkSlotsBySimulation.Clear();
 
-        for (int slotIndex = 0; slotIndex < checkpoints.Count; slotIndex++)
+        for (int slotIndex = 0; slotIndex < slots.Length; slotIndex++)
         {
-            var checkpoint = checkpoints[slotIndex];
-            var state = (LinkSetState)checkpoint.State;
-            ExplicitAtmosEdge[] edges = checkpoint.Links
-                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Flags, link.AreaFraction))
-                .ToArray();
+            var slot = slots[slotIndex];
+            _linkSlots.Add(slot);
 
-            _linkSlots.Add(new LinkSetSlot(checkpoint.Generation, state, checkpoint.Kind, edges));
-
-            if (state == LinkSetState.Free)
+            if (slot.State == LinkSetState.Free)
             {
                 _freeLinkSlots.Add(slotIndex);
                 continue;
             }
 
-            if (state is LinkSetState.PendingCreate or LinkSetState.Active)
+            if (slot.State is LinkSetState.PendingCreate or LinkSetState.Active)
             {
-                foreach (var edge in edges)
+                foreach (var edge in slot.Edges)
                 {
                     _reservedEdges.Add(new ExplicitEdgeKey(edge.First, edge.Second));
                     IndexLinkSlot(slotIndex, edge.First);
@@ -1834,11 +1941,11 @@ public sealed partial class AtmosWorld : IDisposable
                 }
             }
 
-            if (state is LinkSetState.PendingCreate or LinkSetState.PendingDestroyNew or LinkSetState.PendingDestroyActive)
+            if (slot.State is LinkSetState.PendingCreate or LinkSetState.PendingDestroyNew or LinkSetState.PendingDestroyActive)
                 _pendingLinkSlots.Add(slotIndex);
         }
 
-        CompileActiveTopology();
+        InstallTopology(topology);
     }
 
     private void SolveExplicitTransport(ExplicitTransportCapabilities capabilities, float deltaTime)
@@ -1942,8 +2049,23 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void CompileActiveTopology(bool applyPendingChanges = false)
     {
+        InstallTopology(CompileTopology(_linkSlots, applyPendingChanges, GetChunkDimensionsCore()));
+    }
+
+    /// <summary>
+    ///     Builds the active edge list, its per-chunk counts, and every stage's neighbor topology from link slots,
+    ///     without changing the world.
+    /// </summary>
+    /// <remarks>
+    ///     A host selector can throw, and then the world's topology stays as it was.
+    /// </remarks>
+    private CompiledTopology CompileTopology(
+        IReadOnlyList<LinkSetSlot> slots,
+        bool applyPendingChanges,
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
+    {
         int edgeCount = 0;
-        foreach (var slot in _linkSlots)
+        foreach (var slot in slots)
         {
             if (IsSolverActive(slot.State, applyPendingChanges))
                 edgeCount = checked(edgeCount + slot.Edges.Length);
@@ -1951,7 +2073,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         var edges = new ExplicitAtmosEdge[edgeCount];
         int destination = 0;
-        foreach (var slot in _linkSlots)
+        foreach (var slot in slots)
         {
             if (!IsSolverActive(slot.State, applyPendingChanges))
                 continue;
@@ -1969,9 +2091,26 @@ public sealed partial class AtmosWorld : IDisposable
                 AddChunkEdgeCount(chunkCounts, edge.Second);
         }
 
-        Solvers.RecompileTopology(ToDefinitions(edges));
-        _activeEdges = edges;
-        _activeEdgesByChunk = chunkCounts;
+        return new CompiledTopology(edges, chunkCounts, Solvers.CompileTopologies(ToDefinitions(edges), chunkDimensions));
+    }
+
+    private void InstallTopology(CompiledTopology topology)
+    {
+        Solvers.InstallTopologies(topology.SolverTopologies);
+        _activeEdges = topology.Edges;
+        _activeEdgesByChunk = topology.EdgesByChunk;
+    }
+
+    /// <summary>
+    ///     Lists the chunk dimensions of every registered simulation. The caller holds <see cref="Gate" />.
+    /// </summary>
+    internal Dictionary<AtmosSimulationId, Int3> GetChunkDimensionsCore()
+    {
+        var dimensions = new Dictionary<AtmosSimulationId, Int3>(_orderedSimulations.Length);
+        foreach (var simulation in _orderedSimulations)
+            dimensions.Add(simulation.Id, simulation.ChunkDimensions);
+
+        return dimensions;
     }
 
     private void WakeEndpoints(ExplicitAtmosEdge[] edges)
@@ -2433,6 +2572,35 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     private readonly record struct SimulationSlot(AtmosSimulation? Simulation, uint Generation);
+
+    /// <summary>
+    ///     A simulation a restore keeps or adds, with its materialized grid.
+    /// </summary>
+    private sealed class PreparedGrid(AtmosSimulation simulation, bool isNew)
+    {
+        /// <summary>
+        ///     Gets the retained simulation, or the unregistered one built for the checkpoint.
+        /// </summary>
+        internal AtmosSimulation Simulation { get; } = simulation;
+
+        /// <summary>
+        ///     Gets whether the restore built <see cref="Simulation" />.
+        /// </summary>
+        internal bool IsNew { get; } = isNew;
+
+        /// <summary>
+        ///     Gets or sets the prepared grid, or <see langword="null" /> until it is built.
+        /// </summary>
+        internal AtmosKernel.PreparedCheckpoint? Checkpoint { get; set; }
+    }
+
+    /// <summary>
+    ///     The edge list, per-chunk edge counts, and per-stage neighbor topologies that a set of link slots yields.
+    /// </summary>
+    private readonly record struct CompiledTopology(
+        ExplicitAtmosEdge[] Edges,
+        Dictionary<AtmosChunkKey, int> EdgesByChunk,
+        AtmosWorldNeighborTopology[] SolverTopologies);
 
     private readonly record struct AtmosChunkKey(AtmosSimulationId Simulation, Int3 ChunkPosition);
 

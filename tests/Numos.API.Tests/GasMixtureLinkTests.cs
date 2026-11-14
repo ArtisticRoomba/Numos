@@ -425,6 +425,89 @@ public sealed class GasMixtureLinkTests
     }
 
     [Test]
+    public void Restore_ThatASelectorRejects_LeavesTheWorldUnchanged()
+    {
+        using var world = CreateWorld(CreateConfig());
+        var a = world.CreateSimulation(1, 1, 1);
+        var b = world.CreateSimulation(1, 1, 1);
+        var aChunk = CreateOpenChunk(a);
+        var bChunk = CreateOpenChunk(b);
+        bool throwing = false;
+        world.Solvers.Register(
+            "tests/fallible-selector",
+            static _ => { },
+            new AtmosNeighborSelection(
+                "tests/fallible-selector-v1",
+                false,
+                _ => throwing ? throw new InvalidOperationException("Expected selector failure.") : true));
+
+        using var canister = world.CreateGasMixture(1f, Kelvin);
+        canister.AddGas(Air, 10f, Kelvin);
+        world.CreatePortal(a.GetCellRef(aChunk, 0), b.GetCellRef(bChunk, 0), ExplicitLinkFlags.GasTransport);
+        world.Tick();
+        Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
+
+        var checkpoint = world.CaptureCheckpoint();
+        var checkpointHash = checkpoint.ComputeStateHash();
+        float checkpointTemperature = a.GetVoxelSnapshot(aChunk, 0).Temperature;
+        var bId = b.Id;
+
+        a.SetVoxelTemperature(aChunk, 0, 350f);
+        canister.AddGas(Air, 5f, Kelvin);
+        Assert.That(world.DestroySimulation(b), Is.True);
+        var c = world.CreateSimulation(1, 1, 1);
+        var cChunk = CreateOpenChunk(c);
+        world.Tick();
+        world.Tick();
+
+        var cId = c.Id;
+        var hash = world.ComputeStateHash();
+        long tickCount = world.TickCount;
+        float editedTemperature = a.GetVoxelSnapshot(aChunk, 0).Temperature;
+        float moles = canister.GetMoles(Air);
+        Assert.Multiple(() =>
+        {
+            Assert.That(editedTemperature, Is.Not.EqualTo(checkpointTemperature));
+            Assert.That(moles, Is.Not.EqualTo(10f));
+            Assert.That(cId, Is.Not.EqualTo(bId));
+            Assert.That(world.TryGetSimulation(bId, out _), Is.False);
+        });
+
+        throwing = true;
+        Assert.That(
+            () => world.RestoreCheckpoint(checkpoint),
+            Throws.TypeOf<InvalidOperationException>().With.Message.Contains("Expected selector failure."));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash), "state hash");
+            Assert.That(world.TickCount, Is.EqualTo(tickCount), "tick count");
+            Assert.That(a.GetVoxelSnapshot(aChunk, 0).Temperature, Is.EqualTo(editedTemperature), "edit to A");
+            Assert.That(canister.GetMoles(Air), Is.EqualTo(moles), "mixture contents");
+            Assert.That(world.TryGetSimulation(bId, out _), Is.False, "B stays destroyed");
+            Assert.That(
+                world.TryGetSimulation(cId, out var live) && ReferenceEquals(live, c),
+                Is.True,
+                "C stays registered");
+        });
+
+        Assert.That(() => c.GetVoxelSnapshot(cChunk, 0), Throws.Nothing);
+        Assert.That(() => c.CreateAndRegisterChunk(Int3.PosX), Throws.Nothing);
+
+        throwing = false;
+        world.RestoreCheckpoint(checkpoint);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(checkpointHash));
+            Assert.That(world.TryGetSimulation(bId, out _), Is.True);
+            Assert.That(world.TryGetSimulation(cId, out _), Is.False);
+            Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
+            Assert.That(canister.GetMoles(Air), Is.EqualTo(10f));
+        });
+    }
+
+    [Test]
     public void NeighborTopologyListsTheMixtureOnTheVoxelSideWithoutFailing()
     {
         using var world = CreateWorld(CreateConfig());
