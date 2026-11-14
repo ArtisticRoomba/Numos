@@ -16,8 +16,8 @@ PACKAGE_DEPENDENCIES = {
     "Numos.Serialization": ("Numos.API",),
     "Numos.Serialization.FileSystem": ("Numos.Serialization",),
     "Numos.SimDrawer": ("Numos.CoreSim",),
-    "Numos.Workbench": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
-    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem", "Numos.Workbench"),
+    "Numos.Workbench": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization", "Numos.Serialization.FileSystem"),
+    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization", "Numos.Serialization.FileSystem", "Numos.Workbench"),
 }
 # Analyzer projects packed into a package under analyzers/dotnet/cs instead of being published on their own.
 PACKAGE_ANALYZERS = {
