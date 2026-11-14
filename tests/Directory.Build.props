@@ -1,0 +1,66 @@
+<Project>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+
+        <MicrosoftNETTestSdkVersion>17.14.1</MicrosoftNETTestSdkVersion>
+        <NUnitVersion>4.2.2</NUnitVersion>
+        <NUnit3TestAdapterVersion>4.6.0</NUnit3TestAdapterVersion>
+        <CoverletCollectorVersion>6.0.4</CoverletCollectorVersion>
+        <MicrosoftCodeAnalysisCSharpVersion>5.0.0</MicrosoftCodeAnalysisCSharpVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="$(MicrosoftNETTestSdkVersion)"/>
+        <PackageReference Include="NUnit" Version="$(NUnitVersion)"/>
+        <PackageReference Include="NUnit3TestAdapter" Version="$(NUnit3TestAdapterVersion)">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="NUnit.Framework"/>
+    </ItemGroup>
+
+    <!--
+        The opt-in switches below are set in each csproj, after this file is imported. That still works because
+        MSBuild evaluates every property before any item, so these item conditions see the project's value.
+
+        NumosSharedTestSupport links tests/Shared/*.cs, which needs Numos.CoreSim. NumosSharedApiTestSupport also
+        links tests/Shared/Api/*.cs, which needs Numos.API.
+    -->
+    <ItemGroup Condition="'$(NumosSharedTestSupport)' == 'true' or '$(NumosSharedApiTestSupport)' == 'true'">
+        <Compile Include="$(MSBuildThisFileDirectory)Shared/*.cs" Link="Shared/%(Filename)%(Extension)"/>
+        <Using Include="Numos.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(NumosSharedApiTestSupport)' == 'true'">
+        <Compile Include="$(MSBuildThisFileDirectory)Shared/Api/*.cs" Link="Shared/Api/%(Filename)%(Extension)"/>
+    </ItemGroup>
+
+    <!--
+        NumosBaselineSupport links tests/Shared/Baselines/*.cs (NUnit and System.Text.Json only) and records where the
+        project lives, so update mode writes baselines back into the source tree instead of the output directory.
+    -->
+    <ItemGroup Condition="'$(NumosBaselineSupport)' == 'true'">
+        <Compile Include="$(MSBuildThisFileDirectory)Shared/Baselines/*.cs" Link="Shared/Baselines/%(Filename)%(Extension)"/>
+        <Using Include="Numos.Tests.Baselines"/>
+        <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+            <_Parameter1>NumosTestProjectDirectory</_Parameter1>
+            <_Parameter2>$(MSBuildProjectDirectory)</_Parameter2>
+        </AssemblyAttribute>
+        <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+            <_Parameter1>NumosTestProjectPath</_Parameter1>
+            <_Parameter2>$([MSBuild]::MakeRelative($([MSBuild]::NormalizeDirectory($(MSBuildThisFileDirectory)..)), $(MSBuildProjectFullPath)))</_Parameter2>
+        </AssemblyAttribute>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(NumosRoslynTestSupport)' == 'true'">
+        <Compile Include="$(MSBuildThisFileDirectory)Shared/Roslyn/*.cs" Link="Shared/Roslyn/%(Filename)%(Extension)"/>
+        <Using Include="Numos.Tests.Roslyn"/>
+    </ItemGroup>
+</Project>

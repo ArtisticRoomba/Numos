@@ -51,6 +51,16 @@ jobs:
       - name: Run tests
         run: dotnet test Numos.slnx -c Release --no-build --no-restore
 
+      # Baseline mismatches and missing per-architecture values leave .received.json files behind. This is also how
+      # arm64 digests get captured: download the macOS artifact and commit its files as the baselines.
+      - name: Upload received baselines
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: received-baselines-${{ matrix.os }}
+          path: '**/*.received.json'
+          if-no-files-found: ignore
+
   package:
     name: Pack and verify
     needs: test

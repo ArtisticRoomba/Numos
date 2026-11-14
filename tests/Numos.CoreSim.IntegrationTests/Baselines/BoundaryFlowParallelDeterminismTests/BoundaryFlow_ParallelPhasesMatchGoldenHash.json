@@ -1,0 +1,9 @@
+{
+  "regenerate": "NUMOS_UPDATE_BASELINES=1 dotnet test tests/Numos.CoreSim.IntegrationTests/Numos.CoreSim.IntegrationTests.csproj --filter \"FullyQualifiedName~BoundaryFlowParallelDeterminismTests.BoundaryFlow_ParallelPhasesMatchGoldenHash\"",
+  "entries": {
+    "stateHash": {
+      "kind": "digest",
+      "x64": "0xE8E541E50AE95357"
+    }
+  }
+}

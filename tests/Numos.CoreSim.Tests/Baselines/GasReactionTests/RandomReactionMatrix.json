@@ -1,0 +1,37 @@
+{
+  "regenerate": "NUMOS_UPDATE_BASELINES=1 dotnet test tests/Numos.CoreSim.Tests/Numos.CoreSim.Tests.csproj --filter \"FullyQualifiedName~GasReactionTests.RandomReactionMatrix\"",
+  "entries": {
+    "totalReactionSum": {
+      "kind": "float",
+      "tolerance": "ulps(4)",
+      "default": 1748.375
+    },
+    "gasMoleSums": {
+      "kind": "floats",
+      "tolerance": "ulps(4)",
+      "default": [
+        117.50994,
+        89.01923,
+        73.23577,
+        53.959713,
+        32.20401,
+        27.784863,
+        154.73357,
+        92.73902,
+        160.16347,
+        205.67493,
+        120.06365,
+        172.13142,
+        26.036192,
+        145.68103,
+        93.12835,
+        27.783888
+      ]
+    },
+    "temperature0": {
+      "kind": "float",
+      "tolerance": "ulps(4)",
+      "default": 265.40897
+    }
+  }
+}

@@ -1,22 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <IsPackable>false</IsPackable>
-        <IsTestProject>true</IsTestProject>
         <RootNamespace>Numos.API.Tests</RootNamespace>
+        <NumosSharedApiTestSupport>true</NumosSharedApiTestSupport>
     </PropertyGroup>
-
-    <ItemGroup>
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>
-        <PackageReference Include="NUnit" Version="4.2.2"/>
-        <PackageReference Include="NUnit3TestAdapter" Version="4.6.0">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Numos.API\Numos.API.csproj"/>
@@ -26,16 +13,6 @@
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <Using Include="NUnit.Framework"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <Compile Include="../Shared/TestAtmosConfig.cs" Link="Shared/TestAtmosConfig.cs"/>
-        <Compile Include="../Shared/TickHelpers.cs" Link="Shared/TickHelpers.cs"/>
-        <Using Include="Numos.Tests"/>
     </ItemGroup>
 
 </Project>

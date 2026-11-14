@@ -1,5 +1,3 @@
-using NUnit.Framework;
-
 namespace Numos.Maths.Tests;
 
 [TestFixture]

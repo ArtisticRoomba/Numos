@@ -130,7 +130,7 @@ public sealed class ChunkDataDiagnosticTests
             sources: Wrap("public static partial Numos.API.ChunkField<string?> Value { get; }"));
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
     }
 
     [Test]
@@ -204,7 +204,7 @@ public sealed class ChunkDataDiagnosticTests
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK012" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
         Assert.That(diagnostics[0].GetMessage(), Does.Contain("Other.Second").And.Contain("Data.First"));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
     }
 
     [Test]
@@ -232,7 +232,7 @@ public sealed class ChunkDataDiagnosticTests
         Assert.That(diagnostics[0].GetMessage(), Does.Contain("C# 13"));
 
         // The property bodies are still generated, so the error above is the only one the project sees.
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs"), Does.Not.Contain("extension("));
     }
 
@@ -251,7 +251,7 @@ public sealed class ChunkDataDiagnosticTests
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK014" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs"), Does.Not.Contain("extension("));
     }
 
@@ -290,7 +290,7 @@ public sealed class ChunkDataDiagnosticTests
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK014" }));
         Assert.That(diagnostics[0].GetMessage(), Does.Contain("Radiation.Exposure").And.Contain("Fire.Exposure"));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
     }
 
     [Test]
@@ -310,7 +310,7 @@ public sealed class ChunkDataDiagnosticTests
         GeneratorHarness.Run(out Compilation output, out var diagnostics, sources: [source]);
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK014" }));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
     }
 
     [Test]
@@ -347,7 +347,7 @@ public sealed class ChunkDataDiagnosticTests
 
         // Only the unimplemented partial is left; the generator itself adds nothing that fails to compile.
         Assert.That(
-            GeneratorHarness.Errors(output).Select(static d => d.Id).Distinct(),
+            RoslynTestSupport.Errors(output).Select(static d => d.Id).Distinct(),
             Is.EqualTo(new[] { "CS9248" }));
     }
 

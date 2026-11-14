@@ -1,5 +1,4 @@
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
@@ -73,9 +72,9 @@ public sealed class AtmosWorldReplayTests
         using var source = new AtmosWorld(CreateConfig());
         var first = source.CreateSimulation(1, 1, 1);
         var timeline = new AtmosWorldReplayTimeline(source, 0.05);
-        var firstChunk = CreateOpenChunk(first, default);
+        var firstChunk = SimSetup.CreateOpenChunk(first, default);
         var second = source.CreateSimulation(1, 1, 1);
-        var secondChunk = CreateOpenChunk(second, default);
+        var secondChunk = SimSetup.CreateOpenChunk(second, default);
         first.AddGasToVoxel(firstChunk, 0, 0, 1f, 300f);
         var portal = source.CreatePortal(
             first.GetCellRef(firstChunk, 0),
@@ -116,8 +115,8 @@ public sealed class AtmosWorldReplayTests
         using var world = new AtmosWorld(CreateConfig());
         var retained = world.CreateSimulation(1, 1, 1);
         var restored = world.CreateSimulation(2, 1, 1);
-        CreateOpenChunk(retained, default);
-        CreateOpenChunk(restored, default);
+        SimSetup.CreateOpenChunk(retained, default);
+        SimSetup.CreateOpenChunk(restored, default);
         var checkpoint = world.CaptureCheckpoint();
         var restoredId = restored.Id;
 
@@ -142,7 +141,7 @@ public sealed class AtmosWorldReplayTests
     {
         using var legacy = new AtmosWorld(CreateConfig(), AtmosTransportModel.Legacy);
         var recorded = legacy.CreateSimulation(2, 1, 1);
-        var chunk = CreateOpenChunk(recorded, default);
+        var chunk = SimSetup.CreateOpenChunk(recorded, default);
         recorded.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
         legacy.Tick();
         var checkpoint = legacy.CaptureCheckpoint();
@@ -191,8 +190,8 @@ public sealed class AtmosWorldReplayTests
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var timeline = new AtmosWorldReplayTimeline(world, 0.05);
-        var firstChunk = CreateOpenChunk(first, default);
-        var secondChunk = CreateOpenChunk(second, default);
+        var firstChunk = SimSetup.CreateOpenChunk(first, default);
+        var secondChunk = SimSetup.CreateOpenChunk(second, default);
         world.CreatePortal(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0));
         world.Tick();
         var archive = timeline.CaptureReplay();
@@ -237,7 +236,7 @@ public sealed class AtmosWorldReplayTests
     {
         using var world = new AtmosWorld(CreateConfig());
         var simulation = world.CreateSimulation(2, 1, 1);
-        var chunk = CreateOpenChunk(simulation, default);
+        var chunk = SimSetup.CreateOpenChunk(simulation, default);
 
         Assert.That(
             () => world.CreatePortal(simulation.GetCellRef(chunk, 0), simulation.GetCellRef(chunk, 1)),
@@ -262,12 +261,5 @@ public sealed class AtmosWorldReplayTests
         {
             GasRegistry = [new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f }]
         };
-    }
-
-    private static AtmosChunkHandle CreateOpenChunk(AtmosSimulation simulation, Int3 position)
-    {
-        var chunk = simulation.CreateAndRegisterChunk(position);
-        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        return chunk;
     }
 }

@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Numos.Maths;
-using NUnit.Framework;
 
 namespace Numos.Collections.Tests;
 

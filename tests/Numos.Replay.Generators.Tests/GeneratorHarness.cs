@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.Text;
 
 namespace Numos.Replay.Generators.Tests;
 
@@ -10,14 +9,6 @@ namespace Numos.Replay.Generators.Tests;
 /// </summary>
 internal static class GeneratorHarness
 {
-    private static readonly MetadataReference[] FrameworkReferences =
-        ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-        .Split(Path.PathSeparator)
-        .Where(static path => !Path.GetFileName(path).StartsWith("Numos.", StringComparison.Ordinal))
-        .Distinct(StringComparer.Ordinal)
-        .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
-        .ToArray();
-
     private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
 
     public static CSharpCompilation CreateCompilation(
@@ -27,7 +18,7 @@ internal static class GeneratorHarness
         return CSharpCompilation.Create(
             assemblyName,
             sources.Select((source, index) => CSharpSyntaxTree.ParseText(source, ParseOptions, path: $"Source{index}.cs")),
-            FrameworkReferences.Concat(references),
+            RoslynTestSupport.FrameworkReferences.Concat(references),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
     }
 
@@ -56,23 +47,8 @@ internal static class GeneratorHarness
         return compilation.SyntaxTrees.Single(tree => tree.FilePath.EndsWith(hintName, StringComparison.Ordinal)).ToString();
     }
 
-    public static IEnumerable<Diagnostic> Errors(Compilation compilation)
-    {
-        return compilation.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-    }
-
     public static AdditionalText Catalog(string text)
     {
-        return new InMemoryText("Test.magnitudo", text);
-    }
-
-    private sealed class InMemoryText(string path, string text) : AdditionalText
-    {
-        public override string Path { get; } = path;
-
-        public override SourceText GetText(CancellationToken cancellationToken = default)
-        {
-            return SourceText.From(text);
-        }
+        return new InMemoryAdditionalText("Test.magnitudo", text);
     }
 }

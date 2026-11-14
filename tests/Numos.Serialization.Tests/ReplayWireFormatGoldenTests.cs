@@ -293,7 +293,7 @@ public sealed class ReplayWireFormatGoldenTests
         var config = new AtmosConfig { GasRegistry = [new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f }] };
         using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(2, 2, 1);
-        var chunk = CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 1, 0, 3f, 300f);
         float[] heat = [0.5f, -1f, 2.25f, 300f];
         heat.CopyTo(simulation.GetChunkField(chunk, GoldenHeat).AsSpan());
@@ -324,7 +324,7 @@ public sealed class ReplayWireFormatGoldenTests
         using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(1, 1, 1);
         var timeline = new AtmosWorldReplayTimeline(world, 0.05);
-        CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         world.Tick();
 
         var changed = new AtmosConfig(world.Config);
@@ -406,9 +406,9 @@ public sealed class ReplayWireFormatGoldenTests
         using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         var first = world.CreateSimulation(2, 3, 1);
-        var firstChunk = CreateOpenChunk(first, new Int3(1, 2, 0));
+        var firstChunk = SimSetup.CreateOpenChunk(first, new Int3(1, 2, 0));
         var second = world.CreateSimulation(1, 3, 2);
-        var secondChunk = CreateOpenChunk(second, new Int3(0, 3, 4));
+        var secondChunk = SimSetup.CreateOpenChunk(second, new Int3(0, 3, 4));
         first.AddGasToVoxel(firstChunk, 3, 1, 2f, 305f);
         // Sized explicitly so the link's area fraction is pinned as a value rather than the NaN "unset" marker.
         var portal = world.CreatePortal(
@@ -477,13 +477,6 @@ public sealed class ReplayWireFormatGoldenTests
             "phase0-fixture");
 
         return new NumosWorldReplayDocument(metadata, archive);
-    }
-
-    private static AtmosChunkHandle CreateOpenChunk(AtmosSimulation simulation, Int3 position)
-    {
-        var chunk = simulation.CreateAndRegisterChunk(position);
-        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        return chunk;
     }
 
     private static byte[] SerializeNonSeekable(Action<Stream> serialize)

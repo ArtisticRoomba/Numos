@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Numos.API.Generators.ChunkData;
-using Microsoft.CodeAnalysis.Text;
 using Numos.API.Generators.SolverDependency;
 using Numos.API.Generators.State;
 
@@ -13,12 +12,6 @@ namespace Numos.API.Generators.Tests;
 /// </summary>
 internal static class GeneratorHarness
 {
-    private static readonly string[] FrameworkReferences = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-        .Split(Path.PathSeparator)
-        .Where(static path => !Path.GetFileName(path).StartsWith("Numos.", StringComparison.Ordinal))
-        .Distinct(StringComparer.Ordinal)
-        .ToArray();
-
     public static CSharpParseOptions ParseOptions(LanguageVersion version = LanguageVersion.CSharp14)
     {
         return new CSharpParseOptions(version);
@@ -33,9 +26,8 @@ internal static class GeneratorHarness
         CSharpParseOptions parseOptions,
         IEnumerable<MetadataReference> extraReferences, params string[] sources)
     {
-        IEnumerable<MetadataReference> references = FrameworkReferences
-            .Concat(NumosReferences())
-            .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
+        IEnumerable<MetadataReference> references = RoslynTestSupport.FrameworkReferences
+            .Concat(NumosReferences().Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path)))
             .Concat(extraReferences);
 
         return CSharpCompilation.Create(
@@ -134,9 +126,7 @@ internal static class GeneratorHarness
 
     public static Diagnostic[] Errors(Compilation compilation)
     {
-        return compilation.GetDiagnostics()
-            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .ToArray();
+        return RoslynTestSupport.Errors(compilation);
     }
 
     public static string[] Ids(IEnumerable<Diagnostic> diagnostics)
@@ -152,11 +142,4 @@ internal static class GeneratorHarness
                 .StartsWith("Numos.API.Generators", StringComparison.Ordinal))
             .OrderBy(static path => path, StringComparer.Ordinal);
     }
-}
-
-internal sealed class InMemoryAdditionalText(string path, string text) : AdditionalText
-{
-    public override string Path { get; } = path;
-
-    public override SourceText GetText(CancellationToken cancellationToken = default) => SourceText.From(text);
 }

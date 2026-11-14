@@ -48,7 +48,7 @@ public sealed class OperationCodecGeneratorTests
         Compilation output = RunSim(out var diagnostics, StandardOperations);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty, string.Join("\n", GeneratorHarness.Errors(output)));
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty, string.Join("\n", RoslynTestSupport.Errors(output)));
 
         string codec = GeneratorHarness.Generated(output, SimHint);
         Assert.Multiple(() =>
@@ -192,7 +192,7 @@ public sealed class OperationCodecGeneratorTests
         Compilation output = RunSim(out var diagnostics, StandardOperations, codecMembers: codecMembers);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty, string.Join("\n", GeneratorHarness.Errors(output)));
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty, string.Join("\n", RoslynTestSupport.Errors(output)));
         string codec = GeneratorHarness.Generated(output, SimHint);
         Assert.Multiple(() =>
         {
@@ -250,7 +250,7 @@ public sealed class OperationCodecGeneratorTests
 
         Compilation simOutput = GeneratorHarness.Run(new OperationCodecGenerator(), sim, out var simDiagnostics);
         Assert.That(simDiagnostics, Is.Empty);
-        MetadataReference simReference = Emit(simOutput);
+        MetadataReference simReference = RoslynTestSupport.EmitToReference(simOutput);
 
         const string world = """
                              namespace Numos.API
@@ -295,7 +295,7 @@ public sealed class OperationCodecGeneratorTests
             out var diagnostics);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty, string.Join("\n", GeneratorHarness.Errors(output)));
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty, string.Join("\n", RoslynTestSupport.Errors(output)));
         Assert.That(
             output.SyntaxTrees.Any(static tree => tree.FilePath.EndsWith(SimHint, StringComparison.Ordinal)),
             Is.False,
@@ -356,13 +356,5 @@ public sealed class OperationCodecGeneratorTests
                      }
                  }
                  """;
-    }
-
-    private static MetadataReference Emit(Compilation compilation)
-    {
-        using var image = new MemoryStream();
-        var result = compilation.Emit(image);
-        Assert.That(result.Success, Is.True, string.Join("\n", result.Diagnostics));
-        return MetadataReference.CreateFromImage(image.ToArray());
     }
 }

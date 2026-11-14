@@ -1,4 +1,3 @@
-using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -49,7 +48,7 @@ public sealed class AtmosClassSolverTests
     [Test]
     public void NeighborClassSolver_ReceivesItsCompiledTopology()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
@@ -255,17 +254,6 @@ public sealed class AtmosClassSolverTests
             Assert.That(simulation.TickCount, Is.Zero);
             Assert.That(world.ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
         });
-    }
-
-    private static AtmosConfig CreateConfig()
-    {
-        return new AtmosConfig
-        {
-            BulkFlowCoefficient = 0f,
-            DefaultDiffusionCoefficient = 0f,
-            ThermalConductance = 0f,
-            GasRegistry = [new GasProperties { Name = "TestGas", MolarHeatCapacityAtConstantVolume = 20f }]
-        };
     }
 
     private static void StaticSolve(AtmosWorldSolverContext context)

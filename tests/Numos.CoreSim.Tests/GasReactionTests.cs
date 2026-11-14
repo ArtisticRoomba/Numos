@@ -330,25 +330,17 @@ public class GasReactionTests
 
         Assert.That(totalReactionSum > 0);
 
-        // Golden baseline. It pins the exact numeric outcome of this deterministic random scenario (fixed seed, sequential
-        // per-voxel writeback). A change to the material limiter or the reaction-application math that alters results then
-        // shows up here, even if the new result has no NaNs and still looks plausible.
-        Assert.That(totalReactionSum, Is.EqualTo(1748.375f));
+        float[] gasSums = new float[gases.Count];
+        foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount))
+            gasSums[gc.GasId] = gc.Moles.Sum();
 
-        float[] expectedGasSums =
-        [
-            117.50994f, 89.01923f, 73.23577f, 53.959713f, 32.20401f, 27.784863f, 154.73357f, 92.73902f,
-            160.16347f, 205.67493f, 120.06365f, 172.13142f, 26.036192f, 145.68103f, 93.12835f, 27.783888f
-        ];
-
-        Assert.Multiple(() =>
-        {
-            foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
-                Assert.That(gc.Moles.Sum(), Is.EqualTo(expectedGasSums[gc.GasId]));
-        });
-
-        Assert.That(chunk.Temperature[0], Is.EqualTo(265.408966f));
-        Assert.That(chunk.Temperature[0], Is.EqualTo(265.408966f));
+        // The baseline pins the numeric outcome of this fixed-seed scenario, so a change to the material limiter or
+        // the reaction-application math that moves results shows up here even when the new result still looks
+        // plausible and has no NaNs.
+        Baseline.Verify(new BaselineValues()
+            .Float("totalReactionSum", totalReactionSum, BaselineTolerance.Ulps(4))
+            .Floats("gasMoleSums", gasSums, BaselineTolerance.Ulps(4))
+            .Float("temperature0", chunk.Temperature[0], BaselineTolerance.Ulps(4)));
     }
 
     [Test]

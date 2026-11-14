@@ -1,4 +1,3 @@
-using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -10,7 +9,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void NeighborSolver_SeesCartesianAndPortalNeighborsThroughOneView()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var first = world.CreateSimulation(2, 2, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = first.CreateAndRegisterChunk(default);
@@ -49,7 +48,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void NeighborSolver_SeesCartesianNeighborAcrossChunkBoundary()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
@@ -78,7 +77,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void Selector_IsReevaluatedOnlyWhenCompiledTopologyChanges()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(new Int3(2, 0, 0));
@@ -111,7 +110,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void SelectorFailure_LeavesTopologyBoundaryPendingForRetry()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(new Int3(2, 0, 0));
@@ -164,7 +163,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void WorldSolver_RunsOnceAtItsBarrierForAllSimulations()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         world.CreateSimulation(1, 1, 1);
         world.CreateSimulation(1, 1, 1);
         int calls = 0;
@@ -190,7 +189,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void AfterEulerFlow_RunsAfterOrdinaryChunkBoundaryTransport()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var source = simulation.CreateAndRegisterChunk(default);
         var target = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
@@ -213,7 +212,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void OwnedEdges_VisitsCartesianAndExplicitEdgesOnce()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var first = world.CreateSimulation(2, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = first.CreateAndRegisterChunk(default);
@@ -240,7 +239,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void WorldSolverMetadata_ParticipatesInCheckpointHashAndCompatibility()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         world.Solvers.Register(
             "authoritative-custom",
             _ => { },
@@ -266,7 +265,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void WorldSolverDefinition_CannotChangeDuringRecording()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         world.StartRecording();
 
         Assert.That(
@@ -295,7 +294,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void HostDefinedFlagBit_IsInvisibleToBuiltInTransportButVisibleToCustomSelector()
     {
-        var config = CreateConfig();
+        var config = SimConfigs.CreateNoTransportConfig();
         config.BulkFlowCoefficient = 0.25f;
         using var world = new AtmosWorld(config);
         var first = world.CreateSimulation(1, 1, 1);
@@ -339,7 +338,7 @@ public sealed class AtmosWorldSolverPipelineTests
     [Test]
     public void CreateLinksPortalAndDock_AcceptHostDefinedFlagBits()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(SimConfigs.CreateNoTransportConfig());
         var simulation = world.CreateSimulation(2, 2, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
@@ -370,20 +369,9 @@ public sealed class AtmosWorldSolverPipelineTests
         });
     }
 
-    private static AtmosConfig CreateConfig()
-    {
-        return new AtmosConfig
-        {
-            BulkFlowCoefficient = 0f,
-            DefaultDiffusionCoefficient = 0f,
-            ThermalConductance = 0f,
-            GasRegistry = [new GasProperties { Name = "TestGas", MolarHeatCapacityAtConstantVolume = 20f }]
-        };
-    }
-
     private static AtmosWorld CreateDeterministicPortalWorld(bool reversePortal)
     {
-        var config = CreateConfig();
+        var config = SimConfigs.CreateNoTransportConfig();
         config.BulkFlowCoefficient = 0.25f;
         var world = new AtmosWorld(config);
         var first = world.CreateSimulation(2, 1, 1);

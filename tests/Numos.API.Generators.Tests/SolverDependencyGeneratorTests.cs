@@ -83,7 +83,7 @@ public sealed class SolverDependencyGeneratorTests
             FireSource);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
 
         string source = GeneratorHarness.GeneratedSource(result, "MyMod.Fire.FireSolver.SolverDependencies.g.cs");
@@ -128,7 +128,7 @@ public sealed class SolverDependencyGeneratorTests
             HierarchySource);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
 
         string root = GeneratorHarness.GeneratedSource(result, "MyMod.Fire.FireSolverBase.SolverDependencies.g.cs");
@@ -203,7 +203,7 @@ public sealed class SolverDependencyGeneratorTests
             derivedSource);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string derived = GeneratorHarness.GeneratedSource(result, "Consumer.FireSolver.SolverDependencies.g.cs");
         Assert.That(
             derived,
@@ -257,7 +257,7 @@ public sealed class SolverDependencyGeneratorTests
             derivedSource);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string derived = GeneratorHarness.GeneratedSource(result, "Consumer.Derived.SolverDependencies.g.cs");
         Assert.That(
             derived,
@@ -299,7 +299,7 @@ public sealed class SolverDependencyGeneratorTests
             source);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string derived = GeneratorHarness.GeneratedSource(result, "MyMod.Derived.SolverDependencies.g.cs");
         Assert.That(derived, Does.Contain("protected override void InjectSolverDependencies("));
         Assert.That(derived, Does.Not.Contain("base.InjectSolverDependencies"));
@@ -346,7 +346,7 @@ public sealed class SolverDependencyGeneratorTests
             source);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
 
         string generated = GeneratorHarness.GeneratedSource(
@@ -384,7 +384,7 @@ public sealed class SolverDependencyGeneratorTests
             source);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(
             GeneratorHarness.GeneratedSource(result, "GlobalSolver.SolverDependencies.g.cs"),
             Does.Not.Contain("namespace"));
@@ -516,9 +516,6 @@ public sealed class SolverDependencyGeneratorTests
             Assert.That(diagnostics, Is.Empty);
         }
 
-        using var stream = new MemoryStream();
-        var emit = compilation.Emit(stream);
-        Assert.That(emit.Success, Is.True, string.Join("\n", emit.Diagnostics));
-        return MetadataReference.CreateFromImage(stream.ToArray());
+        return RoslynTestSupport.EmitToReference(compilation);
     }
 }

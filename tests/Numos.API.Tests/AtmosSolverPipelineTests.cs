@@ -85,7 +85,7 @@ public sealed class AtmosWorldPipelineTests
 
         world.Tick();
 
-        Assert.That(TotalMoles(target.Simulation, target.Chunk), Is.GreaterThan(0f));
+        Assert.That(Voxel0Moles(target.Simulation, target.Chunk), Is.GreaterThan(0f));
     }
 
     [Test]
@@ -98,8 +98,8 @@ public sealed class AtmosWorldPipelineTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(TotalMoles(source.Simulation, source.Chunk), Is.EqualTo(1f));
-            Assert.That(TotalMoles(target.Simulation, target.Chunk), Is.Zero);
+            Assert.That(Voxel0Moles(source.Simulation, source.Chunk), Is.EqualTo(1f));
+            Assert.That(Voxel0Moles(target.Simulation, target.Chunk), Is.Zero);
         });
     }
 
@@ -227,7 +227,7 @@ public sealed class AtmosWorldPipelineTests
         return world;
     }
 
-    private static float TotalMoles(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    private static float Voxel0Moles(AtmosSimulation simulation, AtmosChunkHandle chunk)
     {
         return simulation.GetVoxelSnapshot(chunk, 0).Gases.Sum(static gas => gas.Moles);
     }

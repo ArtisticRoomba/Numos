@@ -51,7 +51,7 @@ public sealed class ChunkDataGeneratorTests
             sources: [FireSource, FireUsageSource]);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
 
         string source = GeneratorHarness.GeneratedSource(result, "MyMod.Fire.FireChunkData.ChunkData.g.cs");
@@ -150,7 +150,7 @@ public sealed class ChunkDataGeneratorTests
             sources: [source]);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string initializer = GeneratorHarness.GeneratedSource(result, "NumosChunkDataModuleInitializer.g.cs");
         Assert.Multiple(() =>
         {
@@ -211,7 +211,7 @@ public sealed class ChunkDataGeneratorTests
             sources: [source]);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.HiddenData.ChunkData.g.cs");
         Assert.That(generated, Does.Contain("internal static partial class HiddenDataChunkAccessors"));
         Assert.That(generated, Does.Contain("internal global::Numos.Collections.FlatArray<byte> Flags"));
@@ -248,7 +248,7 @@ public sealed class ChunkDataGeneratorTests
             sources: [source]);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Outer+Inner.ChunkData.g.cs");
         Assert.Multiple(() =>
         {
@@ -277,7 +277,7 @@ public sealed class ChunkDataGeneratorTests
             sources: [source]);
 
         Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         string generated = GeneratorHarness.GeneratedSource(result, "GlobalData.ChunkData.g.cs");
         Assert.That(generated, Does.Not.Contain("namespace"));
         Assert.That(generated, Does.Contain("\"GlobalData.Count\""));

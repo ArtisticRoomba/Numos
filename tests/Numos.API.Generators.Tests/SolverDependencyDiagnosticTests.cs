@@ -150,7 +150,7 @@ public sealed class SolverDependencyDiagnosticTests
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP006" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
     }
 
@@ -163,7 +163,7 @@ public sealed class SolverDependencyDiagnosticTests
             Solver("[SolverDependency] private partial IService? Service { get; }"));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP006" }));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
     }
 
     [Test]
@@ -198,7 +198,7 @@ public sealed class SolverDependencyDiagnosticTests
             source);
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP007" }));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
         Assert.That(result.GeneratedSources, Has.Length.EqualTo(1));
     }
 
@@ -235,7 +235,7 @@ public sealed class SolverDependencyDiagnosticTests
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP007" }));
         Assert.That(diagnostics[0].Location.GetLineSpan().Path, Is.EqualTo("Source0.cs"));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
 
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.NotASolver.SolverDependencies.g.cs");
         Assert.That(generated, Does.Contain("__numosDependency_First").And.Contain("__numosDependency_Second"));

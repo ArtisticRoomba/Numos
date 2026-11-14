@@ -76,8 +76,8 @@ public sealed class AtmosWorldTests
         Assert.That(world.ActiveLinkCount, Is.Zero);
         world.Tick();
 
-        float sourceMoles = TotalMoles(first, source);
-        float targetMoles = TotalMoles(second, target);
+        float sourceMoles = SimMetrics.TotalMoles(first, source);
+        float targetMoles = SimMetrics.TotalMoles(second, target);
         Assert.Multiple(() =>
         {
             Assert.That(portal.Links.IsValid, Is.True);
@@ -126,13 +126,13 @@ public sealed class AtmosWorldTests
         world.Tick();
         world.DestroyLinks(handle);
         world.Tick();
-        float afterRemoval = TotalMoles(second, target);
+        float afterRemoval = SimMetrics.TotalMoles(second, target);
         world.Tick();
 
         Assert.Multiple(() =>
         {
             Assert.That(world.ActiveLinkCount, Is.Zero);
-            Assert.That(TotalMoles(second, target), Is.EqualTo(afterRemoval));
+            Assert.That(SimMetrics.TotalMoles(second, target), Is.EqualTo(afterRemoval));
             Assert.That(() => world.GetLinks(handle), Throws.ArgumentException);
             Assert.That(() => world.DestroyLinks(handle), Throws.ArgumentException);
         });
@@ -158,9 +158,9 @@ public sealed class AtmosWorldTests
 
         world.Tick();
 
-        float sourceMoles = TotalMoles(simulation, source);
-        float firstMoles = TotalMoles(simulation, firstTarget);
-        float secondMoles = TotalMoles(simulation, secondTarget);
+        float sourceMoles = SimMetrics.TotalMoles(simulation, source);
+        float firstMoles = SimMetrics.TotalMoles(simulation, firstTarget);
+        float secondMoles = SimMetrics.TotalMoles(simulation, secondTarget);
         Assert.Multiple(() =>
         {
             Assert.That(sourceMoles, Is.GreaterThanOrEqualTo(0f));
@@ -189,14 +189,14 @@ public sealed class AtmosWorldTests
 
         world.Tick();
 
-        float fullMoved = TotalMoles(simulation, fullTarget);
-        float halfMoved = TotalMoles(simulation, halfTarget);
+        float fullMoved = SimMetrics.TotalMoles(simulation, fullTarget);
+        float halfMoved = SimMetrics.TotalMoles(simulation, halfTarget);
         Assert.Multiple(() =>
         {
             Assert.That(fullMoved, Is.GreaterThan(0f));
             Assert.That(halfMoved, Is.EqualTo(fullMoved * 0.5f));
-            Assert.That(TotalMoles(simulation, fullSource) + fullMoved, Is.EqualTo(1f).Within(1e-5f));
-            Assert.That(TotalMoles(simulation, halfSource) + halfMoved, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(SimMetrics.TotalMoles(simulation, fullSource) + fullMoved, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(SimMetrics.TotalMoles(simulation, halfSource) + halfMoved, Is.EqualTo(1f).Within(1e-5f));
         });
     }
 
@@ -215,8 +215,8 @@ public sealed class AtmosWorldTests
         Assert.Multiple(() =>
         {
             Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
-            Assert.That(TotalMoles(simulation, source), Is.EqualTo(1f));
-            Assert.That(TotalMoles(simulation, target), Is.Zero);
+            Assert.That(SimMetrics.TotalMoles(simulation, source), Is.EqualTo(1f));
+            Assert.That(SimMetrics.TotalMoles(simulation, target), Is.Zero);
         });
     }
 
@@ -244,8 +244,8 @@ public sealed class AtmosWorldTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(TotalMoles(simulation, defaultTarget), Is.GreaterThan(0f));
-            Assert.That(TotalMoles(simulation, defaultTarget), Is.EqualTo(TotalMoles(simulation, sizedTarget)));
+            Assert.That(SimMetrics.TotalMoles(simulation, defaultTarget), Is.GreaterThan(0f));
+            Assert.That(SimMetrics.TotalMoles(simulation, defaultTarget), Is.EqualTo(SimMetrics.TotalMoles(simulation, sizedTarget)));
         });
     }
 
@@ -276,8 +276,8 @@ public sealed class AtmosWorldTests
 
         world.Tick();
 
-        float sourceMoles = TotalMoles(simulation, source);
-        float[] targetMoles = targets.Select(target => TotalMoles(simulation, target)).ToArray();
+        float sourceMoles = SimMetrics.TotalMoles(simulation, source);
+        float[] targetMoles = targets.Select(target => SimMetrics.TotalMoles(simulation, target)).ToArray();
         Assert.Multiple(() =>
         {
             Assert.That(sourceMoles, Is.GreaterThanOrEqualTo(0f));
@@ -403,8 +403,8 @@ public sealed class AtmosWorldTests
 
         world.Tick();
         var checkpoint = world.CaptureCheckpoint();
-        float checkpointSource = TotalMoles(first, source);
-        float checkpointTarget = TotalMoles(second, target);
+        float checkpointSource = SimMetrics.TotalMoles(first, source);
+        float checkpointTarget = SimMetrics.TotalMoles(second, target);
 
         world.Tick();
         world.DestroyLinks(handle);
@@ -418,12 +418,12 @@ public sealed class AtmosWorldTests
             Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
             Assert.That(world.TopologyVersion, Is.EqualTo(checkpoint.TopologyVersion));
             Assert.That(world.GetLinks(handle), Has.Count.EqualTo(1));
-            Assert.That(TotalMoles(first, source), Is.EqualTo(checkpointSource).Within(1e-6f));
-            Assert.That(TotalMoles(second, target), Is.EqualTo(checkpointTarget).Within(1e-6f));
+            Assert.That(SimMetrics.TotalMoles(first, source), Is.EqualTo(checkpointSource).Within(1e-6f));
+            Assert.That(SimMetrics.TotalMoles(second, target), Is.EqualTo(checkpointTarget).Within(1e-6f));
         });
 
         world.Tick();
-        Assert.That(TotalMoles(second, target), Is.GreaterThan(checkpointTarget));
+        Assert.That(SimMetrics.TotalMoles(second, target), Is.GreaterThan(checkpointTarget));
     }
 
     [Test]
@@ -454,7 +454,7 @@ public sealed class AtmosWorldTests
         Assert.Multiple(() =>
         {
             Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
-            Assert.That(TotalMoles(second, target), Is.GreaterThan(0f));
+            Assert.That(SimMetrics.TotalMoles(second, target), Is.GreaterThan(0f));
         });
     }
 
@@ -475,7 +475,7 @@ public sealed class AtmosWorldTests
 
         world.Tick();
         world.RestoreCheckpoint(checkpoint);
-        float beforeRemovalBoundary = TotalMoles(second, target);
+        float beforeRemovalBoundary = SimMetrics.TotalMoles(second, target);
 
         Assert.Multiple(() =>
         {
@@ -487,7 +487,7 @@ public sealed class AtmosWorldTests
         Assert.Multiple(() =>
         {
             Assert.That(world.ActiveLinkCount, Is.Zero);
-            Assert.That(TotalMoles(second, target), Is.EqualTo(beforeRemovalBoundary).Within(1e-6f));
+            Assert.That(SimMetrics.TotalMoles(second, target), Is.EqualTo(beforeRemovalBoundary).Within(1e-6f));
             Assert.That(() => world.GetLinks(handle), Throws.ArgumentException);
         });
     }
@@ -556,7 +556,7 @@ public sealed class AtmosWorldTests
 
         float source = local.GetVoxelSnapshot(localChunk, 0).Gases.Sum(static gas => gas.Moles);
         float ordinaryTarget = local.GetVoxelSnapshot(localChunk, 1).Gases.Sum(static gas => gas.Moles);
-        float portalTarget = TotalMoles(remote, remoteChunk);
+        float portalTarget = SimMetrics.TotalMoles(remote, remoteChunk);
         Assert.Multiple(() =>
         {
             Assert.That(source, Is.GreaterThanOrEqualTo(0f));
@@ -590,17 +590,17 @@ public sealed class AtmosWorldTests
         ]);
 
         world.Tick();
-        float transferred = TotalMoles(second, secondChunk);
+        float transferred = SimMetrics.TotalMoles(second, secondChunk);
         world.DestroyDock(dock);
         world.Tick();
-        float afterUndock = TotalMoles(second, secondChunk);
+        float afterUndock = SimMetrics.TotalMoles(second, secondChunk);
         world.Tick();
 
         Assert.Multiple(() =>
         {
             Assert.That(transferred, Is.GreaterThan(0f));
             Assert.That(world.ActiveLinkCount, Is.Zero);
-            Assert.That(TotalMoles(second, secondChunk), Is.EqualTo(afterUndock).Within(1e-6f));
+            Assert.That(SimMetrics.TotalMoles(second, secondChunk), Is.EqualTo(afterUndock).Within(1e-6f));
         });
     }
 
@@ -647,7 +647,7 @@ public sealed class AtmosWorldTests
         float observedMoles = 0f;
         world.Solvers.Register(
             "observe-explicit-flow",
-            _ => observedMoles = TotalMoles(second, target),
+            _ => observedMoles = SimMetrics.TotalMoles(second, target),
             after: AtmosBuiltInSolvers.ExplicitGasTransport);
 
         world.Tick();
@@ -787,14 +787,8 @@ public sealed class AtmosWorldTests
         AtmosSimulation simulation,
         Int3 position = default)
     {
-        var chunk = simulation.CreateAndRegisterChunk(position);
-        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        var chunk = SimSetup.CreateOpenChunk(simulation, position);
         simulation.SetVoxelTemperature(chunk, 0, 300f);
         return chunk;
-    }
-
-    private static float TotalMoles(AtmosSimulation simulation, AtmosChunkHandle chunk)
-    {
-        return simulation.GetChunkSnapshot(chunk).Gases.Sum(gas => gas.Moles.Sum());
     }
 }

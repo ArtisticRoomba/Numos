@@ -19,3 +19,6 @@ BenchmarkDotNet.Artifacts/
 
 # EmitCompilerGeneratedFiles debugging output for source generators.
 GeneratedFiles/
+
+# Baseline mismatches; see docs/testing.md.
+*.received.json

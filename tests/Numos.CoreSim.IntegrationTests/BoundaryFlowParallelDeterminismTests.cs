@@ -8,17 +8,14 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 16781892038452400983UL;
-
     /// <summary>
-    ///     The approved x64 digest for the same scenario after 0.15 s at 960 Hz (144 ticks), the default tick rate.
-    ///     Equal to the 20 Hz digest, because the legacy stages give the same state at both rates.
+    ///     The approved x64 digest for this scenario after 0.15 s at 960 Hz (144 ticks), the default tick rate.
+    ///     Equal to the 20 Hz baseline digest, because the legacy stages give the same state at both rates.
     /// </summary>
     private const ulong X64ExpectedDigest960 = 16781892038452400983UL;
 
     /// <summary>
-    ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
-    ///     <see cref="X64ExpectedDigest" />.
+    ///     Requires four runs of this scenario to produce one digest, then checks it against the baseline.
     /// </summary>
     /// <remarks>
     ///     The x64 digest came from the fully sequential <c>BoundaryFlowSolver</c> that predates <c>PendingTransferBuffer</c>.
@@ -32,19 +29,9 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     value held at 1, 2, and 32 workers.
     /// </remarks>
     [Test]
-    [Explicit(
-        "Verifies four runs at the current processor count produce one deterministic digest that also matches the " +
-        "pre-parallelization golden value on x64. Capture an Arm64 baseline before making its digest a golden value.")]
     public void BoundaryFlow_ParallelPhasesMatchGoldenHash()
     {
-        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => X64ExpectedDigest,
-            Architecture.Arm64 => null,
-            var architecture => throw new PlatformNotSupportedException(
-                $"Boundary flow parallel determinism has no digest baseline for {architecture}.")
-        };
-
+        ulong? firstDigest = null;
         for (int run = 0; run < 4; run++)
         {
             using var simulation = CreateSimulation();
@@ -52,15 +39,16 @@ public sealed class BoundaryFlowParallelDeterminismTests
             for (int tick = 0; tick < 3; tick++)
                 simulation.Tick();
 
-            ulong actualDigest = simulation.CaptureCheckpoint().ComputeStateHash();
-            expectedDigest ??= actualDigest;
+            ulong digest = simulation.CaptureCheckpoint().ComputeStateHash();
+            firstDigest ??= digest;
 
             Assert.That(
-                actualDigest,
-                Is.EqualTo(expectedDigest.Value),
-                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
-                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
+                digest,
+                Is.EqualTo(firstDigest.Value),
+                $"Run {run}; DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
         }
+
+        Baseline.Verify(new BaselineValues().Digest("stateHash", firstDigest!.Value));
     }
 
     [Test]
@@ -97,22 +85,8 @@ public sealed class BoundaryFlowParallelDeterminismTests
 
     private static AtmosSimulation CreateSimulation(int tickRate = SimTestHelpers.PinnedTickRate)
     {
-        var config = SimTestHelpers.CreateDeterministicConfig();
-        string[] gasNames = new string[4];
-        gasNames[0] = SimTestHelpers.FirstGasName;
-        gasNames[1] = SimTestHelpers.SecondGasName;
-
-        for (int gas = 0; gas < gasNames.Length; gas++)
-        {
-            gasNames[gas] ??= $"BoundaryGas{gas}";
-            if (gas >= config.GasRegistry.Count)
-                config.GasRegistry.Add(TestGases.Create(gasNames[gas], 0.01f + gas * 0.003f));
-
-            var properties = config.GasRegistry[gas];
-            properties.DiffusionCoefficient = 0.01f + gas * 0.003f;
-            properties.MolarHeatCapacityAtConstantVolume = 12f + gas;
-            config.GasRegistry.Replace(gas, properties);
-        }
+        var config = SimConfigs.CreateDeterministicConfig();
+        string[] gasNames = DeterminismScenarios.AddSteppedGases(config, 4, "BoundaryGas", 0.003f, 12f);
 
         // A 3x3x3 chunk grid gives enough source-chunk batches to exceed the parallel-dispatch threshold on realistic worker
         // counts. Every chunk touches at least one face neighbor, so boundary flow has cross-chunk work on every tick.
@@ -125,7 +99,7 @@ public sealed class BoundaryFlowParallelDeterminismTests
         for (int cx = 0; cx < gridSize; cx++)
         {
             int chunkOrdinal = cx + cy * gridSize + cz * gridSize * gridSize;
-            var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(cx, cy, cz));
+            var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(cx, cy, cz));
 
             for (int z = 0; z < chunkExtent; z++)
             for (int y = 0; y < chunkExtent; y++)

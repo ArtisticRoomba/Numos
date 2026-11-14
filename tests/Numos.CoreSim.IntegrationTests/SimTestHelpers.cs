@@ -14,12 +14,14 @@ internal static class SimTestHelpers
     /// </summary>
     internal const int PinnedTickRate = 20;
 
-    internal const string FirstGasName = "First";
-    internal const string SecondGasName = "Second";
-    internal const int FirstGasId = 0;
-    internal const int SecondGasId = 1;
-    internal const int RoomId = 1;
-    internal const float DefaultTemperature = 300f;
+    // These constants, CreateDeterministicConfig, and the wrappers at the end of the class forward to SimConfigs,
+    // SimSetup, and SimMetrics in tests/Shared. Tests that still name SimTestHelpers then get the same values.
+    internal const string FirstGasName = SimConfigs.FirstGasName;
+    internal const string SecondGasName = SimConfigs.SecondGasName;
+    internal const int FirstGasId = SimConfigs.FirstGasId;
+    internal const int SecondGasId = SimConfigs.SecondGasId;
+    internal const int RoomId = SimSetup.RoomId;
+    internal const float DefaultTemperature = SimConfigs.DefaultTemperature;
     internal const float Tolerance = 0.0001f;
     internal const float EnergyTolerance = 0.001f;
     internal const string EulerAirGasName = "Air";
@@ -30,26 +32,7 @@ internal static class SimTestHelpers
 
     internal static AtmosConfig CreateDeterministicConfig()
     {
-        return new AtmosConfig
-        {
-            DefaultTemperatureFallback = DefaultTemperature,
-            DefaultMolarHeatCapacityAtConstantVolume = 1f,
-            // Preserve the historical reduced-pressure scale in solver tests while production defaults use SI.
-            VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
-            SaturationReferencePressure = 1000f,
-            BulkFlowCoefficient = 0.25f,
-            VacuumThreshold = 0f,
-            SleepDelay = float.MaxValue,
-            SleepEpsilon = 0f,
-            ThermalConductance = 0.05f,
-            CondensationRateFactor = 0.5f,
-            MaxPressureTransferFractionPerNeighbor = 0.16f,
-            GasRegistry =
-            [
-                TestGases.Create(FirstGasName, 0f),
-                TestGases.Create(SecondGasName, 0f)
-            ]
-        };
+        return SimConfigs.CreateDeterministicConfig();
     }
 
     /// <summary>
@@ -165,19 +148,14 @@ internal static class SimTestHelpers
         AtmosSimulation simulation, Int3 position,
         VoxelClassification? classification = null)
     {
-        var chunk = simulation.CreateAndRegisterChunk(position);
-        simulation.SetChunkClassification(chunk, classification ?? new VoxelClassification(RoomId));
-        return chunk;
+        return SimSetup.CreateOpenChunk(simulation, position, classification);
     }
 
     internal static void SetAllTemperatures(
         AtmosSimulation simulation, AtmosChunkHandle chunk,
         int width, int height, int depth, float temperature = DefaultTemperature)
     {
-        for (int z = 0; z < depth; z++)
-        for (int y = 0; y < height; y++)
-        for (int x = 0; x < width; x++)
-            simulation.SetVoxelTemperature(chunk, x, y, z, temperature);
+        SimSetup.SetAllTemperatures(simulation, chunk, width, height, depth, temperature);
     }
 
     internal static int Index(int x, int y, int z, int width, int height)
@@ -187,73 +165,23 @@ internal static class SimTestHelpers
 
     internal static float Moles(AtmosChunkSnapshot snapshot, int gasId, int index)
     {
-        foreach (var gas in snapshot.Gases)
-        {
-            if (gas.GasId == gasId)
-                return gas.Moles[index];
-        }
-
-        return 0f;
+        return SimMetrics.Moles(snapshot, gasId, index);
     }
 
     internal static float TotalMoles(AtmosChunkSnapshot snapshot)
     {
-        return snapshot.Gases.Sum(gas => gas.Moles.Sum());
+        return SimMetrics.TotalMoles(snapshot);
     }
 
     internal static float TotalMoles(params AtmosChunkSnapshot[] snapshots)
     {
-        return snapshots.Sum(TotalMoles);
-    }
-
-    internal static float TotalThermalEnergy(
-        AtmosConfig config,
-        params AtmosChunkSnapshot[] snapshots)
-    {
-        return (float)TotalThermalEnergyPrecise(config, snapshots);
+        return SimMetrics.TotalMoles(snapshots);
     }
 
     internal static double TotalThermalEnergyPrecise(
         AtmosConfig config,
         params AtmosChunkSnapshot[] snapshots)
     {
-        double totalEnergy = 0d;
-        float fallbackMolarHeatCapacityAtConstantVolume =
-            float.IsFinite(config.DefaultMolarHeatCapacityAtConstantVolume) &&
-            config.DefaultMolarHeatCapacityAtConstantVolume > 0f
-                ? config.DefaultMolarHeatCapacityAtConstantVolume
-                : AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
-
-        foreach (var snapshot in snapshots)
-        {
-            for (int index = 0; index < snapshot.Temperature.Length; index++)
-            {
-                double heatCapacity = 0d;
-                foreach (var gas in snapshot.Gases)
-                {
-                    float configuredMolarHeatCapacityAtConstantVolume = gas.GasId >= 0 &&
-                                                                        gas.GasId < config.GasRegistry.Count
-                        ? config.GasRegistry[gas.GasId].MolarHeatCapacityAtConstantVolume
-                        : fallbackMolarHeatCapacityAtConstantVolume;
-
-                    float molarHeatCapacityAtConstantVolume =
-                        float.IsFinite(configuredMolarHeatCapacityAtConstantVolume) &&
-                        configuredMolarHeatCapacityAtConstantVolume > 0f
-                            ? configuredMolarHeatCapacityAtConstantVolume
-                            : fallbackMolarHeatCapacityAtConstantVolume;
-
-                    heatCapacity += (double)gas.Moles[index] * molarHeatCapacityAtConstantVolume;
-                }
-
-                float storedTemperature = snapshot.Temperature[index];
-                float effectiveTemperature = float.IsFinite(storedTemperature) && storedTemperature > 0f
-                    ? storedTemperature
-                    : config.DefaultTemperatureFallback;
-
-                totalEnergy += heatCapacity * effectiveTemperature;
-            }
-        }
-
-        return totalEnergy;
+        return SimMetrics.TotalThermalEnergyPrecise(config, snapshots);
     }
 }

@@ -29,36 +29,36 @@ public sealed class SimulationLifecycleIntegrationTests
     [Test]
     public void SleepChunk_HaltsSimulationUntilAddingGasWakesIt()
     {
-        var config = SimTestHelpers.CreateDeterministicConfig();
+        var config = SimConfigs.CreateDeterministicConfig();
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
-        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
+        var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 2f, 300f);
         simulation.SleepChunk(chunk);
 
         simulation.Tick();
         var whileSleeping = simulation.GetChunkSnapshot(chunk);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
         simulation.Tick();
         var afterInjection = simulation.GetChunkSnapshot(chunk);
 
         Assert.Multiple(() =>
         {
             Assert.That(
-                SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 0),
+                SimMetrics.Moles(whileSleeping, SimConfigs.FirstGasId, 0),
                 Is.EqualTo(2f));
 
-            Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1), Is.Zero);
+            Assert.That(SimMetrics.Moles(whileSleeping, SimConfigs.FirstGasId, 1), Is.Zero);
             Assert.That(
-                SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 0),
+                SimMetrics.Moles(afterInjection, SimConfigs.FirstGasId, 0),
                 Is.EqualTo(2.25f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
-                SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 1),
+                SimMetrics.Moles(afterInjection, SimConfigs.FirstGasId, 1),
                 Is.EqualTo(0.75f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
-                SimTestHelpers.TotalMoles(afterInjection),
+                SimMetrics.TotalMoles(afterInjection),
                 Is.EqualTo(3f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -66,11 +66,11 @@ public sealed class SimulationLifecycleIntegrationTests
     [Test]
     public void ZeroStoredTemperature_UsesConfiguredFallbackForPressureWithoutOverwritingTemperature()
     {
-        var config = SimTestHelpers.CreateDeterministicConfig();
+        var config = SimConfigs.CreateDeterministicConfig();
         config.DefaultTemperatureFallback = 123f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
-        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
+        var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 2f, 300f);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
 
         simulation.Tick();
@@ -83,7 +83,7 @@ public sealed class SimulationLifecycleIntegrationTests
                 snapshot.TotalPressure[0],
                 Is.EqualTo(246f).Within(SimTestHelpers.Tolerance));
 
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0), Is.EqualTo(2f));
+            Assert.That(SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 0), Is.EqualTo(2f));
         });
     }
 
@@ -93,7 +93,7 @@ public sealed class SimulationLifecycleIntegrationTests
         const int width = 3;
         const int height = 3;
         (int X, int Y)[] openVoxels = [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2)];
-        var config = SimTestHelpers.CreateDeterministicConfig();
+        var config = SimConfigs.CreateDeterministicConfig();
         config.SleepEpsilon = 1f;
         config.SleepDelay = 0.15f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, width, height, 1);
@@ -106,9 +106,9 @@ public sealed class SimulationLifecycleIntegrationTests
                 x,
                 y,
                 0,
-                new VoxelClassification(SimTestHelpers.RoomId));
+                new VoxelClassification(SimSetup.RoomId));
 
-            simulation.SetVoxelTemperature(chunk, x, y, 0, SimTestHelpers.DefaultTemperature);
+            simulation.SetVoxelTemperature(chunk, x, y, 0, SimConfigs.DefaultTemperature);
         }
 
         simulation.AddGasToVoxel(
@@ -116,9 +116,9 @@ public sealed class SimulationLifecycleIntegrationTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasName,
+            SimConfigs.FirstGasName,
             openVoxels.Length,
-            SimTestHelpers.DefaultTemperature);
+            SimConfigs.DefaultTemperature);
 
         for (int i = 0; i < 100; i++)
             simulation.Tick();
@@ -145,7 +145,7 @@ public sealed class SimulationLifecycleIntegrationTests
                 Is.Not.EqualTo(convergedMoles).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
-                SimTestHelpers.TotalMoles(afterWake),
+                SimMetrics.TotalMoles(afterWake),
                 Is.EqualTo(openVoxels.Length).Within(0.002f));
         });
     }
@@ -160,7 +160,7 @@ public sealed class SimulationLifecycleIntegrationTests
 
         simulation.Tick();
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.GreaterThan(1f));
+        Assert.That(SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1), Is.GreaterThan(1f));
     }
 
     [Test]
@@ -173,7 +173,7 @@ public sealed class SimulationLifecycleIntegrationTests
 
         simulation.Tick();
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.GreaterThan(1f));
+        Assert.That(SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1), Is.GreaterThan(1f));
     }
 
     [Test]
@@ -199,26 +199,26 @@ public sealed class SimulationLifecycleIntegrationTests
 
     private static AtmosSimulation CreateSleepingTwoVoxelChunk(out AtmosChunkHandle chunk)
     {
-        var config = SimTestHelpers.CreateDeterministicConfig();
+        var config = SimConfigs.CreateDeterministicConfig();
         var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
-        chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
         simulation.SleepChunk(chunk);
         return simulation;
     }
 
     private static bool IsAwakeAfterStableTicks(int stableTicks)
     {
-        var config = SimTestHelpers.CreateDeterministicConfig();
+        var config = SimConfigs.CreateDeterministicConfig();
         config.SleepDelay = 0.1f;
         config.SleepEpsilon = 0.1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
-        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
 
         for (int i = 0; i < stableTicks; i++)
             simulation.Tick();
@@ -231,9 +231,9 @@ public sealed class SimulationLifecycleIntegrationTests
         int width, int height)
     {
         return openVoxels
-            .Select(voxel => SimTestHelpers.Moles(
+            .Select(voxel => SimMetrics.Moles(
                 snapshot,
-                SimTestHelpers.FirstGasId,
+                SimConfigs.FirstGasId,
                 SimTestHelpers.Index(voxel.X, voxel.Y, 0, width, height)))
             .ToArray();
     }
