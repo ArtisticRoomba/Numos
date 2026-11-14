@@ -1,0 +1,9 @@
+{
+  "regenerate": "NUMOS_UPDATE_BASELINES=1 dotnet test tests/Numos.CoreSim.IntegrationTests/Numos.CoreSim.IntegrationTests.csproj --filter \"FullyQualifiedName~AdvectionParallelDeterminismTests.Advection_ParallelPhasesMatchGoldenHashAt960Hz\"",
+  "entries": {
+    "stateHash": {
+      "kind": "digest",
+      "x64": "0xD0D5880AA2E5CB0E"
+    }
+  }
+}

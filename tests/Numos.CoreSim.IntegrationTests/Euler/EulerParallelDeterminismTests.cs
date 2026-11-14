@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers;
@@ -22,24 +21,6 @@ namespace Numos.CoreSim.IntegrationTests.Euler;
 [NonParallelizable]
 public sealed class EulerParallelDeterminismTests
 {
-    /// <summary>
-    ///     The approved x64 digest of the blast profile after two ticks.
-    /// </summary>
-    /// <remarks>
-    ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
-    ///     stable across worker counts and schedules before approving it.
-    /// </remarks>
-    private const ulong X64ExpectedBlastDigest = 6392939173558140719UL;
-
-    /// <summary>
-    ///     The approved x64 digest of the blast profile after 0.1 s at 960 Hz, the default tick rate, with the default
-    ///     <c>euler-flow</c> interval of 16 ticks.
-    /// </summary>
-    /// <remarks>
-    ///     Same rules as <see cref="X64ExpectedBlastDigest" />.
-    /// </remarks>
-    private const ulong X64ExpectedBlastDigest960 = 12863616055034563626UL;
-
     private const int ChunkSize = 16;
     private const float Temperature = 293f;
     private const float Atmosphere = AtmosPhysicalConstants.StandardAtmosphericPressure;
@@ -61,56 +42,37 @@ public sealed class EulerParallelDeterminismTests
     }
 
     [Test]
-    [Explicit(
-        "Verifies four parallel runs produce one deterministic digest. x64 also checks the approved golden digest; " +
-        "capture an Arm64 baseline before making its digest a golden value.")]
     public void Blast_ParallelRunsMatchGoldenHash()
     {
-        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => X64ExpectedBlastDigest,
-            Architecture.Arm64 => null,
-            var architecture => throw new PlatformNotSupportedException(
-                $"The Euler blast profile has no digest baseline for {architecture}.")
-        };
-
+        ulong? firstDigest = null;
         for (int run = 0; run < 4; run++)
         {
-            ulong actualDigest = Run("blast", workerCount: null);
-            expectedDigest ??= actualDigest;
+            ulong digest = Run("blast", workerCount: null);
+            firstDigest ??= digest;
             Assert.That(
-                actualDigest,
-                Is.EqualTo(expectedDigest.Value),
-                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
-                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}; digest={actualDigest}");
+                digest,
+                Is.EqualTo(firstDigest.Value),
+                $"Run {run}; DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}; digest={digest}");
         }
+
+        Baseline.Verify(new BaselineValues().Digest("stateHash", firstDigest!.Value));
     }
 
     [Test]
-    [Explicit(
-        "Verifies four parallel runs produce one deterministic digest at 960 Hz. x64 also checks the approved golden " +
-        "digest; capture an Arm64 baseline before making its digest a golden value.")]
     public void Blast960_ParallelRunsMatchGoldenHash()
     {
-        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => X64ExpectedBlastDigest960,
-            Architecture.Arm64 => null,
-            var architecture => throw new PlatformNotSupportedException(
-                $"The Euler blast profile has no digest baseline for {architecture}.")
-        };
-
+        ulong? firstDigest = null;
         for (int run = 0; run < 4; run++)
         {
-            ulong actualDigest = Run("blast", workerCount: null, tickRate: 960);
-            TestContext.Out.WriteLine($"blast960 digest={actualDigest} (DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount})");
-            expectedDigest ??= actualDigest;
+            ulong digest = Run("blast", workerCount: null, tickRate: 960);
+            firstDigest ??= digest;
             Assert.That(
-                actualDigest,
-                Is.EqualTo(expectedDigest.Value),
-                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
-                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}; digest={actualDigest}");
+                digest,
+                Is.EqualTo(firstDigest.Value),
+                $"Run {run}; DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}; digest={digest}");
         }
+
+        Baseline.Verify(new BaselineValues().Digest("stateHash", firstDigest!.Value));
     }
 
     private static ulong Run(string profile, int? workerCount, int tickRate = SimTestHelpers.PinnedTickRate)

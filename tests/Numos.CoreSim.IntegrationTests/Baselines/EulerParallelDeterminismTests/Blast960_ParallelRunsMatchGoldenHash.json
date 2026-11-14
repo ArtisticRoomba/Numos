@@ -1,0 +1,9 @@
+{
+  "regenerate": "NUMOS_UPDATE_BASELINES=1 dotnet test tests/Numos.CoreSim.IntegrationTests/Numos.CoreSim.IntegrationTests.csproj --filter \"FullyQualifiedName~EulerParallelDeterminismTests.Blast960_ParallelRunsMatchGoldenHash\"",
+  "entries": {
+    "stateHash": {
+      "kind": "digest",
+      "x64": "0xB284BEA5CF58CC2A"
+    }
+  }
+}
