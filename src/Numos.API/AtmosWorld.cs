@@ -188,17 +188,18 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Gets the immutable physics configuration shared by every registered simulation.
     /// </summary>
+    /// <remarks>
+    ///     During a tick, it returns the configuration the tick
+    ///     started with. A change made from a solver callback applies when the tick ends.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public AtmosConfigSnapshot Config
     {
         get
         {
-            lock (Gate)
-            {
-                ThrowIfDisposed();
-                return _config;
-            }
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            return Volatile.Read(ref _config);
         }
     }
 
@@ -1404,7 +1405,7 @@ public sealed partial class AtmosWorld : IDisposable
                 GasMixtures.BeginTick(tick);
                 poolBegun = true;
 
-                solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts);
+                solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts, _config);
                 Solvers.Execute(worldSteps, solverScope);
 
                 if (_pendingConfig != null)
@@ -1892,7 +1893,7 @@ public sealed partial class AtmosWorld : IDisposable
     private void ApplyConfig(AtmosConfigSnapshot snapshot)
     {
         Debug.Assert(Monitor.IsEntered(_mixtureGate));
-        _config = snapshot;
+        Volatile.Write(ref _config, snapshot);
         foreach (var simulation in _orderedSimulations)
             simulation.Kernel.SetAtmosConfig(snapshot);
 

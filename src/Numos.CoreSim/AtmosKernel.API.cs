@@ -108,7 +108,7 @@ internal sealed partial class AtmosKernel
         {
             ArgumentNullException.ThrowIfNull(config);
             config.ValidateGasRegistry();
-            _config = config;
+            Volatile.Write(ref _config, config);
             _defaultSolvers.OnConfigChanged();
         }
     }
@@ -131,10 +131,7 @@ internal sealed partial class AtmosKernel
 
     internal AtmosConfigSnapshot GetAtmosConfig()
     {
-        lock (StateGate)
-        {
-            return _config;
-        }
+        return Volatile.Read(ref _config);
     }
 
     /// <summary>

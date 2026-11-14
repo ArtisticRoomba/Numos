@@ -689,6 +689,16 @@ Restoring a checkpoint or replay file with solver state needs a world with the s
 the same names. A file with custom solvers saves and loads like any other. Replaying it needs
 `AtmosWorldReplayTimeline.Restore` in a host that registers them. `Import` rejects it.
 
+### Threading inside a stage
+
+The tick thread holds the world lock and every simulation lock until all stages finish. A worker thread that needs
+one of those locks waits for a tick that is waiting for the worker. The result is a deadlock.
+
+Workers can read the context (`Config`, `TickCount`, `DeltaTime`, `Interval`, `Topology`, `Simulations`, chunk and
+mixture views), `World.Config`, `simulation.Config`, and `World.Services` lookups. These reads never lock. Every other
+world or simulation member belongs on the callback thread, including each mutation and `GetSolverData` (see
+"Share a `SolverDataKey`" below). A configuration change made from the callback applies when the tick ends.
+
 ## World services
 
 `world.Services` holds host objects that solvers look up by type, such as a game clock, an event bus, or a shared

@@ -260,7 +260,10 @@ public sealed class AtmosWorldSolverContext
     /// <summary>
     ///     Gets the immutable configuration captured for this tick.
     /// </summary>
-    public AtmosConfigSnapshot Config => World.Config;
+    /// <remarks>
+    ///     The read never locks, so worker threads can use it.
+    /// </remarks>
+    public AtmosConfigSnapshot Config => _solverScope.Config;
 
     /// <summary>
     ///     Gets simulations in stable registration order.

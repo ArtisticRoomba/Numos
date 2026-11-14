@@ -192,7 +192,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <remarks>
     ///     Create an editable copy with <c>new AtmosConfig(simulation.Config)</c>, then call
     ///     <see cref="SetAtmosConfig(AtmosConfig)" /> to apply it to every simulation in <see cref="World" /> through
-    ///     the deterministic operation boundary.
+    ///     the deterministic operation boundary. During a tick it returns the configuration the tick started with.
     /// </remarks>
     [PublicAPI]
     public AtmosConfigSnapshot Config

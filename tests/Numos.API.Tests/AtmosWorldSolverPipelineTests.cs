@@ -1,3 +1,4 @@
+using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -6,6 +7,46 @@ namespace Numos.API.Tests;
 [TestFixture]
 public sealed class AtmosWorldSolverPipelineTests
 {
+    [Test]
+    public void ConfigReads_FromWorkerThreads_DoNotDeadlock()
+    {
+        using var simulation = new AtmosSimulation(2, 2, 2);
+        var world = simulation.World;
+        var taskReads = new AtmosConfigSnapshot[3];
+        var parallelReads = new AtmosConfigSnapshot[64];
+        bool taskCompleted = false;
+        bool parallelCompleted = false;
+
+        world.Solvers.Register(
+            "tests/config-read",
+            context =>
+            {
+                var task = Task.Run(() =>
+                {
+                    taskReads[0] = context.Config;
+                    taskReads[1] = context.World.Config;
+                    taskReads[2] = simulation.Config;
+                });
+                taskCompleted = task.Wait(TimeSpan.FromSeconds(5));
+
+                var parallel = Task.Run(() => Parallel.For(0, parallelReads.Length, i => parallelReads[i] = context.Config));
+                parallelCompleted = parallel.Wait(TimeSpan.FromSeconds(5));
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(taskCompleted, Is.True, "Task.Run read timed out");
+            Assert.That(parallelCompleted, Is.True, "Parallel.For read timed out");
+            foreach (var read in taskReads)
+                Assert.That(read, Is.SameAs(world.Config));
+
+            foreach (var read in parallelReads)
+                Assert.That(read, Is.SameAs(world.Config));
+        });
+    }
+
     [Test]
     public void NeighborSolver_SeesCartesianAndPortalNeighborsThroughOneView()
     {

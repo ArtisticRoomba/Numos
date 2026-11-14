@@ -376,9 +376,11 @@ internal sealed class AtmosSolverTickScope
         AtmosWorld world,
         AtmosSimulation[] simulations,
         IReadOnlyList<AtmosSimulation> publicSimulations,
-        AtmosSolverExecutionContext[] contexts)
+        AtmosSolverExecutionContext[] contexts,
+        AtmosConfigSnapshot config)
     {
         World = world;
+        Config = config;
         Simulations = simulations;
         PublicSimulations = publicSimulations;
         Contexts = contexts;
@@ -394,6 +396,11 @@ internal sealed class AtmosSolverTickScope
     }
 
     internal AtmosWorld World { get; }
+
+    /// <summary>
+    ///     Gets the configuration captured when the tick began.
+    /// </summary>
+    internal AtmosConfigSnapshot Config { get; }
 
     internal AtmosSimulation[] Simulations { get; }
 
