@@ -19,7 +19,6 @@ public sealed class ThermalBoundaryFlatGridTests
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = 0.4f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, ChunkSize, ChunkSize, 1);
 

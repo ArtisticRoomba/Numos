@@ -28,7 +28,6 @@ internal static class SimConfigs
             SleepEpsilon = 0f,
             ThermalConductance = 0.05f,
             CondensationRateFactor = 0.5f,
-            MaxPressureTransferFractionPerNeighbor = 0.16f,
             GasRegistry =
             [
                 TestGases.Create(FirstGasName, 0f),

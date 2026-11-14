@@ -21,7 +21,6 @@ public sealed class SimulationStabilityTests
         config.SleepDelay = 0f;
         config.SleepEpsilon = 3.5f;
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);

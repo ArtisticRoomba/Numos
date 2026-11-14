@@ -230,7 +230,6 @@ public sealed class TopologyAndSymmetryTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = thermalConductance;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 1f;

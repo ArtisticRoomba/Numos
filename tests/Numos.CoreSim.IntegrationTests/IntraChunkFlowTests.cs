@@ -60,14 +60,15 @@ public sealed class IntraChunkFlowTests
         });
     }
 
-    [Test]
-    public void LargePressureDelta_UsesDampedFrictionFlow()
+    [TestCase(2f, 300f)]
+    [TestCase(1f, 4f)]
+    public void BulkFlow_MovesTheSameFractionOfLargeAndSmallPressureDeltas(float moles, float temperature)
     {
         var config = SimConfigs.CreateDeterministicConfig();
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 2f, 300f);
+        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1, temperature);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, moles, temperature);
 
         simulation.Tick();
 
@@ -76,48 +77,23 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.75f * moles).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1),
-                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.25f * moles).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.TotalMoles(snapshot),
-                Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(moles).Within(SimTestHelpers.Tolerance));
         });
     }
 
     [Test]
-    public void SmallPressureDelta_UsesPerNeighborFlowFraction()
-    {
-        var config = SimConfigs.CreateDeterministicConfig();
-        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
-        var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1, 4f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 4f);
-
-        simulation.Tick();
-
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.Multiple(() =>
-        {
-            Assert.That(
-                SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(0.75f).Within(SimTestHelpers.Tolerance));
-
-            Assert.That(
-                SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1),
-                Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
-        });
-    }
-
-    [Test]
-    public void PerNeighborCap_LimitsAggressiveFrictionFlow()
+    public void BulkFlowCoefficient_IsCappedAtHalf()
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 1f;
-        config.MaxPressureTransferFractionPerNeighbor = 0.1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1, 100f);
@@ -300,7 +276,8 @@ public sealed class IntraChunkFlowTests
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimSetup.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimConfigs.SecondGasName, 1f, 300f);
 
         simulation.Tick();
 
@@ -309,11 +286,14 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.995795906f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1),
-                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.00420410046f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(SimMetrics.Moles(snapshot, SimConfigs.SecondGasId, 0), Is.Zero);
+            Assert.That(SimMetrics.Moles(snapshot, SimConfigs.SecondGasId, 1), Is.EqualTo(1f));
 
             Assert.That(
                 SimMetrics.TotalMoles(snapshot),
@@ -325,7 +305,7 @@ public sealed class IntraChunkFlowTests
     public void Diffusion_CounterflowsAgainstTotalPressureWhenBulkFlowIsDisabled()
     {
         var config = SimConfigs.CreateDeterministicConfig();
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.BulkFlowCoefficient = 0f;
         var first = config.GasRegistry[SimConfigs.FirstGasId];
         first.DiffusionCoefficient = 0.1f;
         config.GasRegistry.Replace(SimConfigs.FirstGasId, first);
@@ -345,19 +325,19 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(0.996636748f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.995795906f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.FirstGasId, 1),
-                Is.EqualTo(0.00336328032f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.00420410046f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.SecondGasId, 0),
-                Is.EqualTo(0.253363281f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.00420410046f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(snapshot, SimConfigs.SecondGasId, 1),
-                Is.EqualTo(1.74663675f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.99579585f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.TotalMoles(snapshot),
@@ -492,7 +472,7 @@ public sealed class IntraChunkFlowTests
     public void Diffusion_MaximumHeatCapacityAvoidsSensibleEnergyOverflow()
     {
         var config = SimConfigs.CreateDeterministicConfig();
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.BulkFlowCoefficient = 0f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.DiffusionCoefficient = 0.1f;
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
@@ -509,11 +489,41 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 snapshot.Temperature[0],
-                Is.EqualTo(399.305878f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(399.3125f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 snapshot.Temperature[1],
-                Is.EqualTo(255.57106f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(201.936279f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
+        });
+    }
+
+    [Test]
+    public void BulkFlow_MaximumHeatCapacityAvoidsSensibleEnergyOverflow()
+    {
+        var config = SimConfigs.CreateDeterministicConfig();
+        var gas = config.GasRegistry[SimConfigs.FirstGasId];
+        gas.DiffusionCoefficient = 0f;
+        gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
+        config.GasRegistry.Replace(SimConfigs.FirstGasId, gas);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
+        var chunk = SimSetup.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimConfigs.FirstGasName, 0.5f, 200f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                snapshot.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(
+                snapshot.Temperature[1],
+                Is.EqualTo(254.545456f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
         });

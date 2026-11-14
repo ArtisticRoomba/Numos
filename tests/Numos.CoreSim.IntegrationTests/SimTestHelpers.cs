@@ -63,11 +63,10 @@ internal static class SimTestHelpers
     }
 
     /// <summary>
-    ///     A private-world simulation on the <see cref="AtmosTransportModel.Legacy" /> stages. For tests that pin the
-    ///     pressure-relaxation law's per-tick numbers or its sleep timing, and for tests that zero
-    ///     <see cref="AtmosConfig.BulkFlowCoefficient" /> and
-    ///     <see cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" /> to switch transport off.
-    ///     The <c>euler-flow</c> stage ignores both knobs.
+    ///     A private-world simulation on the <see cref="AtmosTransportModel.Legacy" /> stages. Use it for tests that
+    ///     pin the pressure-relaxation law's per-tick numbers or its sleep timing, and for tests that zero
+    ///     <see cref="AtmosConfig.BulkFlowCoefficient" /> to switch bulk flow off.
+    ///     The <c>euler-flow</c> stage ignores that setting.
     /// </summary>
     internal static AtmosSimulation CreateLegacySimulation(
         AtmosConfig config, int width, int height, int depth, int tickRate = PinnedTickRate)

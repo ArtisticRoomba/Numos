@@ -769,8 +769,7 @@ public sealed class AtmosWorldTests
         {
             ThermalConductance = 0f,
             DefaultDiffusionCoefficient = 0f,
-            BulkFlowCoefficient = 0.25f,
-            MaxPressureTransferFractionPerNeighbor = 0.25f
+            BulkFlowCoefficient = 0.25f
         };
 
         for (int gasId = 0; gasId < config.GasRegistry.Count; gasId++)

@@ -13,7 +13,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
@@ -76,7 +75,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -96,7 +94,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var hot = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         var cold = SimSetup.CreateOpenChunk(simulation, new Int3(1, 0, 0));
@@ -131,7 +128,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 0.01f;
         config.GasRegistry.Replace(SimConfigs.FirstGasId, gas);
@@ -172,7 +168,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = 1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var center = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -217,7 +212,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var first = config.GasRegistry[SimConfigs.FirstGasId];
         first.MolarHeatCapacityAtConstantVolume = 1f;
         config.GasRegistry.Replace(SimConfigs.FirstGasId, first);
@@ -237,7 +231,6 @@ public sealed class ThermodynamicsIntegrationTests
 
         simulation.Tick();
         config.BulkFlowCoefficient = 0.25f;
-        config.MaxPressureTransferFractionPerNeighbor = 0.16f;
         simulation.SetAtmosConfig(config);
         simulation.Tick();
 
@@ -276,7 +269,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 3, 3, 3);
         var source = SimSetup.CreateIsolatedVoxel(
             simulation,
@@ -338,7 +330,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 0.01f;
         config.GasRegistry.Replace(SimConfigs.FirstGasId, gas);
@@ -377,7 +368,6 @@ public sealed class ThermodynamicsIntegrationTests
         const int size = 3;
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 0.01f;
@@ -416,7 +406,6 @@ public sealed class ThermodynamicsIntegrationTests
         const int size = 4;
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = 0.7f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 2.75f;
@@ -454,7 +443,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = float.MaxValue;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
@@ -547,7 +535,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.ThermalConductance = float.MaxValue;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
@@ -581,7 +568,6 @@ public sealed class ThermodynamicsIntegrationTests
         const int height = 3;
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, width, height, 1);
         var hot = SimSetup.CreateIsolatedVoxel(
             simulation,
@@ -657,7 +643,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var hot = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -683,7 +668,6 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimSetup.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimConfigs.FirstGasName, 1f, 400f);

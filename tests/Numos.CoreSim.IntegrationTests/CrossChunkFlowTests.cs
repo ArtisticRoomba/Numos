@@ -216,7 +216,7 @@ public sealed class CrossChunkFlowTests
     public void BoundaryDiffusion_WakesTargetWhenBulkFlowIsDisabled()
     {
         var config = SimConfigs.CreateDeterministicConfig();
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.BulkFlowCoefficient = 0f;
         var gas = config.GasRegistry[SimConfigs.FirstGasId];
         gas.DiffusionCoefficient = 0.1f;
         config.GasRegistry.Replace(SimConfigs.FirstGasId, gas);
@@ -232,6 +232,9 @@ public sealed class CrossChunkFlowTests
             1f,
             SimConfigs.DefaultTemperature);
 
+        simulation.SleepChunk(target);
+        Assert.That(simulation.GetChunkSnapshot(target).IsAwake, Is.False);
+
         simulation.Tick();
 
         var sourceSnapshot = simulation.GetChunkSnapshot(source);
@@ -240,11 +243,11 @@ public sealed class CrossChunkFlowTests
         {
             Assert.That(
                 SimMetrics.Moles(sourceSnapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(0.745795906f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.995795906f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimMetrics.Moles(targetSnapshot, SimConfigs.FirstGasId, 0),
-                Is.EqualTo(0.254204094f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.00420410046f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(targetSnapshot.IsAwake, Is.True);
             Assert.That(
@@ -842,7 +845,6 @@ public sealed class CrossChunkFlowTests
     {
         var config = SimConfigs.CreateDeterministicConfig();
         config.BulkFlowCoefficient = 0f;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 100f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var pressurized = SimSetup.CreateOpenChunk(simulation, default);
