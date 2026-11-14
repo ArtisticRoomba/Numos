@@ -352,8 +352,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <remarks>
-    ///     Fractions of a fixed step carry over to later calls. One update processes at most five fixed steps and
-    ///     discards time beyond that backlog limit, so a long stall cannot start an unbounded catch-up loop.
+    ///     Fractions of a fixed step carry over to later calls. One update keeps at most a quarter second of backlog
+    ///     and discards older time, so a long stall cannot start an unbounded catch-up loop. The number of ticks that
+    ///     cap allows depends on <see cref="AtmosWorld.TickRate" />.
     ///     This method advances every simulation in the world. When the world owns several simulations, call
     ///     <see cref="AtmosWorld.Update" /> directly.
     /// </remarks>
