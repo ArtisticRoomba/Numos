@@ -64,6 +64,11 @@ version.
 The manager validates the full SemVer 2.0.0 grammar. .NET assembly metadata limits the size of each numeric
 component, so the tool rejects components that the shipping assemblies cannot represent.
 
+The fourth component of `FileVersion` encodes the prerelease. `alpha.N` maps to N, `beta.N` to 20000 + N, `rc.N` to
+40000 + N, and a stable release to 60000. A bare label counts as N = 0. The `Numos.API.Generators` assembly copies
+`FileVersion` into its `AssemblyVersion`, so each release gets a new analyzer identity and IDEs reload it. The tool
+accepts only `alpha`, `beta`, and `rc` prereleases of the form `label` or `label.N`, with N below 20000.
+
 ## Reviewing and tagging a release
 
 A version bump edits the family's `Version.props`. Review the result, build the packages, and commit before you create

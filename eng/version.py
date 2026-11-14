@@ -30,6 +30,10 @@ XML_VALUES = {
     "FileVersion": re.compile(r"(<FileVersion>)(?P<value>[^<]*)(</FileVersion>)"),
 }
 MAX_ASSEMBLY_COMPONENT = 65534
+PRERELEASE_REVISION_BASE = {"alpha": 0, "beta": 20000, "rc": 40000}
+PRERELEASE_NUMBER_LIMIT = 20000
+STABLE_REVISION = 60000
+PRERELEASE_FORM = re.compile(r"^(?P<label>[a-z]+)(?:\.(?P<number>0|[1-9][0-9]*))?$")
 
 
 class VersionError(RuntimeError):
@@ -103,6 +107,27 @@ class SemanticVersion:
         return value
 
 
+def file_revision(version: SemanticVersion) -> int:
+    """Return the fourth FileVersion component, which orders releases of one numeric version."""
+    if version.prerelease is None:
+        return STABLE_REVISION
+    match = PRERELEASE_FORM.fullmatch(version.prerelease)
+    if match is None or match["label"] not in PRERELEASE_REVISION_BASE:
+        raise VersionError(
+            f"prerelease '{version.prerelease}' must be alpha, beta, or rc, optionally followed by '.N'"
+        )
+    number = int(match["number"] or 0)
+    if number >= PRERELEASE_NUMBER_LIMIT:
+        raise VersionError(
+            f"prerelease number {number} must be below {PRERELEASE_NUMBER_LIMIT} to fit the FileVersion revision"
+        )
+    return PRERELEASE_REVISION_BASE[match["label"]] + number
+
+
+def expected_file_version(version: SemanticVersion) -> str:
+    return f"{version.major}.{version.minor}.{version.patch}.{file_revision(version)}"
+
+
 def repository_root(explicit_root: str | None = None) -> Path:
     root = Path(explicit_root).resolve() if explicit_root else Path(__file__).resolve().parent.parent
     if all((root / path).is_file() for path in COMPONENT_FILES.values()):
@@ -140,14 +165,10 @@ def write_version(path: Path, version: SemanticVersion) -> None:
     raw = path.read_bytes()
     has_bom = raw.startswith(b"\xef\xbb\xbf")
     text = raw.decode("utf-8-sig")
+    file_version = expected_file_version(version)
     text = replace_xml_value(text, "Version", str(version), path)
     text = replace_xml_value(text, "AssemblyVersion", f"{version.major}.0.0.0", path)
-    text = replace_xml_value(
-        text,
-        "FileVersion",
-        f"{version.major}.{version.minor}.{version.patch}.0",
-        path,
-    )
+    text = replace_xml_value(text, "FileVersion", file_version, path)
     encoding = "utf-8-sig" if has_bom else "utf-8"
     path.write_text(text, encoding=encoding, newline="")
 
@@ -168,7 +189,7 @@ def verify(root: Path, component: str) -> SemanticVersion:
     version = read_version(path)
     text = path.read_text(encoding="utf-8-sig")
     expected_assembly = f"{version.major}.0.0.0"
-    expected_file = f"{version.major}.{version.minor}.{version.patch}.0"
+    expected_file = expected_file_version(version)
     if read_xml_value(text, "AssemblyVersion", path) != expected_assembly:
         raise VersionError(f"{path}: AssemblyVersion must be {expected_assembly}")
     if read_xml_value(text, "FileVersion", path) != expected_file:

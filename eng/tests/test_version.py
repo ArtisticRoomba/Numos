@@ -66,9 +66,41 @@ class SemanticVersionTests(unittest.TestCase):
         self.assertEqual("1.2.3", str(current.promote()))
 
 
+class FileRevisionTests(unittest.TestCase):
+    def revision(self, value: str) -> int:
+        return version_tool.file_revision(version_tool.SemanticVersion.parse(value))
+
+    def test_maps_each_label(self) -> None:
+        self.assertEqual(1, self.revision("0.1.0-alpha.1"))
+        self.assertEqual(19999, self.revision("0.1.0-alpha.19999"))
+        self.assertEqual(20003, self.revision("0.1.0-beta.3"))
+        self.assertEqual(40007, self.revision("0.1.0-rc.7"))
+
+    def test_stable_and_bare_labels(self) -> None:
+        self.assertEqual(60000, self.revision("1.0.0"))
+        self.assertEqual(0, self.revision("0.1.0-alpha"))
+        self.assertEqual(20000, self.revision("0.1.0-beta"))
+        self.assertEqual(40000, self.revision("0.1.0-rc"))
+
+    def test_ignores_build_metadata(self) -> None:
+        self.assertEqual(2, self.revision("0.1.0-alpha.2+sha.abc"))
+        self.assertEqual(60000, self.revision("1.0.0+sha.abc"))
+
+    def test_rejects_unsupported_prereleases(self) -> None:
+        for value in ("0.1.0-preview.1", "0.1.0-alpha.1.2", "0.1.0-alpha.20000", "0.1.0-beta.20000",
+                      "0.1.0-rc.99999", "0.1.0-alpha.x", "0.1.0-1"):
+            with self.subTest(value=value):
+                with self.assertRaises(version_tool.VersionError):
+                    self.revision(value)
+
+    def test_expected_file_version_uses_revision(self) -> None:
+        version = version_tool.SemanticVersion.parse("0.1.0-alpha.2")
+        self.assertEqual("0.1.0.2", version_tool.expected_file_version(version))
+
+
 class VersionFileTests(unittest.TestCase):
     def test_write_updates_dotnet_versions_and_preserves_layout(self) -> None:
-        contents = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <PackageVersion>$(Version)</PackageVersion>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.0</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
+        contents = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <PackageVersion>$(Version)</PackageVersion>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.1</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "Version.props"
             path.write_text(contents, encoding="utf-8")
@@ -79,11 +111,11 @@ class VersionFileTests(unittest.TestCase):
         self.assertIn("<Version>2.4.6-rc.1+sha.123</Version>", updated)
         self.assertIn("<PackageVersion>$(Version)</PackageVersion>", updated)
         self.assertIn("<AssemblyVersion>2.0.0.0</AssemblyVersion>", updated)
-        self.assertIn("<FileVersion>2.4.6.0</FileVersion>", updated)
+        self.assertIn("<FileVersion>2.4.6.40001</FileVersion>", updated)
         self.assertEqual(contents.count("\n"), updated.count("\n"))
 
     def test_main_bumps_prerelease_without_changing_numeric_version(self) -> None:
-        contents = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.0</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
+        contents = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.1</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for relative_path in version_tool.COMPONENT_FILES.values():
@@ -95,11 +127,11 @@ class VersionFileTests(unittest.TestCase):
             updated = (root / version_tool.COMPONENT_FILES["coresim"]).read_text(encoding="utf-8")
 
         self.assertIn("<Version>0.1.0-alpha.2</Version>", updated)
-        self.assertIn("<FileVersion>0.1.0.0</FileVersion>", updated)
+        self.assertIn("<FileVersion>0.1.0.2</FileVersion>", updated)
 
 
 class GitReleaseTests(unittest.TestCase):
-    VERSION_FILE = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <PackageVersion>$(Version)</PackageVersion>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.0</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
+    VERSION_FILE = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <PackageVersion>$(Version)</PackageVersion>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.1</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
 
     def create_repository(self, directory: str) -> Path:
         root = Path(directory)

@@ -21,10 +21,9 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     /// <summary>
     ///     The six unit face offsets, ordered +X, -X, +Y, -Y, +Z, -Z.
     /// </summary>
-    /// <remarks>
-    ///     This is one shared array. Don't write to it.
-    /// </remarks>
-    public readonly static Int3[] CardinalOffsets =
+    public static ReadOnlySpan<Int3> CardinalOffsets => CardinalOffsetStorage;
+
+    private readonly static Int3[] CardinalOffsetStorage =
     [
         PosX, NegX, PosY, NegY, PosZ, NegZ
     ];

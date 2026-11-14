@@ -49,7 +49,7 @@ internal static class NeighborResolution
     /// <remarks>
     ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact order.
     ///     The solvers keep their own copy instead of sharing <see cref="Int3.CardinalOffsets" />.
-    ///     That array uses a different order and is publicly writable.
+    ///     That span uses a different order.
     /// </remarks>
     internal readonly static Int3[] NeighborDirections =
     [

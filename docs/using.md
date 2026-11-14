@@ -37,7 +37,7 @@ using var simulation = new AtmosSimulation(
 AtmosChunkHandle chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
 ```
 
-The `Int3` passed to `CreateAndRegisterChunk` is a position in the chunk grid, not a voxel position. A chunk handle identifies that position inside its owning simulation. It does not expose the chunk's internal arrays. Do not use a handle with another simulation, even at the same position. The behavior is undefined.
+The `Int3` passed to `CreateAndRegisterChunk` is a position in the chunk grid, not a voxel position. A chunk handle is only that position. It does not expose the chunk's internal arrays and is not bound to a simulation, so passing it to another simulation addresses that simulation's chunk at the same position. A handle kept after `UnregisterChunk` addresses whatever chunk is later registered there.
 
 Register a chunk when its world region becomes relevant. Call `UnregisterChunk` when you no longer need the chunk, which disposes it.
 
@@ -901,7 +901,7 @@ var snapshot = simulation.GetChunkSnapshot(chunk);
 var voxel = simulation.GetVoxelSnapshot(chunk, localVoxelIndex: 0);
 ```
 
-A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to skip copying gas data when the chunk has not changed. A chunk's revision advances when a supported mutation changes it, and when a solver stage that may have written it runs. Every stage except `euler-flow` advances the revision of every awake chunk before it runs, because Numos does not track what those stages write. `euler-flow` advances only the chunks it writes, so a resting chunk that it skips keeps its revision between gas and thermal stage runs. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
+A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to read a voxel only while its chunk is still at that revision. A mismatch returns `false` without copying gas data, so a tooltip never shows state newer than the frame under it. A chunk's revision advances when a supported mutation changes it, and when a solver stage that may have written it runs. Every stage except `euler-flow` and `vacuum-cleanup` advances the revision of every awake chunk before it runs, because Numos does not track what those stages write. Those two advance only the chunks they write, so a resting chunk that `euler-flow` skips keeps its revision between gas and thermal stage runs. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
 
 Velocity is derived, not stored. It is a voxel's momentum (set with `SetVoxelMomentum`) divided by the mass of the gas in the voxel. Each gas uses its `MolarMass`, or `ReferenceMolarMass` when none is registered. `GetVoxelVelocity` reads one voxel in m/s, and `AtmosChunkSnapshotFields.Velocity` adds `VelocityX`/`VelocityY`/`VelocityZ` arrays to a chunk snapshot. A vacuum voxel always reads as zero.
 

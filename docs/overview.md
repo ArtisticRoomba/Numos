@@ -6,7 +6,7 @@ The library is intended to replace the aging and techdebt-ridden `AtmosphereSyst
 Since Numos was mostly designed to be `AtmosphereSystem`'s replacement, a lot of documentation, both code and formal docs, will reference SS14 systems as talking points. In a similar vein, a lot of architecture decisions were explicitly made to combat the pains seen while working in `AtmosphereSystem`.
 
 ## Core Design
-`Numos.CoreSim` is designed to be as configurable and extensible as (reasonably) possible while still exposing a stable API surface to protect its internal datastructures and inner workings from unsafe mutation and illegal physics operations. This was a lesson largely learned from SS14, where: 
+`Numos.CoreSim` is designed to be as configurable and extensible as (reasonably) possible, while `Numos.API` is the supported surface in front of it. The API layer protects the kernel's datastructures and inner workings from unsafe mutation and illegal physics operations. This was a lesson largely learned from SS14, where: 
 - A lot of `EntitySystem`s and other logic relied heavily on system assumptions, implementation details, and direct datastructure access.
 - Breaking changes were often wide, undocumented, and hard to incorporate, leading to many forks to opt out of useful performance and code improvements simply because it was a large hassle to upgrade.
 - The system internals themselves were very hard to extend without heavy code modification.
