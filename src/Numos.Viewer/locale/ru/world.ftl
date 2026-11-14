@@ -1,5 +1,4 @@
-﻿active-links-label = АКТИВНЫЕ ССЫЛКИ
-remove-simulation-button = Удалить Симуляцию
+﻿remove-simulation-button = Удалить Симуляцию
 remove-simulation-tooltip = Удаляет выбранную симуляцию, её чанки, и все ссылки соединённые с ней.
 chunk-width-label = Ширина чанка
 chunk-height-label = Высота чанка

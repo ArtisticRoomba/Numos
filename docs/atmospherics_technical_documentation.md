@@ -2177,8 +2177,6 @@ detached operations. Each operation carries the completed world tick and a monot
 sequence. See [Deterministic replay state model](deterministic_replay.md).
 
 The host owns wire serialization of individual snapshots, transport, quantization, and client reconciliation.
-`Numos.CoreSim` also contains an internal `GasInjectionEvent` struct (position, gas, moles, temperature) that
-nothing currently uses.
 
 ---
 

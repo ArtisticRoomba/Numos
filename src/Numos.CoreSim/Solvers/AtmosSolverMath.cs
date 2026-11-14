@@ -144,26 +144,6 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the source-relative species imbalance <c>n_s - n_t · (T_t / T_s)</c>.
-    /// </summary>
-    /// <remarks>No solver currently calls this. Diffusion is driven by the source amount alone.</remarks>
-    internal static Mole CalculateMoleImbalance(
-        Mole sourceMoles, Kelvin sourceTemperature,
-        Mole targetMoles, Kelvin targetTemperature)
-    {
-        Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
-        Debug.Assert(IsFinitePositive(sourceTemperature));
-
-        // An empty target contributes zero whatever the temperature ratio.
-        // Handling it first stops 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
-        if (targetMoles == 0f)
-            return sourceMoles;
-
-        Debug.Assert(IsFinitePositive(targetTemperature));
-        return sourceMoles - targetMoles * (targetTemperature / sourceTemperature);
-    }
-
-    /// <summary>
     ///     Returns the effective conductance between two voxels: the configured conductance capped at
     ///     <c>C1·C2 / (C1 + C2)</c>.
     ///     That cap is the value that equalizes their temperatures in one step, so a transfer cannot overshoot

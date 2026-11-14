@@ -783,27 +783,6 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Determines whether an applied explicit edge touches a chunk.
-    /// </summary>
-    /// <param name="simulation">The simulation that owns the chunk.</param>
-    /// <param name="chunk">The chunk to query.</param>
-    /// <returns><see langword="true" /> when at least one active explicit edge is incident to the chunk.</returns>
-    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not registered in this world.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
-    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    [PublicAPI]
-    public bool HasExplicitLinks(AtmosSimulation simulation, AtmosChunkHandle chunk)
-    {
-        ArgumentNullException.ThrowIfNull(simulation);
-        lock (Gate)
-        {
-            ThrowIfDisposed();
-            ValidateSimulation(simulation, nameof(simulation));
-            return _activeEdgesByChunk.ContainsKey(new AtmosChunkKey(simulation.Id, chunk.Position));
-        }
-    }
-
-    /// <summary>
     ///     Captures a coherent detached continuation state for all simulations and explicit topology.
     /// </summary>
     /// <returns>A checkpoint that can restore this compatible world at an idle boundary.</returns>

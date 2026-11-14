@@ -293,14 +293,4 @@ internal sealed partial class AtmosKernel : IDisposable
     }
 
     private sealed record OrderedChunkCache(long Revision, AtmosChunk[] Chunks);
-
-    private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
-
-    private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
-
-    private readonly record struct ThermalBoundaryConductance(
-        ThermalBoundaryEdge Edge,
-        JoulePerKelvin Conductance);
-
-    private readonly record struct ThermalBoundaryState(Kelvin Temperature, JoulePerKelvin HeatCapacity);
 }

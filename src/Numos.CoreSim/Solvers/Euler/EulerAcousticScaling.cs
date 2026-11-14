@@ -114,10 +114,10 @@ internal static class EulerAcousticScaling
     /// </summary>
     /// <remarks>
     ///     The jump follows the faces the sweep solves. An interior face counts when both open bits agree, which the
-    ///     face masks already encode together with voxel face blocking. A chunk face counts against the neighbour's
-    ///     gathered pressure when it has a workspace and against its live pressure when it has none, as the sweep and
-    ///     the wake scan do. A face into a void cell compares with zero. A trace or vacuum cell already gathers as
-    ///     pressure zero. Reads other workspaces' read buffers only, and writes only this workspace.
+    ///     face masks already encode. A chunk face counts against the neighbour's gathered pressure when it has a
+    ///     workspace and against its live pressure when it has none, as the sweep and the wake scan do. A face into a
+    ///     void cell compares with zero. A trace or vacuum cell already gathers as pressure zero. Reads other
+    ///     workspaces' read buffers only, and writes only this workspace.
     /// </remarks>
     internal static void Measure(EulerChunkWorkspace workspace)
     {
