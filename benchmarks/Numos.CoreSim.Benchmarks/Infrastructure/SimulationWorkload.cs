@@ -19,8 +19,8 @@ internal sealed class SimulationWorkload : IDisposable
     ///     Moles every active voxel starts with, split evenly over the injected gases before the gradients scale it.
     /// </summary>
     internal const float VoxelMoles = 20f;
-    private readonly DefaultAtmosSolvers _solvers;
     private readonly BenchmarkSolverStep? _boundaryFlowStep;
+    private readonly DefaultAtmosSolvers _solvers;
 
     internal SimulationWorkload(int chunks, int activeVoxels, int gases, bool reactions = false, bool condensation = false)
         : this(
@@ -42,8 +42,11 @@ internal sealed class SimulationWorkload : IDisposable
         if (options.AwakeChunkCount > options.RegisteredChunkCount)
             throw new ArgumentException("Awake chunks cannot exceed registered chunks.", nameof(options));
 
-        if (options.GasCount <= 0 || options.CondensingGasCount < 0 || options.CondensingGasCount > options.GasCount ||
-            options.InjectedGasCount <= 0 || options.InjectedGasCount > options.GasCount)
+        if (options.GasCount <= 0 ||
+            options.CondensingGasCount < 0 ||
+            options.CondensingGasCount > options.GasCount ||
+            options.InjectedGasCount <= 0 ||
+            options.InjectedGasCount > options.GasCount)
             throw new ArgumentException("Gas dimensions are invalid.", nameof(options));
 
         if (options.ActiveVoxelCount is < 0 or > AtmosChunkConstants.MaximumVoxelCount)
@@ -54,6 +57,7 @@ internal sealed class SimulationWorkload : IDisposable
         {
             TransportModel = options.TransportModel
         };
+
         _solvers = new DefaultAtmosSolvers(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
         var config = CreateConfig(options);
         Kernel.SetAtmosConfig(config.CreateSnapshot());
@@ -71,24 +75,30 @@ internal sealed class SimulationWorkload : IDisposable
         {
             case AtmosTransportModel.Legacy:
                 // Advection reads the caches derived-refresh rebuilds, so the step times the two stages together.
+                // AtmosKernel.TickSimulation marks the awake chunks changed between these two stages too. Without that,
+                // the refreshed mole totals fail the revision check and advection sums the moles itself.
                 FlowStep = new BenchmarkSolverStep(
                     "advection",
                     context =>
                     {
                         DefaultAtmosSolvers.SolveDerivedRefresh(context);
+                        context.MarkAwakeChunksChanged();
                         _solvers.SolveAdvection(context);
                     });
+
                 _boundaryFlowStep = new BenchmarkSolverStep("boundary-flow", _solvers.SolveBoundaryFlow);
                 Steps =
                 [
                     FlowStep, vacuumCleanupStep, _boundaryFlowStep.Value, ThermodynamicsStep, ThermalBoundaryStep,
                     ReactionsStep
                 ];
+
                 break;
             case AtmosTransportModel.Euler:
                 FlowStep = new BenchmarkSolverStep(
                     "euler-flow",
                     context => LastFlowDiagnostics = _solvers.SolveEulerFlow(context));
+
                 Steps = [FlowStep, vacuumCleanupStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
                 break;
             default:
@@ -165,14 +175,14 @@ internal sealed class SimulationWorkload : IDisposable
     }
 
     /// <summary>
-    ///     Installs a checkpoint captured from this workload at <see cref="InitialTickCount" /> and drops solver
-    ///     scratch state, exactly as <see cref="Reset" /> does for <see cref="Initial" />.
+    ///     Installs a checkpoint captured from this workload at <see cref="InitialTickCount" /> and calls
+    ///     <see cref="DefaultAtmosSolvers.ClearTransientState" />, exactly as <see cref="Reset" /> does for
+    ///     <see cref="Initial" />.
     /// </summary>
     internal void Restore(AtmosSimulationCheckpoint checkpoint)
     {
         Kernel.RestoreCheckpoint(checkpoint, InitialTickCount);
         _solvers.ClearTransientState();
-        Config.SolverData.Clear();
         RefreshContext();
     }
 
