@@ -5,7 +5,7 @@ namespace Numos.Tests.Baselines;
 
 /// <summary>
 ///     Everything the comparison needs to know about the test and its environment. <see cref="Baseline" /> builds one
-///     from the running NUnit test; the mechanism's own tests build one over a temporary directory.
+///     from the running NUnit test. The mechanism's own tests build one over a temporary directory.
 /// </summary>
 internal sealed class BaselineContext
 {
@@ -59,9 +59,10 @@ internal readonly record struct BaselineVerdict(BaselineOutcome Outcome, string 
 ///         regenerate run and the diff is reviewable either way.
 ///     </para>
 ///     <para>
-///         A missing file, entry, or architecture slot is a warning rather than a failure. That is what lets an arm64 CI
-///         leg run a digest test that only has an x64 baseline: the test's own self-consistency checks still run, and
-///         the received file it uploads becomes the arm64 baseline.
+///         A missing file, entry, or architecture slot is a warning locally and a failure when <c>CI</c> is set.
+///         Locally, a developer can run a new test before its baseline exists. Either way the engine writes the
+///         received file first. A new architecture's values come from that leg's uploaded received file, which becomes
+///         the baseline.
 ///     </para>
 /// </remarks>
 internal static class BaselineEngine
@@ -70,6 +71,10 @@ internal static class BaselineEngine
 
     // Arrays can be long, and the first few bad elements are enough to see what moved.
     private const int MaxRowsPerKey = 24;
+
+    private const string ArchitectureHint =
+        "\nA new architecture's values come from that leg's received-baselines-<os> CI artifact " +
+        "(copy the received file over the baseline).";
 
     internal static BaselineVerdict Verify(BaselineValues values, BaselineContext context, string? guard = null)
     {
@@ -119,13 +124,16 @@ internal static class BaselineEngine
             return new BaselineVerdict(BaselineOutcome.Updated, $"baseline updated: {context.BaselinePath}");
         }
 
+        bool strict = IsContinuousIntegration(context);
+        BaselineOutcome missingOutcome = strict ? BaselineOutcome.Failed : BaselineOutcome.Warning;
+
         if (existing is null)
         {
             WriteReceived(context, updatedText);
             return new BaselineVerdict(
-                BaselineOutcome.Warning,
+                missingOutcome,
                 $"No baseline at {context.BaselinePath}. Wrote {context.ReceivedPath}; check the values, then run " +
-                $"this to accept them:\n  {regenerate}");
+                $"this to accept them:\n  {regenerate}{(strict ? ArchitectureHint : "")}");
         }
 
         var missing = new List<string>();
@@ -145,9 +153,10 @@ internal static class BaselineEngine
         {
             WriteReceived(context, updatedText);
             return new BaselineVerdict(
-                BaselineOutcome.Warning,
+                missingOutcome,
                 $"Baseline {context.BaselinePath} has no {context.Architecture} value for {string.Join(", ", missing)}. " +
-                $"Wrote {context.ReceivedPath}; check the values, then run this to accept them:\n  {regenerate}");
+                $"Wrote {context.ReceivedPath}; check the values, then run this to accept them:\n  {regenerate}" +
+                (strict ? ArchitectureHint : ""));
         }
 
         DeleteReceived(context);

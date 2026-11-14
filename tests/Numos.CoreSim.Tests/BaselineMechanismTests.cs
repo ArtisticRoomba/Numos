@@ -186,7 +186,7 @@ public sealed class BaselineMechanismTests
     }
 
     [Test]
-    public void DigestMissingForArchitecture_WarnsAndWritesReceived()
+    public void DigestMissingForArchitecture_WarnsLocallyAndWritesReceived()
     {
         WriteBaseline("""
                       { "entries": { "hash": { "kind": "digest", "x64": "0x0000000000000001" } } }
@@ -213,7 +213,7 @@ public sealed class BaselineMechanismTests
     }
 
     [Test]
-    public void MissingFileOrEntry_WarnsWithoutFailing()
+    public void MissingFileOrEntry_WarnsLocallyWithoutFailing()
     {
         Assert.That(Run(Single(1f)).Outcome, Is.EqualTo(BaselineOutcome.Warning));
         Assert.That(File.Exists(BaselinePath), Is.False);
@@ -224,6 +224,50 @@ public sealed class BaselineMechanismTests
 
         Assert.That(verdict.Outcome, Is.EqualTo(BaselineOutcome.Warning));
         Assert.That(verdict.Message, Does.Contain("added"));
+    }
+
+    [Test]
+    public void MissingFileOnCi_FailsAndWritesReceivedWithoutBaseline()
+    {
+        var verdict = Run(Single(1f), Env(("CI", "true")));
+
+        Assert.That(verdict.Outcome, Is.EqualTo(BaselineOutcome.Failed));
+        Assert.That(verdict.Message, Does.Contain(ReceivedPath));
+        Assert.That(verdict.Message, Does.Contain("NUMOS_UPDATE_BASELINES=1 dotnet test"));
+        Assert.That(verdict.Message, Does.Contain("received-baselines-<os>"));
+        Assert.That(File.Exists(BaselinePath), Is.False);
+        Assert.That(File.Exists(ReceivedPath), Is.True);
+    }
+
+    [Test]
+    public void MissingEntryOnCi_FailsAndNamesTheEntry()
+    {
+        Run(Single(1f), Update());
+
+        var verdict = Run(Single(1f).Float("added", 2f, BaselineTolerance.Exact), Env(("CI", "true")));
+
+        Assert.That(verdict.Outcome, Is.EqualTo(BaselineOutcome.Failed));
+        Assert.That(verdict.Message, Does.Contain("added"));
+        Assert.That(verdict.Message, Does.Contain(ReceivedPath));
+        Assert.That(File.Exists(ReceivedPath), Is.True);
+    }
+
+    [Test]
+    public void DigestMissingForArchitectureOnCi_FailsAndReceivedKeepsOtherArchitecture()
+    {
+        WriteBaseline("""
+                      { "entries": { "hash": { "kind": "digest", "x64": "0x0000000000000001" } } }
+                      """);
+
+        var verdict = Run(new BaselineValues().Digest("hash", 2), Env(("CI", "1")), architecture: "arm64");
+
+        Assert.That(verdict.Outcome, Is.EqualTo(BaselineOutcome.Failed));
+        Assert.That(verdict.Message, Does.Contain("no arm64 value for hash"));
+        Assert.That(verdict.Message, Does.Contain("received-baselines-<os>"));
+        var received = BaselineDocument.Parse(File.ReadAllText(ReceivedPath)).Entries["hash"].Slots;
+        Assert.That(received.Keys, Is.EqualTo(new[] { "arm64", "x64" }));
+        Assert.That(received["x64"].Digest, Is.EqualTo(1UL));
+        Assert.That(received["arm64"].Digest, Is.EqualTo(2UL));
     }
 
     [Test]
@@ -370,9 +414,132 @@ public sealed class BaselineMechanismTests
         Assert.That(Baseline.SanitizeFileName(name), Is.EqualTo(expected));
     }
 
+    [Test]
+    public void FindOrphans_ExactMatchIsNotAnOrphan()
+    {
+        WriteFile("SampleFixture/SampleTest.json");
+
+        Assert.That(BaselineInventory.FindOrphans(BaselineRoot, [Named("SampleFixture", "SampleTest")]), Is.Empty);
+    }
+
+    [Test]
+    public void FindOrphans_RenamedMethodIsAnOrphan()
+    {
+        WriteFile("SampleFixture/SampleTest.json");
+
+        var orphans = BaselineInventory.FindOrphans(BaselineRoot, [Named("SampleFixture", "RenamedTest")]);
+
+        Assert.That(orphans, Is.EqualTo(new[] { "SampleFixture/SampleTest.json" }));
+    }
+
+    [Test]
+    public void FindOrphans_WrongFixtureDirectoryIsAnOrphan()
+    {
+        WriteFile("OldFixture/SampleTest.json");
+
+        var orphans = BaselineInventory.FindOrphans(BaselineRoot, [Named("SampleFixture", "SampleTest")]);
+
+        Assert.That(orphans, Is.EqualTo(new[] { "OldFixture/SampleTest.json" }));
+    }
+
+    [TestCase(true, 0)]
+    [TestCase(false, 1)]
+    public void FindOrphans_ParameterizedPrefixMatchesOnlyWithParameters(bool hasParameters, int expectedOrphans)
+    {
+        WriteFile("SampleFixture/SampleTest_1.5f_a_b.json");
+
+        var orphans = BaselineInventory.FindOrphans(
+            BaselineRoot,
+            [new BaselineTestName("SampleFixture", "SampleTest", hasParameters)]);
+
+        Assert.That(orphans, Has.Count.EqualTo(expectedOrphans));
+    }
+
+    [Test]
+    public void FindOrphans_PrefixNeedsTheUnderscoreSeparator()
+    {
+        WriteFile("SampleFixture/SampleTestOther.json");
+
+        var orphans = BaselineInventory.FindOrphans(
+            BaselineRoot,
+            [new BaselineTestName("SampleFixture", "SampleTest", HasParameters: true)]);
+
+        Assert.That(orphans, Is.EqualTo(new[] { "SampleFixture/SampleTestOther.json" }));
+    }
+
+    [Test]
+    public void FindOrphans_IgnoresReceivedFiles()
+    {
+        WriteFile("SampleFixture/SampleTest.received.json");
+        WriteFile("Nowhere/Missing.received.json");
+
+        Assert.That(BaselineInventory.FindOrphans(BaselineRoot, []), Is.Empty);
+    }
+
+    [Test]
+    public void FindOrphans_FileInRootOrTwoLevelsDownIsAnOrphan()
+    {
+        WriteFile("SampleTest.json");
+        WriteFile("SampleFixture/Nested/SampleTest.json");
+
+        var orphans = BaselineInventory.FindOrphans(BaselineRoot, [Named("SampleFixture", "SampleTest")]);
+
+        Assert.That(orphans, Is.EqualTo(new[] { "SampleFixture/Nested/SampleTest.json", "SampleTest.json" }));
+    }
+
+    [Test]
+    public void FindOrphans_MissingRootReturnsEmpty()
+    {
+        Assert.That(BaselineInventory.FindOrphans(BaselineRoot, [Named("SampleFixture", "SampleTest")]), Is.Empty);
+    }
+
+    [Test]
+    public void FindOrphans_IgnoresFilesThatAreNotJson()
+    {
+        WriteFile("SampleFixture/notes.txt");
+
+        Assert.That(BaselineInventory.FindOrphans(BaselineRoot, []), Is.Empty);
+    }
+
+    [Test]
+    public void DiscoverTests_FindsTestsAndCasesOfThisAssembly()
+    {
+        var tests = BaselineInventory.DiscoverTests(typeof(BaselineMechanismTests).Assembly).ToList();
+        const string fixture = nameof(BaselineMechanismTests);
+
+        Assert.That(
+            tests,
+            Does.Contain(new BaselineTestName(fixture, nameof(DiscoverTests_FindsTestsAndCasesOfThisAssembly), false)));
+        Assert.That(
+            tests,
+            Does.Contain(new BaselineTestName(fixture, nameof(UpdateFilter_MatchesTestFullName), true)));
+    }
+
+    [TestCase("Numos.CoreSim.Tests.GasReactionTests", "GasReactionTests")]
+    [TestCase("Numos.CoreSim.Tests.Outer+Inner", "Outer_Inner")]
+    [TestCase("TopLevel", "TopLevel")]
+    public void FixtureName_TakesTextAfterLastDotAndSanitizes(string className, string expected)
+    {
+        Assert.That(Baseline.FixtureName(className), Is.EqualTo(expected));
+    }
+
     private string BaselinePath => Path.Combine(_directory, "Baselines", "SampleFixture", "SampleTest.json");
 
     private string ReceivedPath => Path.ChangeExtension(BaselinePath, ".received.json");
+
+    private string BaselineRoot => Path.Combine(_directory, "Baselines");
+
+    private static BaselineTestName Named(string fixture, string method)
+    {
+        return new BaselineTestName(fixture, method, HasParameters: false);
+    }
+
+    private void WriteFile(string relativePath)
+    {
+        string path = Path.Combine(BaselineRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{}");
+    }
 
     private static BaselineValues Single(float value)
     {

@@ -16,8 +16,8 @@ that the answer moved. When one of these fails, someone has to decide whether th
 
 Use a contract whenever you can say what the answer should be. Reach for a baseline when the scenario is too tangled to
 predict by hand, or when bit-exact determinism is the thing under test. A baseline test should still run its own cheap
-sanity checks first (no NaNs, every parallel run agrees with the others), because on an architecture with no baseline
-those checks are all that can fail.
+sanity checks first (no NaNs, every parallel run agrees with the others), because a local run on an architecture with
+no baseline has nothing else to fail on.
 
 ## Writing a baseline test
 
@@ -39,8 +39,13 @@ A mismatch fails with one table (key, expected, actual, delta, ULP distance) and
 the baseline. That file is the whole baseline as it would look if you accepted the new values. `*.received.json` is
 gitignored, and a passing run deletes any stale one.
 
-A missing file, entry, or architecture value doesn't fail. The test warns (NUnit reports it as skipped) and writes the
-received file so you can review and commit it.
+A missing file, entry, or architecture value warns when you run locally, and NUnit reports the test as skipped. When
+`CI` is set, the same condition fails the test. Either way the test writes the received file, so you can review and
+commit it.
+
+Each baseline-enabled project also runs `BaselineInventoryTests`. It fails when a file under `Baselines/` belongs to no
+test. A baseline is found by fixture and test name, so renaming a test or fixture means moving its baseline in the same
+change.
 
 ## Regenerating baselines
 
@@ -75,6 +80,11 @@ and `arm64` overrides. Floats and text use `default` unless an entry already car
 mode writes the current architecture's override. Digests are always stored per architecture and never fall back to
 `default`.
 
-The only arm64 machine available is the macOS CI leg. To capture its values, let it run (it warns rather than fails on
-a missing arm64 digest), download the `received-baselines-macos-latest` artifact, and copy each `.received.json` over
-the matching baseline. The received file keeps the existing x64 values alongside the new arm64 ones.
+The Linux and Windows CI legs both use the `x64` slot. The only arm64 machine available is the macOS CI leg, and it
+fails on a missing arm64 digest. Adding a digest test is therefore a two-step change:
+
+1. Generate the x64 baseline locally and commit it.
+2. Let CI fail on macOS. Download the `received-baselines-macos-latest` artifact, then copy each `.received.json` over
+   the matching baseline.
+
+The received file keeps the existing x64 values alongside the new arm64 ones.

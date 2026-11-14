@@ -3,6 +3,7 @@
   "entries": {
     "stateHash": {
       "kind": "digest",
+      "arm64": "0x649830DD6F29CB3B",
       "x64": "0xE8E541E50AE95357"
     }
   }
