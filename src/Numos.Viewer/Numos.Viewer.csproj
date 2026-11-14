@@ -16,7 +16,6 @@
         <PackageTags>simulation;atmospherics;visualization;raylib;imgui;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <GenerateNumosBuildInfo>true</GenerateNumosBuildInfo>
-        <NumosReleaseTagPrefix>viewer</NumosReleaseTagPrefix>
         <NumosSourceReference Condition="'$(ViewerSourceReference)' != ''">$(ViewerSourceReference)</NumosSourceReference>
     </PropertyGroup>
 

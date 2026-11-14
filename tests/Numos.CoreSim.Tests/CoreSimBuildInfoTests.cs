@@ -24,4 +24,17 @@ public class CoreSimBuildInfoTests
             });
         }
     }
+
+    [Test]
+    public void InformationalVersionRevisionMatchesGitCommit()
+    {
+        // The SDK appends the build's source revision after the first "+", so a mismatch means the commit was overridden.
+        string version = CoreSimBuildInfo.InformationalVersion;
+        int plus = version.IndexOf('+');
+
+        if (plus >= 0)
+        {
+            Assert.That(version[(plus + 1)..], Is.EqualTo(CoreSimBuildInfo.GitCommit));
+        }
+    }
 }
