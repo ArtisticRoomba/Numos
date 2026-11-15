@@ -457,7 +457,7 @@ internal sealed class AtmosSolverTickScope
         {
             throw new InvalidOperationException(
                 "This solver view belongs to a tick that has ended. Request a new view from the solver context " +
-                "on each callback, or use AtmosSimulation.GetChunkField outside a tick.");
+                "on each callback, or use AtmosSimulation.TryGetChunkField outside a tick.");
         }
     }
 

@@ -231,7 +231,8 @@ public sealed partial class AtmosChunkCheckpoint;
 
 The generator fills the snapshot with one get-only member per marked live member. It also writes `Capture(live)` and the
 state walker (equality, hash, wire read and write). Where every member can be put back, it writes `RestoreInto(live)`.
-To add chunk state, mark the live member:
+On a capture-only snapshot, `RestoreInto` is a stub. A call to it is a build error (CS0619) whose message names the
+first member that blocks the restore. To add chunk state, mark the live member:
 
 ```csharp
 // In AtmosChunk:
@@ -337,7 +338,10 @@ registered fields in different orders still produce identical checkpoint content
 
 Values use the exact element representation, including floating-point bits and custom struct padding. Compatible solvers
 need matching types, layout, and runtime byte order. Direct writes outside solver callbacks are not recorded operations.
-Initialize such state before the starting checkpoint, then update it as deterministic solver work.
+The supported API gives host code only a read-only view, `AtmosSimulation.TryGetChunkField`, and that view never
+allocates storage. A host that must write goes through `AtmosSimulation.Dangerous().GetChunkField`, which bypasses
+recording and creates the storage on first use. Creating a rollback field's storage changes the next checkpoint and
+state hash. Initialize such state before the starting checkpoint, then update it as deterministic solver work.
 
 ## Solver state is checkpointed and recorded
 

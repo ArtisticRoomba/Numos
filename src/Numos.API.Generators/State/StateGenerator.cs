@@ -91,7 +91,8 @@ public sealed class StateGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     A cheap syntactic filter: does this declaration itself mark a field, property, or positional parameter?
+    ///     A cheap syntactic filter: does this declaration itself mark a field, property, indexer, or positional
+    ///     parameter? Indexers can't hold state, but the transform reports a marked one.
     /// </summary>
     /// <remarks>
     ///     Matches on the attribute's simple name, so an alias of the attribute isn't seen. The transform confirms the
@@ -110,7 +111,8 @@ public sealed class StateGenerator : IIncrementalGenerator
 
         foreach (MemberDeclarationSyntax member in declaration.Members)
         {
-            if (member is FieldDeclarationSyntax or PropertyDeclarationSyntax && HasSerializeName(member.AttributeLists))
+            if (member is FieldDeclarationSyntax or PropertyDeclarationSyntax or IndexerDeclarationSyntax &&
+                HasSerializeName(member.AttributeLists))
                 return true;
         }
 
@@ -170,6 +172,13 @@ public sealed class StateGenerator : IIncrementalGenerator
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             (INamedTypeSymbol current, bool isPartial) = chain[i];
+            if (current.IsFileLocal)
+            {
+                // The hint name would carry the mangled metadata name, and a generated partial can't reopen the type anyway.
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.FileLocal, typeLocation, typeDisplayName));
+                return Skipped(type, diagnostics);
+            }
+
             if (!isPartial)
             {
                 diagnostics.Add(
@@ -248,10 +257,13 @@ public sealed class StateGenerator : IIncrementalGenerator
         foreach (ISymbol member in type.GetMembers())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
+            if (StateSymbols.ReportUnsupportedMark(member, typeDisplayName, location, diagnostics))
+                canGenerate = false;
+
             if (!StateSymbols.TryGetMember(type, member, out ITypeSymbol? memberType, out bool hasStorage))
                 continue;
 
-            LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
             SerializedMember? parsed = SerializedMember.TryParse(
                 member, StateSymbols.FindSerialize(member), hasStorage, typeDisplayName, location, WireNameChecks.None,
                 ids, diagnostics);

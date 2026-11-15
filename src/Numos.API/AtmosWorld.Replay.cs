@@ -9,13 +9,21 @@ public sealed partial class AtmosWorld
 {
     private readonly List<AtmosWorldRecordedOperation> _recordedWorldOperations = [];
     private readonly object _recordingGate = new();
+    [NumosIgnore]
     private bool _hasWorldRecording;
+    [NumosIgnore]
     private bool _isApplyingWorldOperation;
+    [NumosIgnore]
     private bool _isReplayingWorld;
+    [NumosIgnore]
     private bool _isWorldRecording;
+    [NumosIgnore]
     private ulong _lastWorldOperationSequence;
+    [NumosIgnore]
     private AtmosWorldStateHash? _stoppedWorldRecordingHash;
+    [NumosIgnore]
     private AtmosTimelinePosition _worldRecordingHead;
+    [NumosIgnore]
     private AtmosTimelinePosition _worldRecordingStart;
 
     /// <summary>

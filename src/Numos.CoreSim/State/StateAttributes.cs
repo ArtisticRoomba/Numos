@@ -20,9 +20,10 @@ namespace Numos.CoreSim.State;
 ///         Two names in one type that hash to the same id fail the build.
 ///     </para>
 ///     <para>
-///         A mutable instance member on a participating type with neither this attribute nor
-///         <see cref="NumosIgnoreAttribute" /> is a build warning. A new setting therefore cannot quietly miss the hash.
-///         The generator assumes readonly fields and get-only auto-properties are derived caches and does not flag them.
+///         A mutable instance member with neither this attribute nor <see cref="NumosIgnoreAttribute" /> is a build
+///         warning. That holds on a participating type and on the live type of a
+///         <see cref="NumosSnapshotOfAttribute" /> snapshot. A new setting therefore cannot quietly miss the hash. The
+///         generator assumes readonly fields and get-only auto-properties are derived caches and does not flag them.
 ///     </para>
 ///     <para>
 ///         Supported types are <see langword="bool" />, the integer types, <see langword="float" />,
@@ -144,6 +145,12 @@ public sealed class NumosSerializeAttribute : Attribute
 ///         type needs no attribute and does not have to be partial. It must be a class in the same project.
 ///     </para>
 ///     <para>
+///         An unmarked mutable member of the live type is a build warning, as on a participating type. Mark it
+///         <see cref="NumosIgnoreAttribute" /> when the restore rebuilds it, when it is runtime-only, or when a marked
+///         adapter property saves it. A member that a <see cref="NumosSerializeAttribute.Count" /> argument names needs
+///         neither attribute, because the snapshot saves and restores it.
+///     </para>
+///     <para>
 ///         How a member is captured depends on what it is. Fields and auto-properties of immutable types (primitives,
 ///         enums, strings, <c>Int3</c>, quantity aliases, and immutable serializable types) are copied by value.
 ///         Arrays and <c>FlatArray&lt;T&gt;</c> of such elements are copied into an
@@ -159,7 +166,10 @@ public sealed class NumosSerializeAttribute : Attribute
 ///         the live type. Arrays are copied into the live arrays, and their lengths must match. Settable members are assigned.
 ///         Read-only value members (such as dimensions) must already match. Nothing is written until every check
 ///         has passed. Members that only the owner can rebuild, such as a list of live children, make the snapshot
-///         capture-only. The owner then creates the live objects and calls the <c>RestoreInto</c> of the children itself.
+///         capture-only. So do a get-only reference member and a nested snapshot that is capture-only. The owner then
+///         creates the live objects and calls the <c>RestoreInto</c> of the children itself. A capture-only snapshot
+///         still has a <c>RestoreInto</c>, but a call to it fails the build (CS0619). The error message names the first
+///         member that blocks the restore.
 ///     </para>
 ///     <para>
 ///         To give a generated member different visibility or its own docs, declare it on the snapshot as a get-only
@@ -200,12 +210,15 @@ public sealed class NumosSnapshotOfAttribute(Type liveType) : Attribute
 }
 
 /// <summary>
-///     Says a field or property of a type with <see cref="NumosSerializeAttribute" /> members is deliberately not
-///     state, which silences the warning for an unmarked mutable member.
+///     Says a field or property of a type with <see cref="NumosSerializeAttribute" /> members, or of the live type of a
+///     <see cref="NumosSnapshotOfAttribute" /> snapshot, is deliberately not state. That silences the warning for an
+///     unmarked mutable member.
 /// </summary>
 /// <remarks>
-///     For derived caches rebuilt from the marked members, scratch buffers, and the like. Anything that changes solver
-///     behavior on its own belongs in a <see cref="NumosSerializeAttribute" /> member instead, or replay will diverge.
+///     For derived caches rebuilt from the marked members, scratch buffers, and runtime-only flags. It also fits a
+///     private field that a marked adapter property saves and restores, such as the storage behind a hand-written
+///     getter. Anything that changes solver behavior on its own belongs in a <see cref="NumosSerializeAttribute" />
+///     member instead, or replay will diverge.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
 public sealed class NumosIgnoreAttribute : Attribute;

@@ -206,8 +206,11 @@ public sealed class SnapshotGeneratorTests
             Assert.That(snapshot.Tanks[1].Pressure, Is.EqualTo(4f));
             Assert.That(NumosState.ComputeHash(read), Is.EqualTo(NumosState.ComputeHash(snapshot)));
             Assert.That(NumosState.ComputeHash(PlantSnapshot.Capture(restored)), Is.EqualTo(NumosState.ComputeHash(snapshot)));
-            Assert.That(typeof(PlantSnapshot).GetMethod("RestoreInto", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance),
-                Is.Null);
+            System.Reflection.MethodInfo? restore = typeof(PlantSnapshot).GetMethod(
+                "RestoreInto", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            Assert.That(restore?.GetCustomAttributes(typeof(ObsoleteAttribute), false), Has.Length.EqualTo(1),
+                "a capture-only snapshot's RestoreInto fails the build");
         });
     }
 }
@@ -231,7 +234,7 @@ internal sealed class Tank
     // A read-only adapter: captured, and required to match on restore.
     [NumosSerialize("Capacity")] internal int CellCount => Cells.Length;
 
-    public int Restores;
+    [NumosIgnore] public int Restores;
 }
 
 [NumosSnapshotOf(typeof(Valve))]

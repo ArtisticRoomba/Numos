@@ -73,6 +73,40 @@ public sealed class SolverDependencyDiagnosticTests
         Assert.That(result.GeneratedSources, Is.Empty);
     }
 
+    [TestCase("file sealed partial class Solver : IAtmosWorldSolver")]
+    [TestCase("file partial class Outer")]
+    public void FileLocalType_ReportsNumosDep010AndGeneratesNothing(string declaration)
+    {
+        string source = declaration.Contains("Outer")
+            ? """
+              using Numos.API;
+
+              namespace MyMod;
+
+              file partial class Outer
+              {
+                  public sealed partial class Solver : IAtmosWorldSolver
+                  {
+                      [SolverDependency] private partial System.IServiceProvider Provider { get; }
+
+                      public void Solve(AtmosWorldSolverContext context)
+                      {
+                      }
+                  }
+              }
+              """
+            : Solver("[SolverDependency] private partial IService Service { get; }", declaration);
+
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(out _, out var diagnostics, source);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Exception, Is.Null);
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP010" }));
+            Assert.That(result.GeneratedSources, Is.Empty);
+        });
+    }
+
     [Test]
     public void Struct_ReportsNumosDep002()
     {

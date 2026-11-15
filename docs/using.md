@@ -573,8 +573,10 @@ The generator writes:
 
 Marking is opt-in, with a safety net. A mutable field, or an auto-property with a `set` or `init` accessor, that has
 neither `[NumosSerialize]` nor `[NumosIgnore]` is a build warning (`NUMOSSTATE016`). The warning catches a setting
-that is missing from the hash. Put `[NumosIgnore]` on caches and scratch. The generator does not flag readonly fields and
-get-only auto-properties, because they are usually derived in the constructor.
+that is missing from the hash. Put `[NumosIgnore]` on caches, scratch, and fields that a marked adapter property saves.
+The generator does not flag readonly fields and get-only auto-properties, because they are usually derived in the
+constructor. The live type of a `[NumosSnapshotOf]` snapshot gets the same warning, except for a member that a `Count`
+argument names.
 
 Solvers read the applied snapshot from the tick context:
 

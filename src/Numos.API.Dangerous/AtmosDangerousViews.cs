@@ -23,8 +23,9 @@ namespace Numos.API.Dangerous;
 ///         unregistered or a checkpoint is restored; reacquire it instead.
 ///     </para>
 ///     <para>
-///         Custom <see cref="ChunkField{T}" /> storage isn't exposed here. Read it through the
-///         <see cref="AtmosSolverChunk" /> the view came from, which is just as live and lock-free.
+///         Custom <see cref="ChunkField{T}" /> storage isn't exposed on this view. Read it through the
+///         <see cref="AtmosSolverChunk" /> the view came from, which is just as live and lock-free. Host code outside
+///         a tick can use <see cref="AtmosDangerousApi.GetChunkField{T}" />.
 ///     </para>
 /// </remarks>
 public readonly ref struct AtmosDangerousChunk

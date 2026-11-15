@@ -1,3 +1,4 @@
+using Numos.API.Dangerous;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -147,7 +148,7 @@ public sealed class AtmosSolverChunkTests
         int total = 0;
         foreach (var handle in simulation.GetChunkHandles())
         {
-            FlatArray<int> values = simulation.GetChunkField(handle, hits);
+            Assert.That(simulation.TryGetChunkField(handle, hits, out ReadOnlyFlatArray<int> values), Is.True);
             Assert.That(values.Dimensions, Is.EqualTo(new Int3(4, 4, 1)));
             foreach (int value in values.AsSpan())
                 total += value;
@@ -157,7 +158,7 @@ public sealed class AtmosSolverChunkTests
     }
 
     [Test]
-    public void GetChunkField_FromWorkerDuringTick_ThrowsInsteadOfBlocking()
+    public void DangerousGetChunkField_FromWorkerDuringTick_ThrowsInsteadOfBlocking()
     {
         using var world = new AtmosWorld(new TestAtmosConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
@@ -169,12 +170,12 @@ public sealed class AtmosSolverChunkTests
             "tests/solver-chunk/worker-facade",
             _ =>
             {
-                tickThreadSucceeded = simulation.GetChunkField(handle, Scratch).Length == 1;
+                tickThreadSucceeded = simulation.Dangerous().GetChunkField(handle, Scratch).Length == 1;
                 workerFailure = Task.Run(() =>
                 {
                     try
                     {
-                        simulation.GetChunkField(handle, Scratch);
+                        simulation.Dangerous().GetChunkField(handle, Scratch);
                         return null;
                     }
                     catch (Exception exception)
@@ -191,6 +192,137 @@ public sealed class AtmosSolverChunkTests
             Assert.That(tickThreadSucceeded, Is.True);
             Assert.That(workerFailure, Is.TypeOf<InvalidOperationException>());
         });
+    }
+
+    [Test]
+    public void TryGetChunkField_FromWorkerDuringTick_ThrowsInsteadOfBlocking()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var handle = simulation.CreateAndRegisterChunk(default);
+        Exception? workerFailure = null;
+        bool tickThreadSucceeded = false;
+
+        world.Solvers.Register(
+            "tests/solver-chunk/worker-try-get",
+            context =>
+            {
+                Assert.That(context.Chunks(simulation).TryGet(handle, out var chunk), Is.True);
+                _ = chunk.Get(Scratch);
+                tickThreadSucceeded = simulation.TryGetChunkField(handle, Scratch, out _);
+                workerFailure = Task.Run(() =>
+                {
+                    try
+                    {
+                        simulation.TryGetChunkField(handle, Scratch, out _);
+                        return null;
+                    }
+                    catch (Exception exception)
+                    {
+                        return exception;
+                    }
+                }).GetAwaiter().GetResult();
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(tickThreadSucceeded, Is.True);
+            Assert.That(workerFailure, Is.TypeOf<InvalidOperationException>());
+            Assert.That(workerFailure!.Message, Does.Contain(nameof(AtmosSimulation.TryGetChunkField)));
+        });
+    }
+
+    [Test]
+    public void TryGetChunkField_WithoutStorage_ReturnsFalseAndLeavesStateHashUnchanged()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(2, 2, 1);
+        var handle = simulation.CreateAndRegisterChunk(default);
+        var before = world.ComputeStateHash();
+
+        bool found = simulation.TryGetChunkField(handle, Exposure, out ReadOnlyFlatArray<float> values);
+        bool foundFixed = simulation.TryGetChunkField(handle, Counters, out ReadOnlyFlatArray<int> counters);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(found, Is.False);
+            Assert.That(values.IsInitialized, Is.False);
+            Assert.That(foundFixed, Is.False);
+            Assert.That(counters.IsInitialized, Is.False);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(before));
+        });
+    }
+
+    [Test]
+    public void TryGetChunkField_AfterSolverCreatesStorage_ReadsSolverValues()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(2, 2, 1);
+        var handle = simulation.CreateAndRegisterChunk(default);
+
+        world.Solvers.Register(
+            "tests/solver-chunk/try-get-seed",
+            context =>
+            {
+                Assert.That(context.Chunks(simulation).TryGet(handle, out var chunk), Is.True);
+                chunk.Get(Exposure)[new Int3(1, 1, 0)] = 4f;
+                chunk.Get(Counters)[2] = 9;
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.TryGetChunkField(handle, Exposure, out ReadOnlyFlatArray<float> exposure), Is.True);
+            Assert.That(exposure.Dimensions, Is.EqualTo(simulation.ChunkDimensions));
+            Assert.That(exposure[new Int3(1, 1, 0)], Is.EqualTo(4f));
+            Assert.That(simulation.TryGetChunkField(handle, Counters, out ReadOnlyFlatArray<int> counters), Is.True);
+            Assert.That(counters.Dimensions, Is.EqualTo(new Int3(3, 1, 1)));
+            Assert.That(counters[2], Is.EqualTo(9));
+        });
+    }
+
+    [Test]
+    public void TryGetChunkField_AfterDangerousWrite_ReadsTheSameValues()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(2, 2, 1);
+        var handle = simulation.CreateAndRegisterChunk(default);
+        var before = world.ComputeStateHash();
+
+        simulation.Dangerous().GetChunkField(handle, Exposure)[new Int3(0, 1, 0)] = 6f;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ComputeStateHash(), Is.Not.EqualTo(before));
+            Assert.That(simulation.TryGetChunkField(handle, Exposure, out ReadOnlyFlatArray<float> values), Is.True);
+            Assert.That(values.Dimensions, Is.EqualTo(simulation.ChunkDimensions));
+            Assert.That(values[new Int3(0, 1, 0)], Is.EqualTo(6f));
+        });
+    }
+
+    [Test]
+    public void TryGetChunkField_InvalidArguments_Throw()
+    {
+        var simulation = new AtmosSimulation(1, 1, 1);
+        var handle = simulation.CreateAndRegisterChunk(default);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => simulation.TryGetChunkField<float>(handle, null!, out _),
+                Throws.ArgumentNullException);
+            Assert.That(
+                () => simulation.TryGetChunkField(new AtmosChunkHandle(Int3.PosY), Exposure, out _),
+                Throws.TypeOf<KeyNotFoundException>());
+        });
+
+        simulation.Dispose();
+        Assert.That(
+            () => simulation.TryGetChunkField(handle, Exposure, out _),
+            Throws.TypeOf<ObjectDisposedException>());
     }
 
     [Test]
@@ -321,19 +453,19 @@ public sealed class AtmosSolverChunkTests
                 Is.EquivalentTo(new[] { station.GetCellRef(stationNeighbor, 0), portalTarget }));
 
             Assert.That(resolved.Single(static item => item.Cell.LocalVoxelIndex == 3).Simulation, Is.SameAs(shuttle));
-            Assert.That(shuttle.GetChunkField(shuttleChunk, Exposure)[3], Is.EqualTo(5f));
+            Assert.That(shuttle.Dangerous().GetChunkField(shuttleChunk, Exposure)[3], Is.EqualTo(5f));
             Assert.That(missingChunk, Is.False);
             Assert.That(missingVoxel, Is.False);
         });
     }
 
     [Test]
-    public void GetChunkField_SharesStorageWithSolverViews()
+    public void DangerousGetChunkField_SharesStorageWithSolverViews()
     {
         using var world = new AtmosWorld(new TestAtmosConfig());
         var simulation = world.CreateSimulation(2, 1, 1);
         var handle = simulation.CreateAndRegisterChunk(default);
-        simulation.GetChunkField(handle, Exposure)[new Int3(1, 0, 0)] = 3f;
+        simulation.Dangerous().GetChunkField(handle, Exposure)[new Int3(1, 0, 0)] = 3f;
         float seen = 0f;
 
         world.Solvers.Register(
@@ -351,9 +483,9 @@ public sealed class AtmosSolverChunkTests
         Assert.Multiple(() =>
         {
             Assert.That(seen, Is.EqualTo(3f));
-            Assert.That(simulation.GetChunkField(handle, Exposure)[0], Is.EqualTo(11f));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, Exposure)[0], Is.EqualTo(11f));
             Assert.That(
-                () => simulation.GetChunkField(new AtmosChunkHandle(Int3.PosY), Exposure),
+                () => simulation.Dangerous().GetChunkField(new AtmosChunkHandle(Int3.PosY), Exposure),
                 Throws.TypeOf<KeyNotFoundException>());
         });
     }
@@ -381,19 +513,19 @@ public sealed class AtmosSolverChunkTests
         var checkpoint = world.CaptureCheckpoint();
         world.Tick();
         world.Tick();
-        Assert.That(simulation.GetChunkField(handle, Counters)[1], Is.EqualTo(3));
+        Assert.That(simulation.Dangerous().GetChunkField(handle, Counters)[1], Is.EqualTo(3));
 
         world.RestoreCheckpoint(checkpoint);
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.GetChunkField(handle, Counters)[1], Is.EqualTo(1));
-            Assert.That(simulation.GetChunkField(handle, Exposure)[2], Is.EqualTo(0.5f));
-            Assert.That(simulation.GetChunkField(handle, Scratch)[0], Is.Zero);
+            Assert.That(simulation.Dangerous().GetChunkField(handle, Counters)[1], Is.EqualTo(1));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, Exposure)[2], Is.EqualTo(0.5f));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, Scratch)[0], Is.Zero);
             Assert.That(world.ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
         });
 
         world.Tick();
-        Assert.That(simulation.GetChunkField(handle, Counters)[1], Is.EqualTo(2));
+        Assert.That(simulation.Dangerous().GetChunkField(handle, Counters)[1], Is.EqualTo(2));
     }
 }

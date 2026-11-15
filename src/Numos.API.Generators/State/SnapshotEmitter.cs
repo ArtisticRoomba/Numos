@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using Numos.API.Generators.Common;
 
 namespace Numos.API.Generators.State;
@@ -45,11 +46,12 @@ internal static class SnapshotEmitter
 
         EmitCapture(writer, model, live);
         writer.Line();
-        if (model.Restorable)
-        {
+        if (model.CaptureOnlyReason is { } reason)
+            EmitCaptureOnlyRestore(writer, model, live, reason);
+        else
             EmitRestore(writer, model, live);
-            writer.Line();
-        }
+
+        writer.Line();
 
         writer.Line("/// <summary>");
         writer.Line("///     Runs at the end of <see cref=\"Capture\" />, to fill members the snapshot declares itself.");
@@ -372,6 +374,24 @@ internal static class SnapshotEmitter
         writer.Line("///     or rebuild derived live state.");
         writer.Line("/// </summary>");
         writer.Line("partial void OnRestored(" + live + " live);");
+    }
+
+    /// <summary>
+    ///     Writes a <c>RestoreInto</c> that fails the build where it's called and says why, so a caller gets the reason
+    ///     instead of a missing-member error.
+    /// </summary>
+    private static void EmitCaptureOnlyRestore(CodeWriter writer, SnapshotModel model, string live, string reason)
+    {
+        string snapshot = model.TypeName.Replace("global::", "");
+        string message = snapshot + " is capture-only: " + reason + ". Restore the live object from its owner.";
+
+        writer.Line("/// <summary>");
+        writer.Line("///     Not available. This snapshot is capture-only, so its owner restores the live object.");
+        writer.Line("/// </summary>");
+        writer.Line("[global::System.Obsolete(" + SymbolDisplay.FormatLiteral(message, true) + ", true)]");
+        writer.Line(CodeWriter.EditorBrowsableNeverAttribute);
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal void RestoreInto(" + live + " live) => throw new global::System.NotSupportedException();");
     }
 
     private static void EmitReadState(CodeWriter writer, SnapshotModel model, string stateInterface)

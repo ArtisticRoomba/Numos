@@ -117,6 +117,10 @@ internal sealed class SerializedMember
 
         if (serialize is null)
         {
+            // [field: NumosSerialize] already drew its own error, so the property isn't also "unmarked".
+            if (member is IPropertySymbol property && StateSymbols.HasMarkedBackingField(property))
+                return null;
+
             if (!ignored && hasStorage && !member.IsImplicitlyDeclared && StateSymbols.IsMutable(member))
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.Unmarked, location, displayName, ownerDisplayName));
 

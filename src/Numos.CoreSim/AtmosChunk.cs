@@ -26,7 +26,8 @@ namespace Numos.CoreSim;
 ///     <para>
 ///         Members marked <see cref="NumosSerializeAttribute" /> are the chunk's continuation state. The generated
 ///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those.
-///         Everything unmarked is derived or scratch and must be rebuildable from the marked members.
+///         Everything unmarked is derived, scratch, or saved through a marked adapter property such as
+///         <see cref="GasChannelCheckpoints" />. Restore must rebuild it from the marked members.
 ///     </para>
 /// </remarks>
 internal class AtmosChunk
@@ -53,6 +54,7 @@ internal class AtmosChunk
     /// <summary>
     ///     Number of valid gas channels at the beginning of <see cref="ActiveGases" />.
     /// </summary>
+    [NumosIgnore]
     public int ActiveGasCount;
 
     /// <summary>
@@ -66,6 +68,7 @@ internal class AtmosChunk
     ///     it leaves the active-air list stale too. A chunk restored from a checkpoint is a new object, so cached
     ///     geometry must also check the chunk reference and its generation.
     /// </remarks>
+    [NumosIgnore]
     internal long AirTopologyVersion;
 
     /// <summary>
@@ -75,6 +78,7 @@ internal class AtmosChunk
     ///     Only the first <see cref="ActiveGasCount" /> entries are valid. Each valid channel contains
     ///     one moles value for every voxel in the chunk.
     /// </remarks>
+    [NumosIgnore]
     public GasChannel[] ActiveGases;
 
     /// <summary>
@@ -88,11 +92,13 @@ internal class AtmosChunk
     ///     Numos recycles IDs after a chunk is unregistered. A lookup table keyed on this ID must record which
     ///     chunk owns each slot and check that before it trusts old contents.
     /// </remarks>
+    [NumosIgnore]
     public int DenseId;
 
     /// <summary>
     ///     The number of voxels along the z-axis.
     /// </summary>
+    [NumosIgnore]
     public int Depth;
 
     /// <summary>
@@ -104,6 +110,7 @@ internal class AtmosChunk
     /// <summary>
     ///     The number of voxels along the y-axis.
     /// </summary>
+    [NumosIgnore]
     public int Height;
 
     /// <summary>
@@ -122,6 +129,7 @@ internal class AtmosChunk
     ///     voxel. Every pressure refresh also sets it for a voxel without gas and clears it for a voxel with gas.
     ///     Consumers should use it instead of interpreting a vacuum voxel's temperature.
     /// </remarks>
+    [NumosIgnore]
     public FlatArray<bool> IsVacuum;
 
     /// <summary>
@@ -219,6 +227,7 @@ internal class AtmosChunk
     /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
     /// </summary>
+    [NumosIgnore]
     public int VoxelCount;
 
     /// <summary>
@@ -239,14 +248,19 @@ internal class AtmosChunk
     /// <summary>
     ///     The number of voxels along the x-axis.
     /// </summary>
+    [NumosIgnore]
     public int Width;
+    [NumosIgnore]
     private int _capturedFieldCount;
 
     // Indexed by ChunkFieldDescriptor.Slot. Readers load the array without a lock; writers hold _fieldGate and
     // publish a grown copy instead of resizing in place.
+    [NumosIgnore]
     private SolverArrayStorage?[]? _fields;
 
+    [NumosIgnore]
     private long _generation;
+    [NumosIgnore]
     private long _revision;
 
     /// <summary>

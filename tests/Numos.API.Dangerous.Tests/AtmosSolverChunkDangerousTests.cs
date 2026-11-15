@@ -44,7 +44,7 @@ public sealed class AtmosSolverChunkDangerousTests
             Assert.That(temperatureLength, Is.EqualTo(8));
             Assert.That(position, Is.EqualTo(handle.Position));
             Assert.That(
-                simulation.GetChunkField(handle, Exposure)[3],
+                simulation.Dangerous().GetChunkField(handle, Exposure)[3],
                 Is.EqualTo(simulation.GetChunkSnapshot(handle).Temperature[3]).And.GreaterThan(0f));
         });
     }

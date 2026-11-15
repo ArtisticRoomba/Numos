@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -19,17 +20,20 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
     /// </summary>
+    [NumosIgnore]
     internal long LastBoundaryTicks;
 
     /// <summary>
     ///     What the <c>euler-flow</c> stage did during the latest tick, or all zeros when it did not run. Reset
     ///     when a checkpoint is installed. A checkpoint never holds it.
     /// </summary>
+    [NumosIgnore]
     internal AtmosFlowDiagnostics LastFlowDiagnostics;
 
     /// <summary>
     ///     Number of completed fixed ticks on the owning world timeline.
     /// </summary>
+    [NumosIgnore]
     internal long TickCount;
 
     /// <summary>
@@ -37,6 +41,7 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     world pipeline. Benchmarks set it directly. World ticks ignore it, because the world's pipeline decides
     ///     which stages run.
     /// </summary>
+    [NumosIgnore]
     internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;
 
     /// <summary>
@@ -44,13 +49,20 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     rate to <see cref="BeginWorldTick" />. This stays at 20 and does not follow
     ///     <c>AtmosWorld.DefaultTickRate</c>: the kernel's tests and benchmarks pin numbers taken at 50 ms ticks.
     /// </summary>
+    [NumosIgnore]
     internal int TickRate { get; set; } = 20;
 
+    [NumosIgnore]
     private long _chunkCollectionRevision;
+    [NumosIgnore]
     private OrderedChunkCache? _orderedChunks;
+    [NumosIgnore]
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
+    [NumosIgnore]
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
+    [NumosIgnore]
     private bool _isTickExecuting;
+    [NumosIgnore]
     private int _nextChunkDenseId;
 
     internal AtmosKernel(

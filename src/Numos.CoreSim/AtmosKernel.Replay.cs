@@ -9,7 +9,9 @@ namespace Numos.CoreSim;
 internal sealed partial class AtmosKernel
 {
     private readonly Int3 _dimensions;
+    [NumosIgnore]
     private Action<AtmosOperation>? _externalOperationSink;
+    [NumosIgnore]
     private bool _isApplyingOperation;
 
     private bool ShouldRecord =>

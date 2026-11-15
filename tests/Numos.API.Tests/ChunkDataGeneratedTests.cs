@@ -1,3 +1,4 @@
+using Numos.API.Dangerous;
 using Numos.Collections;
 using Numos.Maths;
 
@@ -119,8 +120,8 @@ public sealed class ChunkDataGeneratedTests
             Assert.That(dimensions, Is.EqualTo(new Int3(2, 2, 2)));
             foreach (var handle in handles)
             {
-                FlatArray<float> exposure = simulation.GetChunkField(handle, GeneratedFireData.Exposure);
-                FlatArray<int> burnCount = simulation.GetChunkField(handle, GeneratedFireData.BurnCount);
+                FlatArray<float> exposure = simulation.Dangerous().GetChunkField(handle, GeneratedFireData.Exposure);
+                FlatArray<int> burnCount = simulation.Dangerous().GetChunkField(handle, GeneratedFireData.BurnCount);
                 Assert.That(exposure[7], Is.EqualTo(14f));
                 Assert.That(burnCount[0], Is.EqualTo(2));
                 Assert.That(burnCount[1], Is.EqualTo(handle.Position.X + 10 * handle.Position.Y));
@@ -158,19 +159,19 @@ public sealed class ChunkDataGeneratedTests
         Assert.That(keys, Does.Contain(GeneratedFireData.Exposure.Key));
         Assert.That(keys, Does.Contain(GeneratedFireData.BurnCount.Key));
         Assert.That(keys, Does.Not.Contain(GeneratedFireData.Scratch.Key));
-        Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.EqualTo(3));
+        Assert.That(simulation.Dangerous().GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.EqualTo(3));
 
         simulation.World.RestoreCheckpoint(checkpoint);
-        Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.Zero);
-        Assert.That(simulation.GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(1));
+        Assert.That(simulation.Dangerous().GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.Zero);
+        Assert.That(simulation.Dangerous().GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(1));
 
         simulation.World.ReplayTo(checkpoint, recording.Operations, expected.Position);
 
         Assert.Multiple(() =>
         {
             Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
-            Assert.That(simulation.GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(3));
-            Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Exposure)[1], Is.EqualTo(6f));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(3));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, GeneratedFireData.Exposure)[1], Is.EqualTo(6f));
         });
     }
 
@@ -182,7 +183,7 @@ public sealed class ChunkDataGeneratedTests
         using var world = new AtmosWorld(new TestAtmosConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var handle = simulation.CreateAndRegisterChunk(default);
-        simulation.GetChunkField(handle, exposure)[0] = 5f;
+        simulation.Dangerous().GetChunkField(handle, exposure)[0] = 5f;
         float seen = 0f;
 
         world.Solvers.Register(
@@ -202,8 +203,8 @@ public sealed class ChunkDataGeneratedTests
             Assert.That(exposure, Is.SameAs(GeneratedFireData.Exposure));
             Assert.That(burnCount, Is.SameAs(GeneratedFireData.BurnCount));
             Assert.That(seen, Is.EqualTo(5f));
-            Assert.That(simulation.GetChunkField(handle, exposure)[0], Is.EqualTo(7f));
-            Assert.That(simulation.GetChunkField(handle, burnCount)[1], Is.EqualTo(8));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, exposure)[0], Is.EqualTo(7f));
+            Assert.That(simulation.Dangerous().GetChunkField(handle, burnCount)[1], Is.EqualTo(8));
             Assert.That(
                 () => ChunkField<float>.Register(GeneratedFireData.KeyPrefix + "exposure"),
                 Throws.InvalidOperationException);

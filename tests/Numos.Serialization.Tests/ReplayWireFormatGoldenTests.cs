@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.API.Dangerous;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.EulerFlow;
@@ -296,9 +297,9 @@ public sealed class ReplayWireFormatGoldenTests
         var chunk = SimSetup.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 1, 0, 3f, 300f);
         float[] heat = [0.5f, -1f, 2.25f, 300f];
-        heat.CopyTo(simulation.GetChunkField(chunk, GoldenHeat).AsSpan());
+        heat.CopyTo(simulation.Dangerous().GetChunkField(chunk, GoldenHeat).AsSpan());
         int[] counts = [1, -2, int.MaxValue];
-        counts.CopyTo(simulation.GetChunkField(chunk, GoldenCounts).AsSpan());
+        counts.CopyTo(simulation.Dangerous().GetChunkField(chunk, GoldenCounts).AsSpan());
 
         var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         world.Tick();

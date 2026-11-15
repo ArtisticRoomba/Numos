@@ -28,6 +28,7 @@ public sealed partial class AtmosSimulation : IDisposable
     private readonly int _chunkWidth;
     private readonly AtmosKernel _kernel;
     private readonly bool _ownsWorld;
+    [NumosIgnore]
     private bool _disposed;
 
     /// <summary>

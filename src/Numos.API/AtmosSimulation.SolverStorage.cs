@@ -78,25 +78,32 @@ public sealed partial class AtmosSimulation
     }
 
     /// <summary>
-    ///     Gets a chunk's storage for a custom field outside a solver tick, creating it on first use.
+    ///     Reads a chunk's storage for a custom field outside a solver tick, without creating it.
     /// </summary>
     /// <typeparam name="T">The field's element type.</typeparam>
     /// <param name="chunk">The chunk that owns the storage.</param>
     /// <param name="field">The field to read.</param>
+    /// <param name="values">
+    ///     A read-only view of the same array solvers reach through <see cref="AtmosSolverChunk.Get{T}" />, or
+    ///     <see langword="default" /> when the chunk has no storage for the field. Per-voxel fields use
+    ///     <see cref="ChunkDimensions" />. Fixed-length fields are one-dimensional.
+    /// </param>
     /// <returns>
-    ///     A live view of the same array solvers reach through <see cref="AtmosSolverChunk.Get{T}" />. Per-voxel fields
-    ///     use <see cref="ChunkDimensions" />; fixed-length fields are one-dimensional.
+    ///     <see langword="true" /> when the chunk has storage for <paramref name="field" />. <see langword="false" />
+    ///     means every element reads as <see langword="default" />.
     /// </returns>
     /// <remarks>
     ///     <para>
-    ///         Use this to seed or inspect field data from host code. Inside solver callbacks, use
-    ///         <see cref="AtmosWorldSolverContext.Chunks" /> instead: it skips the state lock this method takes, and
-    ///         it works from worker threads.
+    ///         This method never allocates storage, so it leaves checkpoints and state hashes unchanged. Solvers
+    ///         create storage on first use. A chunk with no storage reads as all <see langword="default" /> values.
     ///     </para>
     ///     <para>
-    ///         Writes are not recorded. For replay, write rollback fields before capturing the starting checkpoint and
-    ///         only from deterministic solver callbacks after that. The array stays live until the chunk is
-    ///         unregistered or a checkpoint is restored; reacquire it after either.
+    ///         The view is live. It shows later solver writes until the chunk is unregistered or a checkpoint is
+    ///         restored. Call this method again after either.
+    ///     </para>
+    ///     <para>
+    ///         Inside solver callbacks, use <see cref="AtmosWorldSolverContext.Chunks" /> instead. It skips the state
+    ///         lock this method takes, and it works from worker threads.
     ///     </para>
     ///     <para>
     ///         While a world tick runs, only the tick's own thread may call this. Any other thread gets an
@@ -112,24 +119,53 @@ public sealed partial class AtmosSimulation
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <example>
     ///     <code>
-    ///     simulation.GetChunkField(chunk, FireData.Exposure)[new Int3(0, 0, 0)] = 1f;
-    ///     var checkpoint = simulation.CaptureCheckpoint(); // includes the seeded value for rollback fields
+    ///     if (simulation.TryGetChunkField(chunk, FireData.Exposure, out var exposure))
+    ///         Console.WriteLine(exposure[new Int3(0, 0, 0)]);
     ///     </code>
     /// </example>
     [PublicAPI]
-    public FlatArray<T> GetChunkField<T>(AtmosChunkHandle chunk, ChunkField<T> field)
+    public bool TryGetChunkField<T>(AtmosChunkHandle chunk, ChunkField<T> field, out ReadOnlyFlatArray<T> values)
     {
         ArgumentNullException.ThrowIfNull(field);
         ThrowIfDisposed();
-        if (World.IsTickExecuting && !Monitor.IsEntered(_kernel.StateGate))
+        ThrowIfChunkFieldAccessFromWorker(nameof(TryGetChunkField));
+
+        if (!_kernel.TryGetChunkField(chunk.Position, field.Descriptor, out T[]? array))
         {
-            throw new InvalidOperationException(
-                "Chunk fields cannot be read through AtmosSimulation from another thread while a tick is running. " +
-                "Inside a solver callback, use AtmosWorldSolverContext.Chunks or TryGetChunk and the returned " +
-                "AtmosSolverChunk views, which are safe on worker threads.");
+            values = default;
+            return false;
         }
+
+        values = field.CreateView(array, ChunkDimensions);
+        return true;
+    }
+
+    /// <summary>
+    ///     Gets a chunk's live storage for a custom field, creating it on first use. Backs
+    ///     <c>AtmosDangerousApi.GetChunkField</c>.
+    /// </summary>
+    /// <remarks>
+    ///     Creating a rollback field's storage adds a zero-filled array to the next checkpoint and changes the state
+    ///     hash. The same checks as <see cref="TryGetChunkField{T}" /> apply.
+    /// </remarks>
+    internal FlatArray<T> GetOrCreateChunkField<T>(AtmosChunkHandle chunk, ChunkField<T> field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+        ThrowIfChunkFieldAccessFromWorker("Dangerous().GetChunkField");
 
         T[] values = _kernel.GetOrCreateChunkField(chunk.Position, field.Descriptor);
         return field.CreateView(values, ChunkDimensions);
+    }
+
+    private void ThrowIfChunkFieldAccessFromWorker(string member)
+    {
+        if (World.IsTickExecuting && !Monitor.IsEntered(_kernel.StateGate))
+        {
+            throw new InvalidOperationException(
+                $"Chunk fields cannot be read through {member} from another thread while a tick is running. " +
+                "Inside a solver callback, use AtmosWorldSolverContext.Chunks or TryGetChunk and the returned " +
+                "AtmosSolverChunk views, which are safe on worker threads.");
+        }
     }
 }

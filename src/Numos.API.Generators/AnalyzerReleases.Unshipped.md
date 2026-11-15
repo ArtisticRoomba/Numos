@@ -29,6 +29,7 @@
  NUMOSDEP007   | Numos.API.SolverDependency | Warning  | Type with solver dependencies is not a world solver             
  NUMOSDEP008   | Numos.API.SolverDependency | Error    | Base class injects dependencies without an overridable hook     
  NUMOSDEP009   | Numos.API.SolverDependency | Error    | Type implements dependency injection by hand                    
+ NUMOSDEP010   | Numos.API.SolverDependency | Error    | Solver class must not be file-local                             
  NUMOSSTATE001 | Numos.State                | Error    | Serializable type must be partial
  NUMOSSTATE002 | Numos.State                | Error    | Serializable type must not be generic
  NUMOSSTATE005 | Numos.State                | Error    | Two serialized members hash to the same id
@@ -56,3 +57,6 @@
  NUMOSSTATE029 | Numos.State                | Error    | Count needs an array
  NUMOSSTATE030 | Numos.State                | Error    | Live type has more than one snapshot
  NUMOSSTATE031 | Numos.State                | Error    | Count only applies to live types
+ NUMOSSTATE032 | Numos.State                | Error    | Serializable type must not be file-local
+ NUMOSSTATE033 | Numos.State                | Error    | [NumosSerialize] is on a property's backing field
+ NUMOSSTATE034 | Numos.State                | Error    | Serialized member must not be an indexer

@@ -1,3 +1,4 @@
+using Numos.API.Dangerous;
 using Numos.CoreSim;
 using Numos.Maths;
 using Numos.Serialization;
@@ -57,9 +58,9 @@ public sealed class ChunkFieldArchiveTests
         var chunk = simulation.GetChunkHandles().Single();
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.GetChunkField(chunk, ArchivedFireData.Heat).AsSpan().ToArray(), Is.EqualTo(new[] { 1.5f, -2f, float.NaN, 4f }));
-            Assert.That(simulation.GetChunkField(chunk, Counters).AsSpan().ToArray(), Is.EqualTo(new[] { 7, -9 }));
-            Assert.That(simulation.GetChunkField(chunk, Phases).AsSpan().ToArray(), Is.EqualTo(new[] { Phase.Cold, Phase.Burning, Phase.Cold, Phase.Ash }));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, ArchivedFireData.Heat).AsSpan().ToArray(), Is.EqualTo(new[] { 1.5f, -2f, float.NaN, 4f }));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, Counters).AsSpan().ToArray(), Is.EqualTo(new[] { 7, -9 }));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, Phases).AsSpan().ToArray(), Is.EqualTo(new[] { Phase.Cold, Phase.Burning, Phase.Cold, Phase.Ash }));
         });
 
         imported.ReturnToHead();
@@ -130,7 +131,7 @@ public sealed class ChunkFieldArchiveTests
         AtmosWorldReplayArchive archive = RecordWorld(simulation =>
         {
             var chunk = simulation.GetChunkHandles().Single();
-            simulation.GetChunkField(chunk, PaddedField).AsSpan()[0] = new Padded(1, 2);
+            simulation.Dangerous().GetChunkField(chunk, PaddedField).AsSpan()[0] = new Padded(1, 2);
         });
 
         Assert.That(archive.UnsupportedFeatures, Has.Count.EqualTo(1));
@@ -152,12 +153,12 @@ public sealed class ChunkFieldArchiveTests
         simulation.AddGasToVoxel(chunk, 0, 0, 5f, 300f);
 
         float[] heat = [1.5f, -2f, float.NaN, 4f];
-        heat.CopyTo(simulation.GetChunkField(chunk, ArchivedFireData.Heat).AsSpan());
-        simulation.GetChunkField(chunk, Counters).AsSpan()[0] = 7;
-        simulation.GetChunkField(chunk, Counters).AsSpan()[1] = -9;
+        heat.CopyTo(simulation.Dangerous().GetChunkField(chunk, ArchivedFireData.Heat).AsSpan());
+        simulation.Dangerous().GetChunkField(chunk, Counters).AsSpan()[0] = 7;
+        simulation.Dangerous().GetChunkField(chunk, Counters).AsSpan()[1] = -9;
         Phase[] phases = [Phase.Cold, Phase.Burning, Phase.Cold, Phase.Ash];
-        phases.CopyTo(simulation.GetChunkField(chunk, Phases).AsSpan());
-        simulation.GetChunkField(chunk, ArchivedFireData.ArchiveScratch).AsSpan().Fill(3f);
+        phases.CopyTo(simulation.Dangerous().GetChunkField(chunk, Phases).AsSpan());
+        simulation.Dangerous().GetChunkField(chunk, ArchivedFireData.ArchiveScratch).AsSpan().Fill(3f);
         extra?.Invoke(simulation);
 
         var timeline = new AtmosWorldReplayTimeline(world, 0.05);

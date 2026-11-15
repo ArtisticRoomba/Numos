@@ -14,10 +14,10 @@ namespace Numos.API;
 /// </typeparam>
 /// <remarks>
 ///     <para>
-///         A field is a typed key, not storage. Each chunk allocates its own array the first time the field is read
-///         through <see cref="AtmosSolverChunk.Get{T}" /> or <see cref="AtmosSimulation.GetChunkField{T}" />. The
-///         array starts filled with default values. Allocation is lazy, so a field nobody touches adds nothing to
-///         checkpoints or state hashes.
+///         A field is a typed key, not storage. Each chunk allocates its own array the first time a solver reads the
+///         field through <see cref="AtmosSolverChunk.Get{T}" />. The array starts filled with default values.
+///         Allocation is lazy, so a field nobody touches adds nothing to checkpoints or state hashes. Host code reads
+///         a field without allocating through <see cref="AtmosSimulation.TryGetChunkField{T}" />.
 ///     </para>
 ///     <para>
 ///         Fields are process-wide. Every simulation, world, and assembly in the process shares one registry, so a

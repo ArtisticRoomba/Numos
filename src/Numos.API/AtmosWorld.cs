@@ -44,16 +44,28 @@ public sealed partial class AtmosWorld : IDisposable
     private readonly SortedSet<int> _pendingLinkSlots = [];
     private readonly HashSet<ExplicitEdgeKey> _reservedEdges = [];
     private readonly List<SimulationSlot> _simulationSlots = [];
+    // Host frame pacing, not tick state. Replay runs recorded ticks, and a restore sets it to zero.
+    [NumosIgnore]
     private double _accumulator;
 
+    [NumosIgnore]
     private ExplicitAtmosEdge[] _activeEdges = [];
+    [NumosIgnore]
     private Dictionary<AtmosChunkKey, int> _activeEdgesByChunk = [];
+    [NumosIgnore]
     private AtmosConfigSnapshot _config;
+    [NumosIgnore]
     private bool _disposed;
+    [NumosIgnore]
     private volatile bool _isTickExecuting;
+    [NumosIgnore]
     private long _linkSetCollectionRevision;
+    [NumosIgnore]
     private AtmosSimulation[] _orderedSimulations = [];
+    // Only a solver callback queues a configuration, and the same tick applies it before it ends.
+    [NumosIgnore]
     private AtmosConfigSnapshot? _pendingConfig;
+    [NumosIgnore]
     private long _simulationCollectionRevision;
 
     /// <summary>
@@ -167,6 +179,7 @@ public sealed partial class AtmosWorld : IDisposable
     ///     already stale when it returns if anything changed meanwhile. Numos only touches this under
     ///     <see cref="Gate" />.
     /// </remarks>
+    [NumosIgnore]
     internal int SolverDependencyEpoch { get; private set; }
 
     /// <summary>
@@ -207,6 +220,7 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets the number of completed fixed world ticks.
     /// </summary>
     [PublicAPI]
+    [NumosIgnore]
     public long TickCount { get; private set; }
 
     /// <summary>

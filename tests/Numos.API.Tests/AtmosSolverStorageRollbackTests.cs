@@ -1,3 +1,4 @@
+using Numos.API.Dangerous;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Replay;
@@ -60,11 +61,11 @@ public sealed class AtmosSolverStorageRollbackTests
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
         long baselineBytes = simulation.CaptureCheckpoint().PayloadBytes;
-        FlatArray<float> flat = simulation.GetChunkField(chunk, HeatExposure);
+        FlatArray<float> flat = simulation.Dangerous().GetChunkField(chunk, HeatExposure);
         flat[new Int3(1, 2, 3)] = 42f;
-        FlatArray<int> counters = simulation.GetChunkField(chunk, HeatCounts);
+        FlatArray<int> counters = simulation.Dangerous().GetChunkField(chunk, HeatCounts);
         counters[2] = 7;
-        FlatArray<int> transient = simulation.GetChunkField(chunk, HeatScratch);
+        FlatArray<int> transient = simulation.Dangerous().GetChunkField(chunk, HeatScratch);
         transient[0] = 9;
         var checkpoint = simulation.CaptureCheckpoint();
         var snapshot = simulation.GetChunkSnapshot(chunk);
@@ -95,15 +96,15 @@ public sealed class AtmosSolverStorageRollbackTests
         for (int attempt = 0; attempt < 3; attempt++)
         {
             simulation.RestoreCheckpoint(checkpoint);
-            FlatArray<float> restored = simulation.GetChunkField(chunk, HeatExposure);
-            FlatArray<int> restoredCounts = simulation.GetChunkField(chunk, HeatCounts);
+            FlatArray<float> restored = simulation.Dangerous().GetChunkField(chunk, HeatExposure);
+            FlatArray<int> restoredCounts = simulation.Dangerous().GetChunkField(chunk, HeatCounts);
             Assert.Multiple(() =>
             {
                 Assert.That(restored.Dimensions, Is.EqualTo(new Int3(2, 3, 4)));
                 Assert.That(restored[new Int3(1, 2, 3)], Is.EqualTo(42f));
                 Assert.That(restoredCounts[2], Is.EqualTo(7));
                 Assert.That(restoredCounts.AsSpan() == counters.AsSpan(), Is.False);
-                Assert.That(simulation.GetChunkField(chunk, HeatScratch)[0], Is.Zero);
+                Assert.That(simulation.Dangerous().GetChunkField(chunk, HeatScratch)[0], Is.Zero);
                 Assert.That(simulation.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
             });
 
@@ -118,13 +119,13 @@ public sealed class AtmosSolverStorageRollbackTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         var checkpoint = simulation.CaptureCheckpoint();
-        simulation.GetChunkField(chunk, Later)[0] = 42;
+        simulation.Dangerous().GetChunkField(chunk, Later)[0] = 42;
 
         simulation.RestoreCheckpoint(checkpoint);
 
         Assert.That(simulation.CaptureCheckpoint().Chunks[0].SolverArrays, Is.Empty);
         Assert.That(simulation.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
-        Assert.That(simulation.GetChunkField(chunk, Later)[0], Is.Zero);
+        Assert.That(simulation.Dangerous().GetChunkField(chunk, Later)[0], Is.Zero);
     }
 
     [Test]
@@ -134,19 +135,19 @@ public sealed class AtmosSolverStorageRollbackTests
         using var second = new AtmosSimulation(1, 1, 1);
         var chunk = first.CreateAndRegisterChunk(default);
         second.CreateAndRegisterChunk(default);
-        first.GetChunkField(chunk, OrderA)[0] = 7;
-        first.GetChunkField(chunk, OrderB)[0] = 9;
-        second.GetChunkField(chunk, OrderB)[0] = 9;
+        first.Dangerous().GetChunkField(chunk, OrderA)[0] = 7;
+        first.Dangerous().GetChunkField(chunk, OrderB)[0] = 9;
+        second.Dangerous().GetChunkField(chunk, OrderB)[0] = 9;
         // An equal but distinct key string resolves to the same field.
         ChunkField<int> sameA = ChunkField<int>.Register(new string((KeyPrefix + "order/a").ToCharArray()), true);
         Assert.That(sameA, Is.SameAs(OrderA));
-        second.GetChunkField(chunk, sameA)[0] = 7;
+        second.Dangerous().GetChunkField(chunk, sameA)[0] = 7;
         Assert.That(second.World.ComputeStateHash(), Is.EqualTo(first.World.ComputeStateHash()));
 
-        second.GetChunkField(chunk, OrderA)[0] = 8;
+        second.Dangerous().GetChunkField(chunk, OrderA)[0] = 8;
         Assert.That(second.World.ComputeStateHash(), Is.Not.EqualTo(first.World.ComputeStateHash()));
         second.World.RestoreCheckpoint(first.World.CaptureCheckpoint());
-        Assert.That(second.GetChunkField(chunk, OrderA)[0], Is.EqualTo(7));
+        Assert.That(second.Dangerous().GetChunkField(chunk, OrderA)[0], Is.EqualTo(7));
         Assert.That(second.World.ComputeStateHash(), Is.EqualTo(first.World.ComputeStateHash()));
     }
 
@@ -156,24 +157,24 @@ public sealed class AtmosSolverStorageRollbackTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         var expected = new SolverValue(12, BitConverter.Int32BitsToSingle(unchecked((int)0xffc00001)));
-        simulation.GetChunkField(chunk, Custom)[0] = expected;
-        simulation.GetChunkField(chunk, NegativeZero)[0] = -0f;
-        simulation.GetChunkField(chunk, Empty);
+        simulation.Dangerous().GetChunkField(chunk, Custom)[0] = expected;
+        simulation.Dangerous().GetChunkField(chunk, NegativeZero)[0] = -0f;
+        simulation.Dangerous().GetChunkField(chunk, Empty);
         var checkpoint = simulation.CaptureCheckpoint();
 
         simulation.RestoreCheckpoint(checkpoint);
 
-        var actual = simulation.GetChunkField(chunk, Custom)[0];
+        var actual = simulation.Dangerous().GetChunkField(chunk, Custom)[0];
         Assert.That(actual.Count, Is.EqualTo(expected.Count));
         Assert.That(
             BitConverter.SingleToInt32Bits(actual.Exposure),
             Is.EqualTo(BitConverter.SingleToInt32Bits(expected.Exposure)));
 
         Assert.That(
-            BitConverter.SingleToInt32Bits(simulation.GetChunkField(chunk, NegativeZero)[0]),
+            BitConverter.SingleToInt32Bits(simulation.Dangerous().GetChunkField(chunk, NegativeZero)[0]),
             Is.EqualTo(unchecked((int)0x80000000)));
 
-        Assert.That(simulation.GetChunkField(chunk, Empty).Length, Is.Zero);
+        Assert.That(simulation.Dangerous().GetChunkField(chunk, Empty).Length, Is.Zero);
         Assert.That(checkpoint.Chunks[0].SolverArrays.Select(array => array.Key), Does.Contain(Empty.Key));
         Assert.That(simulation.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
     }
@@ -199,8 +200,8 @@ public sealed class AtmosSolverStorageRollbackTests
             Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
         });
 
-        simulation.GetChunkField(chunk, Captured)[0] = 4;
-        simulation.GetChunkField(chunk, Transient)[0] = 5;
+        simulation.Dangerous().GetChunkField(chunk, Captured)[0] = 4;
+        simulation.Dangerous().GetChunkField(chunk, Transient)[0] = 5;
         Assert.Multiple(() =>
         {
             Assert.That(() => ChunkField<int>.Register(Captured.Key), Throws.InvalidOperationException);
@@ -208,8 +209,8 @@ public sealed class AtmosSolverStorageRollbackTests
                 () => ChunkField<int>.Register(Transient.Key, true),
                 Throws.InvalidOperationException);
 
-            Assert.That(simulation.GetChunkField(chunk, Captured)[0], Is.EqualTo(4));
-            Assert.That(simulation.GetChunkField(chunk, Transient)[0], Is.EqualTo(5));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, Captured)[0], Is.EqualTo(4));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, Transient)[0], Is.EqualTo(5));
         });
     }
 
@@ -218,7 +219,7 @@ public sealed class AtmosSolverStorageRollbackTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        FlatArray<int> values = simulation.GetChunkField(chunk, Counter);
+        FlatArray<int> values = simulation.Dangerous().GetChunkField(chunk, Counter);
         var first = simulation.GetChunkSnapshot(chunk);
         values[0] = 42;
 
@@ -281,7 +282,7 @@ public sealed class AtmosSolverStorageRollbackTests
         {
             simulation.World.ReplayTo(checkpoint, recording.Operations, expected.Position);
             Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
-            Assert.That(simulation.GetChunkField(chunk, ReplayCount)[0], Is.EqualTo(5));
+            Assert.That(simulation.Dangerous().GetChunkField(chunk, ReplayCount)[0], Is.EqualTo(5));
             Assert.That(simulation.GetVoxelSnapshot(chunk, 0).Temperature, Is.EqualTo(315f));
         }
 
@@ -291,7 +292,7 @@ public sealed class AtmosSolverStorageRollbackTests
             Throws.InvalidOperationException);
 
         Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
-        Assert.That(simulation.GetChunkField(chunk, ReplayCount)[0], Is.EqualTo(5));
+        Assert.That(simulation.Dangerous().GetChunkField(chunk, ReplayCount)[0], Is.EqualTo(5));
     }
 
     private readonly record struct SolverValue(int Count, float Exposure);

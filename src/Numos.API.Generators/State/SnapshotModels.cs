@@ -223,7 +223,10 @@ internal sealed record SnapshotMemberModel(
 
 /// <param name="LiveTypeName">The live type, fully qualified.</param>
 /// <param name="EmitConstructor">Whether to generate the private parameterless constructor.</param>
-/// <param name="Restorable">Whether every member can be put back, so <c>RestoreInto</c> is generated.</param>
+/// <param name="CaptureOnlyReason">
+///     Why the snapshot can't put its live object back, naming the first member that blocks it, or null when every
+///     member can be put back and <c>RestoreInto</c> is generated.
+/// </param>
 /// <param name="Members">Generated members in the live type's declaration order.</param>
 /// <param name="State">
 ///     The snapshot type and every schema field, generated and hand-written, for the state walker.
@@ -231,10 +234,15 @@ internal sealed record SnapshotMemberModel(
 internal sealed record SnapshotModel(
     string LiveTypeName,
     bool EmitConstructor,
-    bool Restorable,
+    string? CaptureOnlyReason,
     EquatableArray<SnapshotMemberModel> Members,
     StateTypeModel State)
 {
+    /// <summary>
+    ///     Gets whether every member can be put back, so the real <c>RestoreInto</c> is generated.
+    /// </summary>
+    public bool Restorable => CaptureOnlyReason is null;
+
     /// <summary>
     ///     Gets the snapshot type to reopen.
     /// </summary>

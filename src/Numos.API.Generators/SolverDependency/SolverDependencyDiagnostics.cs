@@ -85,4 +85,13 @@ internal static class SolverDependencyDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
+
+    public static readonly DiagnosticDescriptor FileLocal = new(
+        "NUMOSDEP010",
+        "Solver class must not be file-local",
+        "'{0}' is declared in '{1}', which is file-local or nested in a file-local type, so injection can't be " +
+        "generated into it from another file; remove the 'file' modifier",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
 }

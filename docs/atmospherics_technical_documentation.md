@@ -1677,6 +1677,7 @@ gives the resolution order and what it means for solver code.
 | `NUMOSDEP007` | Warning  | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it.                                                           |
 | `NUMOSDEP008` | Error    | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
 | `NUMOSDEP009` | Error    | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself.                        |
+| `NUMOSDEP010` | Error    | The class, or a type it's nested in, is `file`-local, so the generator can't reopen it from another file.                                        |
 
 ### 12.2 Solver-specific configuration
 
@@ -1746,14 +1747,14 @@ Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE013` | Error    | The class derives from a class other than `object`, whose members the generator can't see.                   |
 | `NUMOSSTATE014` | Error    | No constructor binds: a parameter matches no member, can't take its type, or a member has no setter.          |
 | `NUMOSSTATE015` | Error    | `Key` returns a blank string.                                                                                 |
-| `NUMOSSTATE016` | Warning  | A mutable field, or an auto-property with `set`/`init`, has neither `[NumosSerialize]` nor `[NumosIgnore]`.   |
+| `NUMOSSTATE016` | Warning  | A mutable field, or an auto-property with `set`/`init`, has neither `[NumosSerialize]` nor `[NumosIgnore]`. This includes a snapshot's live type, except a member a `Count` names. |
 | `NUMOSSTATE017` | Error    | `[NumosSerialize("...")]` passes a blank wire name.                                                           |
 | `NUMOSSTATE018` | Error    | A solver configuration's `Key` doesn't return a compile-time constant.                                        |
 | `NUMOSSTATE019` | Warning  | A solver configuration is private or protected (or nested in one), so the module initializer can't name it.   |
 | `NUMOSSTATE020` | Error    | A solver's marked member is `readonly`, get-only, or `init`, so a restore can't assign it in place.           |
 | `NUMOSSTATE021` | Error    | A `[NumosSnapshotOf]` snapshot, or a type it's nested in, isn't `partial`.                                      |
 | `NUMOSSTATE022` | Error    | The snapshot is a struct, record, generic, abstract, or static, or derives from a class other than `object`.    |
-| `NUMOSSTATE023` | Error    | The live type isn't a non-generic class in the same project.                                                    |
+| `NUMOSSTATE023` | Error    | The live type isn't a non-generic class in the same project, or it is `file`-local or nested in a `file` type.  |
 | `NUMOSSTATE024` | Error    | The live type has no `[NumosSerialize]` members.                                                                |
 | `NUMOSSTATE025` | Error    | A marked live member is private or protected, so the generated snapshot can't read it.                          |
 | `NUMOSSTATE026` | Error    | A marked live member is mutable and not an array, a live type with a snapshot, or an adapter property.          |
@@ -1762,6 +1763,9 @@ Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE029` | Error    | `Count` is on a member that isn't an array, `FlatArray<T>`, or list of live children.                           |
 | `NUMOSSTATE030` | Error    | Two snapshots name the same live type.                                                                          |
 | `NUMOSSTATE031` | Error    | `Count` is on a member of an ordinary serializable type, where it means nothing.                                |
+| `NUMOSSTATE032` | Error    | A serializable type, class solver, or snapshot is `file`-local or nested in a `file` type.                      |
+| `NUMOSSTATE033` | Error    | A property has `[field: NumosSerialize]`. The mark lands on the backing field, which the generator doesn't read. Use `[NumosSerialize]` on the property. |
+| `NUMOSSTATE034` | Error    | `[NumosSerialize]` is on an indexer, which doesn't hold one value.                                              |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.
@@ -1823,9 +1827,15 @@ chunk for the first time still get one shared array. Synchronizing writes to tha
 are valid only until the tick ends, and using one later throws. Ask the context again in each callback instead of
 keeping views.
 
-Outside a tick, `simulation.GetChunkField(handle, field)` returns the same storage. Host code uses it to seed or
-inspect the field. Seed rollback fields before capturing the starting checkpoint. Field writes are not recorded
-operations, so after that point only deterministic solver callbacks should change them. Replay re-runs the solver to
+Outside a tick, `simulation.TryGetChunkField(handle, field, out var values)` gives host code a read-only view of the
+same storage. It never allocates. It returns `false` when the chunk has no storage for the field yet, which reads as
+every element being `default`. Reading therefore cannot change a checkpoint or a state hash.
+
+Writing from host code goes through `simulation.Dangerous().GetChunkField(handle, field)`, which returns a writable
+view and creates the storage on first use. Field writes are not recorded operations, so a recording replays to a
+different state if a host writes between recorded ticks. Creating a rollback field's storage also adds a zero-filled
+array to the next checkpoint and changes the state hash. Seed rollback fields before capturing the starting
+checkpoint. After that point, only deterministic solver callbacks should change them. Replay re-runs the solver to
 regenerate its writes.
 
 #### Lifetime and allocation

@@ -93,7 +93,7 @@ public sealed class SnapshotDiagnosticTests
     [Test]
     public void LiveTypeWithoutMarkedMembers_ReportsNumosState024()
     {
-        Assert.That(Ids(Source("internal sealed class Tank { public float Pressure; }")), Is.EqualTo(new[] { "NUMOSSTATE024" }));
+        Assert.That(Ids(Source("internal sealed class Tank { public readonly float Pressure; }")), Is.EqualTo(new[] { "NUMOSSTATE024" }));
     }
 
     [Test]
@@ -239,8 +239,173 @@ public sealed class SnapshotDiagnosticTests
             Assert.That(GeneratorHarness.Errors(output), Is.Empty);
             INamedTypeSymbol snapshot = output.GetTypeByMetadataName("MyMod.TankSnapshot")!;
             Assert.That(snapshot.GetMembers("Main").OfType<IPropertySymbol>().Single().Type.Name, Is.EqualTo("ValveSnapshot"));
-            Assert.That(snapshot.GetMembers("RestoreInto"), Is.Empty, "a list of live children makes it capture-only");
+            Assert.That(
+                snapshot.GetMembers("RestoreInto").Single().GetAttributes().Select(static attribute => attribute.AttributeClass!.Name),
+                Does.Contain("ObsoleteAttribute"),
+                "a list of live children makes it capture-only");
         });
+    }
+
+    /// <summary>
+    ///     Compiles <paramref name="source" /> with and without a call to <c>RestoreInto</c>, and returns the errors the
+    ///     call adds.
+    /// </summary>
+    private static Diagnostic[] RestoreIntoErrors(string source, string snapshot, string live)
+    {
+        string caller = $"internal static class Caller {{ public static void Restore({snapshot} snapshot, {live} live) => snapshot.RestoreInto(live); }}";
+        string[] ids = Ids(source, out Compilation without);
+        Assert.That(ids, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(without), Is.Empty);
+
+        ids = Ids(source + "\n" + caller, out Compilation with);
+        Assert.That(ids, Is.Empty);
+        return GeneratorHarness.Errors(with);
+    }
+
+    [Test]
+    public void RestoreIntoOnAListOfLiveChildren_FailsTheBuildAndNamesTheMember()
+    {
+        string live = """
+                      internal sealed class Child { [NumosSerialize] public bool Open; }
+
+                      internal sealed class Parent
+                      {
+                          [NumosSerialize] public float Pressure;
+                          [NumosSerialize] public Child[] Children = [];
+                      }
+
+                      [NumosSnapshotOf(typeof(Child))] internal sealed partial class ChildSnapshot;
+                      """;
+
+        string source = Source(live, "[NumosSnapshotOf(typeof(Parent))] internal sealed partial class ParentSnapshot;");
+        Diagnostic[] errors = RestoreIntoErrors(source, "ParentSnapshot", "Parent");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratorHarness.Ids(errors), Is.EqualTo(new[] { "CS0619" }));
+            Assert.That(
+                errors[0].GetMessage(),
+                Does.Contain("MyMod.ParentSnapshot is capture-only: 'MyMod.Parent.Children' is a list of live objects"));
+        });
+    }
+
+    [Test]
+    public void RestoreIntoWithAGetOnlyAdapter_NamesTheMissingSetter()
+    {
+        string live = """
+                      internal sealed class Tank
+                      {
+                          private readonly List<int> _cells = [1, 2];
+
+                          [NumosSerialize] public float Pressure;
+                          [NumosSerialize("Cells")] internal IReadOnlyList<int> CellsSnapshot => _cells.ToArray();
+                      }
+                      """;
+
+        Diagnostic[] errors = RestoreIntoErrors(Source(live), "TankSnapshot", "Tank");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratorHarness.Ids(errors), Is.EqualTo(new[] { "CS0619" }));
+            Assert.That(errors[0].GetMessage(), Does.Contain("'MyMod.Tank.CellsSnapshot' has no setter the snapshot can call"));
+        });
+    }
+
+    [Test]
+    public void RestoreIntoThroughACaptureOnlyNestedSnapshot_NamesTheNestedSnapshot()
+    {
+        string live = """
+                      internal sealed class Valve
+                      {
+                          [NumosSerialize] public bool Open;
+                          [NumosSerialize] internal IReadOnlyList<int> Positions => new[] { 1 };
+                      }
+
+                      internal sealed class Tank
+                      {
+                          [NumosSerialize] public float Pressure;
+                          [NumosSerialize] public Valve Main = new();
+                      }
+
+                      [NumosSnapshotOf(typeof(Valve))] internal sealed partial class ValveSnapshot;
+                      """;
+
+        Diagnostic[] errors = RestoreIntoErrors(Source(live), "TankSnapshot", "Tank");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratorHarness.Ids(errors), Is.EqualTo(new[] { "CS0619" }));
+            Assert.That(
+                errors[0].GetMessage(),
+                Does.Contain("'MyMod.Tank.Main' is restored through 'MyMod.ValveSnapshot', which is capture-only"));
+        });
+    }
+
+    [Test]
+    public void RestoreIntoOnARestorableSnapshot_Compiles()
+    {
+        Assert.That(RestoreIntoErrors(Source(Tank), "TankSnapshot", "Tank"), Is.Empty);
+    }
+
+    [Test]
+    public void UnmarkedMutableLiveField_ReportsNumosState016AndStillGenerates()
+    {
+        string live = """
+                      internal sealed class Tank
+                      {
+                          [NumosSerialize] public float Pressure;
+                          public int Leaks;
+                      }
+                      """;
+
+        GeneratorRunResult[] results = GeneratorHarness.RunSnapshots(out Compilation output, out var diagnostics, Source(live));
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE016" }));
+            Assert.That(diagnostics[0].GetMessage(), Does.Contain("'MyMod.Tank.Leaks'"));
+            Assert.That(
+                results.SelectMany(static result => result.GeneratedSources).Select(static source => source.HintName),
+                Does.Contain("MyMod.TankSnapshot.NumosSnapshot.g.cs"));
+            Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        });
+    }
+
+    [TestCase("[NumosIgnore] public int Leaks;")]
+    [TestCase("[NumosIgnore] public int Leaks { get; set; }")]
+    [TestCase("public readonly int Leaks;")]
+    [TestCase("public int Leaks { get; }")]
+    [TestCase("public static int Leaks;")]
+    [TestCase("public int Leaks { get => 0; set { } }")]
+    public void ExemptUnmarkedLiveMember_DoesNotReportNumosState016(string member)
+    {
+        string live = $$"""
+                        internal sealed class Tank
+                        {
+                            [NumosSerialize] public float Pressure;
+                            {{member}}
+                        }
+                        """;
+
+        string[] ids = Ids(Source(live), out Compilation output);
+        Assert.Multiple(() =>
+        {
+            Assert.That(ids, Is.Empty);
+            Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void CountMemberOfALiveType_DoesNotReportNumosState016()
+    {
+        string live = """
+                      internal sealed class Tank
+                      {
+                          public int Used;
+                          [NumosSerialize(Count = nameof(Used))] public ushort[] Active = new ushort[4];
+                      }
+                      """;
+
+        Assert.That(Ids(Source(live)), Is.Empty);
     }
 
     [Test]
@@ -323,5 +488,151 @@ public sealed class SnapshotDiagnosticTests
                           """;
 
         Assert.That(Ids(Source(Tank, snapshot)), Does.Contain("NUMOSSTATE027"));
+    }
+
+    [Test]
+    public void FileLocalSnapshot_ReportsNumosState032WithoutCrashing()
+    {
+        string source = Source(Tank, "[NumosSnapshotOf(typeof(Tank))] file sealed partial class TankSnapshot;");
+        GeneratorRunResult[] results = GeneratorHarness.RunSnapshots(out _, out var diagnostics, source);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(results.Select(static result => result.Exception), Has.All.Null);
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE032" }));
+            Assert.That(results.SelectMany(static result => result.GeneratedSources), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void SnapshotNestedInAFileLocalType_ReportsNumosState032WithoutCrashing()
+    {
+        string snapshot = """
+                          file partial class Holder
+                          {
+                              [NumosSnapshotOf(typeof(Tank))] internal sealed partial class TankSnapshot;
+                          }
+                          """;
+
+        GeneratorRunResult[] results = GeneratorHarness.RunSnapshots(out _, out var diagnostics, Source(Tank, snapshot));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(results.Select(static result => result.Exception), Has.All.Null);
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE032" }));
+        });
+    }
+
+    [Test]
+    public void FileLocalLiveType_ReportsNumosState023WithoutCrashing()
+    {
+        string live = """
+                      file sealed class Tank
+                      {
+                          [NumosSerialize] public float Pressure;
+                      }
+                      """;
+
+        GeneratorRunResult[] results = GeneratorHarness.RunSnapshots(out _, out var diagnostics, Source(live));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(results.Select(static result => result.Exception), Has.All.Null);
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE023" }));
+            Assert.That(results.SelectMany(static result => result.GeneratedSources), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void LiveTypeNestedInAFileLocalType_ReportsNumosState023()
+    {
+        string live = """
+                      file static class Holder
+                      {
+                          public sealed class Tank
+                          {
+                              [NumosSerialize] public float Pressure;
+                          }
+                      }
+                      """;
+
+        string snapshot = "[NumosSnapshotOf(typeof(Holder.Tank))] internal sealed partial class TankSnapshot;";
+        Assert.That(Ids(Source(live, snapshot)), Is.EqualTo(new[] { "NUMOSSTATE023" }));
+    }
+
+    [Test]
+    public void FieldTargetOnLiveProperty_ReportsNumosState033Only()
+    {
+        string live = """
+                      internal sealed class Tank
+                      {
+                          [NumosSerialize] public float Pressure;
+                          [field: NumosSerialize] public int Extra { get; set; }
+                      }
+                      """;
+
+        Assert.That(Ids(Source(live)), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+    }
+
+    [Test]
+    public void FieldTargetOnTheOnlyLiveMark_DoesNotAlsoReportNumosState024()
+    {
+        string live = "internal sealed class Tank { [field: NumosSerialize] public int Extra { get; set; } }";
+        Assert.That(Ids(Source(live)), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+    }
+
+    [Test]
+    public void FieldTargetOnSnapshotMember_ReportsNumosState033()
+    {
+        string snapshot = """
+                          [NumosSnapshotOf(typeof(Tank))]
+                          internal sealed partial class TankSnapshot
+                          {
+                              [field: NumosSerialize] public int Extra { get; set; }
+                          }
+                          """;
+
+        Assert.That(Ids(Source(Tank, snapshot)), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+    }
+
+    [Test]
+    public void MarkedIndexerOnLiveType_ReportsNumosState034InsteadOfSkippingTheSnapshot()
+    {
+        string live = """
+                      internal sealed class Tank
+                      {
+                          [NumosSerialize] public float Pressure;
+                          [NumosSerialize] public float this[int index] { get => 0f; set { } }
+                      }
+                      """;
+
+        GeneratorRunResult[] results = GeneratorHarness.RunSnapshots(out _, out var diagnostics, Source(live));
+        Assert.Multiple(() =>
+        {
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE034" }));
+            Assert.That(diagnostics[0].GetMessage(), Does.Contain("'MyMod.Tank.this[int]'"));
+            Assert.That(results.SelectMany(static result => result.GeneratedSources), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void MarkedIndexerAsTheOnlyLiveMark_DoesNotAlsoReportNumosState024()
+    {
+        string live = "internal sealed class Tank { [NumosSerialize] public float this[int index] => 0f; }";
+        Assert.That(Ids(Source(live)), Is.EqualTo(new[] { "NUMOSSTATE034" }));
+    }
+
+    [Test]
+    public void MarkedIndexerOnSnapshotMember_ReportsNumosState034()
+    {
+        string snapshot = """
+                          [NumosSnapshotOf(typeof(Tank))]
+                          internal sealed partial class TankSnapshot
+                          {
+                              [NumosSerialize] public int this[int index] { get => 0; set { } }
+                          }
+                          """;
+
+        Assert.That(Ids(Source(Tank, snapshot)), Is.EqualTo(new[] { "NUMOSSTATE034" }));
     }
 }

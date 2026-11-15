@@ -97,6 +97,12 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             (INamedTypeSymbol current, bool isPartial) = chain[i];
+            if (current.IsFileLocal)
+            {
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.FileLocal, location, displayName));
+                canGenerate = false;
+            }
+
             if (!isPartial)
             {
                 diagnostics.Add(
@@ -123,10 +129,14 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         string liveDisplay = live.ToDisplayString();
         bool liveInProject = SymbolEqualityComparer.Default.Equals(live.ContainingAssembly, compilation.Assembly);
         bool liveGeneric = false;
+        bool liveFileLocal = false;
         for (INamedTypeSymbol? current = live; current is not null; current = current.ContainingType)
+        {
             liveGeneric |= current.TypeParameters.Length > 0;
+            liveFileLocal |= current.IsFileLocal;
+        }
 
-        if (live.TypeKind != TypeKind.Class || liveGeneric || !liveInProject)
+        if (live.TypeKind != TypeKind.Class || liveGeneric || liveFileLocal || !liveInProject)
         {
             diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.LiveTypeInvalid, location, liveDisplay, displayName));
             return Skipped(snapshot, typeName, displayName, liveName, liveDisplay, diagnostics, location);
@@ -147,15 +157,44 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             }
         }
 
+        // The snapshot saves and restores a count member itself, so it isn't an unmarked member.
+        var countMembers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ISymbol member in live.GetMembers())
+        {
+            if (member is IFieldSymbol or IPropertySymbol && StateSymbols.FindSerialize(member) is { } marked &&
+                StateSymbols.NamedString(marked, "Count") is { } countName)
+            {
+                countMembers.Add(countName);
+            }
+        }
+
         var ids = new Dictionary<int, string>();
         var members = new List<LiveMemberDeclaration>();
         bool anyMarked = false;
         foreach (ISymbol member in live.GetMembers())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (member is not (IFieldSymbol or IPropertySymbol) || member.IsImplicitlyDeclared ||
-                StateSymbols.FindSerialize(member) is not { } serialize)
+            LocationInfo? memberLocation = LocationInfo.From(member.Locations.FirstOrDefault()) ?? location;
+            if (StateSymbols.ReportUnsupportedMark(member, liveDisplay, memberLocation, diagnostics))
             {
+                anyMarked = true;
+                canGenerate = false;
+                continue;
+            }
+
+            if (member is not (IFieldSymbol or IPropertySymbol) || member.IsImplicitlyDeclared)
+                continue;
+
+            if (StateSymbols.FindSerialize(member) is not { } serialize)
+            {
+                // A mutable member that's neither marked nor ignored could miss the checkpoint, as on a serializable type.
+                if (!countMembers.Contains(member.Name) &&
+                    StateSymbols.TryGetMember(live, member, out _, out bool hasStorage))
+                {
+                    SerializedMember.TryParse(
+                        member, null, hasStorage, liveDisplay, memberLocation, WireNameChecks.Identifier, ids, diagnostics);
+                }
+
                 continue;
             }
 
@@ -180,6 +219,10 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         bool hasParameterlessConstructor = false;
         foreach (ISymbol member in snapshot.GetMembers())
         {
+            LocationInfo? memberLocation = LocationInfo.From(member.Locations.FirstOrDefault()) ?? location;
+            if (StateSymbols.ReportUnsupportedMark(member, displayName, memberLocation, diagnostics))
+                canGenerate = false;
+
             if (member.IsImplicitlyDeclared)
                 continue;
 
@@ -199,7 +242,6 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 continue;
 
             ownNames.Add(member.Name);
-            LocationInfo? memberLocation = LocationInfo.From(member.Locations.FirstOrDefault()) ?? location;
             if (Array.IndexOf(OwnedMembers, member.Name) >= 0)
             {
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.HandWritten, memberLocation, displayName, member.Name));
@@ -467,8 +509,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
 
         var plans = new Dictionary<
             string,
-            (SnapshotDeclaration Declaration, List<SnapshotMemberModel> Members, List<string> Nested, bool OwnRestorable)>(
-            StringComparer.Ordinal);
+            (SnapshotDeclaration Declaration, List<SnapshotMemberModel> Members, List<string> DisplayNames, List<string> Nested,
+            bool OwnRestorable)>(StringComparer.Ordinal);
 
         foreach (SnapshotDeclaration declaration in byLive.Values)
         {
@@ -476,6 +518,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 continue;
 
             var members = new List<SnapshotMemberModel>();
+            var displayNames = new List<string>();
             var nested = new List<string>();
             bool restorable = true;
             bool failed = false;
@@ -489,13 +532,14 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 }
 
                 members.Add(model);
+                displayNames.Add(member.DisplayName);
                 restorable &= model.Restore != RestoreMode.None;
                 if (model.Kind == SnapshotMemberKind.Nested)
                     nested.Add(model.Nested);
             }
 
             if (!failed)
-                plans.Add(declaration.TypeName, (declaration, members, nested, restorable));
+                plans.Add(declaration.TypeName, (declaration, members, displayNames, nested, restorable));
         }
 
         // A snapshot that restores a nested one in place is only restorable if that one is.
@@ -551,16 +595,51 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 fields.OrderBy(static field => field.Id).ToEquatableArray(),
                 StateReadPlan.Empty);
 
+            string? captureOnlyReason = restorableTypes.Contains(declaration.TypeName)
+                ? null
+                : CaptureOnlyReason(plan.Members, plan.DisplayNames, restorableTypes, byLive);
+
             models.Add(
                 new SnapshotModel(
                     declaration.LiveTypeName,
                     declaration.EmitConstructor,
-                    restorableTypes.Contains(declaration.TypeName),
+                    captureOnlyReason,
                     plan.Members.ToEquatableArray(),
                     state));
         }
 
         return new GeneratorOutput<SnapshotModel>(diagnostics.ToEquatableArray(), models.ToEquatableArray());
+    }
+
+    /// <summary>
+    ///     Names the first member, in the live type's declaration order, that keeps a snapshot from restoring its live
+    ///     object.
+    /// </summary>
+    private static string CaptureOnlyReason(
+        List<SnapshotMemberModel> members, List<string> displayNames, HashSet<string> restorableTypes,
+        Dictionary<string, SnapshotDeclaration> byLive)
+    {
+        for (int index = 0; index < members.Count; index++)
+        {
+            SnapshotMemberModel member = members[index];
+            string displayName = displayNames[index];
+            if (member.Kind == SnapshotMemberKind.NestedList)
+                return "'" + displayName + "' is a list of live objects that only its owner can create or remove";
+
+            if (member.Restore == RestoreMode.None)
+                return "'" + displayName + "' has no setter the snapshot can call";
+
+            if (member.Kind == SnapshotMemberKind.Nested && !restorableTypes.Contains(member.Nested))
+            {
+                string nested = byLive.Values.FirstOrDefault(declaration => declaration.TypeName == member.Nested)?.DisplayName ??
+                                member.Nested.Replace("global::", "");
+
+                return "'" + displayName + "' is restored through '" + nested + "', which is capture-only";
+            }
+        }
+
+        // Unreachable: a snapshot is only capture-only through one of its members.
+        return "a member can't be put back";
     }
 
     private static SnapshotMemberModel? ResolveMember(

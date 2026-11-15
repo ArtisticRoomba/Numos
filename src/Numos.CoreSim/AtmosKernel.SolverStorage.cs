@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -42,6 +43,24 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             return GetChunk(position).GetOrCreateField(field);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a chunk's storage for a field if the chunk has already allocated it.
+    /// </summary>
+    /// <param name="position">The chunk's position.</param>
+    /// <param name="field">The field descriptor.</param>
+    /// <param name="array">The live array, or <see langword="null" /> when the chunk has no storage for the field.</param>
+    /// <returns><see langword="true" /> when the chunk has storage for <paramref name="field" />.</returns>
+    /// <remarks>
+    ///     This never allocates, so it leaves checkpoints and state hashes unchanged.
+    /// </remarks>
+    internal bool TryGetChunkField<T>(Int3 position, ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? array)
+    {
+        lock (StateGate)
+        {
+            return GetChunk(position).TryGetField(field, out array);
         }
     }
 }

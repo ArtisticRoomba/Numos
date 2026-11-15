@@ -104,10 +104,7 @@ public readonly struct FlatArray<T>
     /// </exception>
     public int GetIndex(Int3 position)
     {
-        if (!position.IsWithin(_dimensions))
-            throw new IndexOutOfRangeException();
-
-        return GetIndexUnsafe(position);
+        return FlatArrayIndexing.GetIndex(position, _dimensions);
     }
 
     /// <summary>
@@ -121,9 +118,8 @@ public readonly struct FlatArray<T>
     /// </remarks>
     public int GetIndexUnsafe(Int3 position)
     {
-        return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
+        return FlatArrayIndexing.GetIndexUnsafe(position, _dimensions);
     }
-
 
     /// <summary>
     ///     Converts a flat array index to its coordinate.
@@ -133,13 +129,7 @@ public readonly struct FlatArray<T>
     /// <exception cref="IndexOutOfRangeException"><paramref name="index" /> is outside the backing array.</exception>
     public Int3 GetPosition(int index)
     {
-        if ((uint)index >= (uint)Length)
-            throw new IndexOutOfRangeException();
-
-        return new Int3(
-            index % _dimensions.X,
-            index / _dimensions.X % _dimensions.Y,
-            index / (_dimensions.X * _dimensions.Y));
+        return FlatArrayIndexing.GetPosition(index, Length, _dimensions);
     }
 
     /// <summary>
@@ -200,6 +190,25 @@ public readonly struct FlatArray<T>
     public FlatArray<T> Reshape(Int3 dimensions)
     {
         return new FlatArray<T>(_data, dimensions);
+    }
+
+    /// <summary>
+    ///     Returns a read-only view of the same storage and dimensions.
+    /// </summary>
+    /// <returns>A view sharing this instance's backing array. It is uninitialized when this instance is.</returns>
+    public ReadOnlyFlatArray<T> AsReadOnly()
+    {
+        return new ReadOnlyFlatArray<T>(_data, _dimensions);
+    }
+
+    /// <summary>
+    ///     Converts a flat array to a read-only view of the same storage.
+    /// </summary>
+    /// <param name="array">The array to view.</param>
+    /// <returns>The same view that <see cref="AsReadOnly" /> returns.</returns>
+    public static implicit operator ReadOnlyFlatArray<T>(FlatArray<T> array)
+    {
+        return array.AsReadOnly();
     }
 
     /// <summary>

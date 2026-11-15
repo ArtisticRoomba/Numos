@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Numos.API.Generators.State;
 
 namespace Numos.API.Generators.Tests;
 
@@ -543,5 +544,203 @@ public sealed class StateDiagnosticTests
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE019" }));
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
         Assert.That(result.GeneratedSources.Select(static source => source.HintName), Has.None.Contains("ModuleInitializer"));
+    }
+
+    private const string PublicConfiguration = """
+                                               public sealed partial class Visible : IAtmosSolverConfiguration
+                                               {
+                                                   public string Key => "my-mod/visible";
+                                                   [NumosSerialize] public float Rate { get; init; }
+                                               }
+                                               """;
+
+    private static string FileLocalSource(string hidden)
+    {
+        return $$"""
+                 using Numos.API;
+                 using Numos.CoreSim;
+                 using Numos.CoreSim.State;
+
+                 namespace MyMod;
+
+                 {{PublicConfiguration}}
+
+                 {{hidden}}
+                 """;
+    }
+
+    [TestCase(
+        """
+        file sealed partial class Hidden : IAtmosSolverConfiguration
+        {
+            public string Key => "my-mod/hidden";
+            [NumosSerialize] public float Rate { get; init; }
+        }
+        """)]
+    [TestCase(
+        """
+        file sealed partial class Hidden : IAtmosWorldSolver
+        {
+            [NumosSerialize] public float Rate;
+
+            public void Solve(AtmosWorldSolverContext context)
+            {
+            }
+        }
+        """)]
+    [TestCase(
+        """
+        file partial class Holder
+        {
+            public sealed partial class Hidden : IAtmosSolverConfiguration
+            {
+                public string Key => "my-mod/hidden";
+                [NumosSerialize] public float Rate { get; init; }
+            }
+        }
+        """)]
+    public void FileLocalType_ReportsNumosState032WithoutCrashing(string hidden)
+    {
+        GeneratorRunResult result = GeneratorHarness.RunState(
+            out _, out var diagnostics, null, FileLocalSource(hidden));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Exception, Is.Null);
+            Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE032" }));
+            Assert.That(diagnostics[0].GetMessage(), Does.Contain("Hidden"));
+            Assert.That(
+                result.GeneratedSources.Select(static source => source.HintName),
+                Has.Some.EqualTo("MyMod.Visible.NumosState.g.cs"));
+
+            string initializer = GeneratorHarness.GeneratedSource(result, StateGenerator.ModuleInitializerHintName);
+            Assert.That(initializer, Does.Contain("MyMod.Visible").And.Not.Contain("Hidden"));
+        });
+    }
+
+    [Test]
+    public void FieldTargetOnProperty_ReportsNumosState033()
+    {
+        Diagnostic[] diagnostics = Run(
+            out GeneratorRunResult result,
+            State(
+                """
+                [NumosSerialize] public float Rate { get; set; }
+                [field: NumosSerialize] public float Spread { get; set; }
+                """));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'MyMod.Settings.Spread'"));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void FieldTargetOnTheOnlyMark_ReportsNumosState033()
+    {
+        Assert.That(
+            Ids(State("[field: NumosSerialize] public float Spread { get; set; }")),
+            Is.EqualTo(new[] { "NUMOSSTATE033" }));
+    }
+
+    [Test]
+    public void FieldTargetOnSolverProperty_ReportsNumosState033()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] public float Rate { get; set; }
+                                  [field: NumosSerialize] public float Spread { get; set; }
+
+                                  public void Solve(AtmosWorldSolverContext context)
+                                  {
+                                  }
+                              }
+                              """;
+
+        Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void FieldTargetOnRecordParameter_ReportsNumosState033()
+    {
+        const string source = """
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial record Settings(
+                                  [property: NumosSerialize] float Rate,
+                                  [field: NumosSerialize] float Spread);
+                              """;
+
+        Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE033" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'MyMod.Settings.Spread'"));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void FieldTargetOnAField_IsAllowed()
+    {
+        Assert.That(Ids(State("[field: NumosSerialize] public float Rate;")), Is.Empty);
+    }
+
+    [Test]
+    public void MarkedIndexerOnly_ReportsNumosState034()
+    {
+        Diagnostic[] diagnostics = Run(
+            out GeneratorRunResult result,
+            State("[NumosSerialize] public float this[int index] { get => 0f; set { } }"));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE034" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'MyMod.Settings.this[int]'"));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void MarkedIndexerNextToMarkedField_ReportsNumosState034()
+    {
+        Diagnostic[] diagnostics = Run(
+            out GeneratorRunResult result,
+            State(
+                """
+                [NumosSerialize] public float Rate { get; set; }
+                [NumosSerialize] public float this[int index] { get => 0f; set { } }
+                """));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE034" }));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void MarkedIndexerOnSolver_ReportsNumosState034()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] public float Rate { get; set; }
+                                  [NumosSerialize] public float this[int index] { get => 0f; set { } }
+
+                                  public void Solve(AtmosWorldSolverContext context)
+                                  {
+                                  }
+                              }
+                              """;
+
+        Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE034" }));
+        Assert.That(result.GeneratedSources, Is.Empty);
     }
 }

@@ -86,6 +86,16 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
 
         foreach ((INamedTypeSymbol containing, bool isPartial) in PartialSyntax.GetContainingChain(type, syntax))
         {
+            if (containing.IsFileLocal)
+            {
+                typeDiagnostics.Add(
+                    DiagnosticInfo.Create(
+                        SolverDependencyDiagnostics.FileLocal,
+                        typeLocation,
+                        displayName,
+                        containing.ToDisplayString()));
+            }
+
             if (!isPartial)
             {
                 typeDiagnostics.Add(

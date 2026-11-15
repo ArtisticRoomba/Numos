@@ -58,12 +58,19 @@ internal sealed class AtmosGasMixturePool : IDisposable
     private readonly PhaseChangeSolver _phaseChanges = new();
     private readonly ReactionSolver _reactions = new();
 
+    [NumosIgnore]
     private AtmosChunk[] _pages = [];
+    [NumosIgnore]
     private CubicMetre[][] _pageVolumes = [];
+    [NumosIgnore]
     private uint[] _generations = [];
+    [NumosIgnore]
     private bool[] _allocated = [];
+    [NumosIgnore]
     private int _lowestFree;
+    [NumosIgnore]
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
+    [NumosIgnore]
     private bool _isTickExecuting;
 
     internal AtmosGasMixturePool()
@@ -84,11 +91,13 @@ internal sealed class AtmosGasMixturePool : IDisposable
     /// <summary>
     ///     Gets the tick number set by the latest <see cref="BeginTick" />.
     /// </summary>
+    [NumosIgnore]
     internal long TickCount { get; private set; }
 
     /// <summary>
     ///     Gets the number of slots that currently hold a mixture.
     /// </summary>
+    [NumosIgnore]
     internal int AllocatedCount { get; private set; }
 
     /// <summary>

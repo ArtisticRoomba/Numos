@@ -104,7 +104,7 @@ internal static class StateDiagnostics
         "NUMOSSTATE016",
         "Mutable member is neither serialized nor ignored",
         "'{0}' can change but isn't saved with '{1}'; mark it [NumosSerialize] if it affects behavior, or " +
-        "[NumosIgnore] if it's derived or scratch",
+        "[NumosIgnore] if it's derived, scratch, or saved through another member",
         Category,
         DiagnosticSeverity.Warning,
         true);
@@ -165,7 +165,8 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor LiveTypeInvalid = new(
         "NUMOSSTATE023",
         "Live type can't have a generated snapshot",
-        "'{0}' can't be the live type of snapshot '{1}'; it must be a non-generic class declared in the same project",
+        "'{0}' can't be the live type of snapshot '{1}'; it must be a non-generic class declared in the same project " +
+        "and not file-local",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -236,6 +237,32 @@ internal static class StateDiagnostics
         "NUMOSSTATE031",
         "Count only applies to live types",
         "'{0}' sets Count, which only applies to members of a live type that has a [NumosSnapshotOf] snapshot",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor FileLocal = new(
+        "NUMOSSTATE032",
+        "Serializable type must not be file-local",
+        "'{0}' is file-local or nested in a file-local type, so code can't be generated into it from another file; " +
+        "remove the 'file' modifier",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor BackingFieldTarget = new(
+        "NUMOSSTATE033",
+        "[NumosSerialize] is on a property's backing field",
+        "'{0}' has [field: NumosSerialize], which marks the backing field the generator doesn't read; mark the " +
+        "property instead ([NumosSerialize], or [property: NumosSerialize] on a record parameter)",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor Indexer = new(
+        "NUMOSSTATE034",
+        "Serialized member must not be an indexer",
+        "'{0}' is an indexer; [NumosSerialize] only applies to fields and properties that hold one value",
         Category,
         DiagnosticSeverity.Error,
         true);
