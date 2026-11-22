@@ -251,6 +251,96 @@ public sealed class AtmosSolverGasMixtureTests
     }
 
     [Test]
+    public void TryGet_UntouchedRollbackField_ReturnsFalseAndLeavesTheStateHashAlone()
+    {
+        var untouched = ChunkField<float>.Register(KeyPrefix + "try-get-untouched", true);
+        using var looking = CreateWorld();
+        using var idle = CreateWorld();
+        using var lookingMixture = looking.CreateGasMixture(3f, 300f);
+        using var idleMixture = idle.CreateGasMixture(3f, 300f);
+        bool found = true;
+        bool has = true;
+
+        looking.Solvers.Register(
+            KeyPrefix + "try-get-untouched",
+            context =>
+            {
+                var page = context.GasMixtures[0];
+                found = page.TryGet(untouched, out _);
+                has = page.Has(untouched);
+            });
+        idle.Solvers.Register(KeyPrefix + "try-get-untouched", _ => { });
+
+        looking.Tick();
+        idle.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(found, Is.False);
+            Assert.That(has, Is.False);
+            Assert.That(looking.ComputeStateHash(), Is.EqualTo(idle.ComputeStateHash()));
+        });
+    }
+
+    [Test]
+    public void TryGet_AfterGet_ViewsTheSameArray()
+    {
+        var perCell = ChunkField<float>.Register(KeyPrefix + "try-get-per-cell", true);
+        using var world = CreateWorld();
+        using var mixture = world.CreateGasMixture(3f, 300f);
+        bool found = false;
+        bool has = false;
+        int length = -1;
+        float viaGet = 0f;
+        float viaTryGet = 0f;
+
+        world.Solvers.Register(
+            KeyPrefix + "try-get-after-get",
+            context =>
+            {
+                var page = context.GasMixtures[0];
+                page.Get(perCell)[2] = 4f;
+                found = page.TryGet(perCell, out var view);
+                has = page.Has(perCell);
+                length = view.Length;
+                viaTryGet = view[2];
+                view[3] = 6f;
+                viaGet = page.Get(perCell)[3];
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(found, Is.True);
+            Assert.That(has, Is.True);
+            Assert.That(length, Is.EqualTo(256));
+            Assert.That(viaTryGet, Is.EqualTo(4f));
+            Assert.That(viaGet, Is.EqualTo(6f));
+        });
+    }
+
+    [Test]
+    public void TryGetAndHas_AfterTheTickOrOnDefault_Throw()
+    {
+        using var world = CreateWorld();
+        using var mixture = world.CreateGasMixture(3f, 300f);
+        AtmosSolverGasMixturePage retained = default;
+        world.Solvers.Register(KeyPrefix + "try-get-retained", context => retained = context.GasMixtures[0]);
+
+        world.Tick();
+        AtmosSolverGasMixturePage defaultPage = default;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => retained.TryGet(Exposure, out _), Throws.InvalidOperationException);
+            Assert.That(() => retained.Has(Exposure), Throws.InvalidOperationException);
+            Assert.That(() => defaultPage.TryGet(Exposure, out _), Throws.InvalidOperationException);
+            Assert.That(() => defaultPage.Has(Exposure), Throws.InvalidOperationException);
+        });
+    }
+
+    [Test]
     public void TransientField_StartsEmptyAfterARestore()
     {
         using var world = CreateWorld();

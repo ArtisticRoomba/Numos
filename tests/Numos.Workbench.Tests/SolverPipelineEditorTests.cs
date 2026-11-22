@@ -185,4 +185,37 @@ public sealed class SolverPipelineEditorTests
             Assert.That(SolverPipelineEditor.GetWarnings(boundaryDisabled).Any(warning => warning.Contains("every")), Is.False);
         });
     }
+
+    [Test]
+    public void GetAddableCatalogSolvers_ListsCatalogNamesThePipelineLacks_InCatalogOrder()
+    {
+        var steps = EulerSteps().Append(Step("mod/b", custom: true)).ToArray();
+        string[] catalog = ["mod/c", "mod/b", "mod/a"];
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(SolverPipelineEditor.GetAddableCatalogSolvers(steps, catalog), Is.EqualTo(new[] { "mod/c", "mod/a" }));
+            Assert.That(SolverPipelineEditor.GetAddableCatalogSolvers(steps, []), Is.Empty);
+            Assert.That(
+                SolverPipelineEditor.GetAddableCatalogSolvers(steps),
+                Does.Contain(WorkbenchStateSolver.Name),
+                "the overload without a catalog reads AtmosSolverCatalog");
+        });
+    }
+
+    [Test]
+    public void IsCatalogStage_And_Describe_TellCatalogStagesFromHostStages()
+    {
+        var catalog = Step(WorkbenchStateSolver.Name, custom: true);
+        var host = Step("numos-workbench-tests/host", custom: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(SolverPipelineEditor.IsCatalogStage(catalog), Is.True);
+            Assert.That(SolverPipelineEditor.IsCatalogStage(host), Is.False);
+            Assert.That(SolverPipelineEditor.IsCatalogStage(Step(AtmosBuiltInSolvers.EulerFlow)), Is.False);
+            Assert.That(SolverPipelineEditor.Describe(catalog.Name), Does.Contain("catalog"));
+            Assert.That(SolverPipelineEditor.Describe(host.Name), Is.EqualTo("A stage registered by the host."));
+        });
+    }
 }

@@ -13,6 +13,7 @@ public sealed class SolverStateTests
 {
     private const string Name = "tests/counter";
     private const string RejectingName = "tests/rejecting";
+    private const string CollectionsName = "tests/collections";
 
     [Test]
     public void HostEditBetweenTicks_IsRecordedOnceAtTheNextTick()
@@ -307,7 +308,7 @@ public sealed class SolverStateTests
         {
             Assert.That(
                 () => missing.RestoreCheckpoint(checkpoint),
-                Throws.ArgumentException.With.Message.Contains("isn't registered"));
+                Throws.ArgumentException.With.Message.Contains("aren't registered"));
 
             Assert.That(
                 () => asDelegate.RestoreCheckpoint(checkpoint),
@@ -423,6 +424,131 @@ public sealed class SolverStateTests
         });
     }
 
+    [Test]
+    public void Restore_RefillsTheCollectionsTheSolverAlreadyHolds()
+    {
+        using var world = CreateCollectionWorld(out var solver);
+        world.Tick();
+        world.Tick();
+        solver.Seen.Add(7);
+        solver.Heat["east"] = 2f;
+        var checkpoint = world.CaptureCheckpoint();
+
+        List<int> log = solver.Log;
+        HashSet<int> seen = solver.Seen;
+        Dictionary<string, float> heat = solver.Heat;
+        float[] weights = solver.Weights;
+        List<IgnitionEvent> events = solver.Events;
+        world.Tick();
+        solver.Seen.Clear();
+        solver.Heat["west"] = 5f;
+        solver.Weights[0] = 9f;
+        world.RestoreCheckpoint(checkpoint);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(solver.Log, Is.SameAs(log));
+            Assert.That(solver.Seen, Is.SameAs(seen));
+            Assert.That(solver.Heat, Is.SameAs(heat));
+            Assert.That(solver.Weights, Is.SameAs(weights));
+            Assert.That(solver.Events, Is.SameAs(events));
+
+            Assert.That(solver.Log, Is.EqualTo(new[] { 0, 1 }));
+            Assert.That(solver.Seen, Is.EquivalentTo(new[] { 0, 1, 7 }));
+            Assert.That(solver.Heat, Is.EquivalentTo(new Dictionary<string, float> { ["east"] = 2f }));
+            Assert.That(solver.Weights, Is.EqualTo(new[] { 2f, 0f, 0f }));
+            Assert.That(solver.Events, Is.EqualTo(new[] { new IgnitionEvent(0, 300f), new IgnitionEvent(1, 301f) }));
+        });
+    }
+
+    [Test]
+    public void Restore_AssignsAnArrayOfAnotherLength()
+    {
+        using var world = CreateCollectionWorld(out var solver);
+        solver.Weights = [1f, 2f];
+        var checkpoint = world.CaptureCheckpoint();
+        float[] shorter = [3f];
+        solver.Weights = shorter;
+
+        world.RestoreCheckpoint(checkpoint);
+
+        Assert.That(solver.Weights, Is.Not.SameAs(shorter));
+        Assert.That(solver.Weights, Is.EqualTo(new[] { 1f, 2f }));
+    }
+
+    [Test]
+    public void WorldHash_IsIndependentOfHashSetInsertionOrder()
+    {
+        using var forward = CreateCollectionWorld(out var first);
+        using var backward = CreateCollectionWorld(out var second);
+        foreach (int value in new[] { 3, 17, 5, 42, 11 })
+            first.Seen.Add(value);
+
+        foreach (int value in new[] { 11, 42, 5, 17, 3 })
+            second.Seen.Add(value);
+
+        // Removing and re-adding moves an element in the set's own order without changing what it holds.
+        second.Seen.Remove(3);
+        second.Seen.Add(3);
+
+        Assert.That(forward.ComputeStateHash(), Is.EqualTo(backward.ComputeStateHash()));
+    }
+
+    [Test]
+    public void MutableList_WritesTheBytesOfAReadOnlyList()
+    {
+        using var mutable = new AtmosWorld(new TestAtmosConfig());
+        mutable.CreateSimulation(1, 1, 1);
+        mutable.Solvers.Register(CollectionsName, new MutableListSolver { Cells = { 4, 8, 15 }, Events = { new IgnitionEvent(1, 2f) } });
+
+        using var readOnly = new AtmosWorld(new TestAtmosConfig());
+        readOnly.CreateSimulation(1, 1, 1);
+        readOnly.Solvers.Register(CollectionsName, new ReadOnlyListSolver { Cells = [4, 8, 15], Events = [new IgnitionEvent(1, 2f)] });
+
+        Assert.That(
+            mutable.CaptureCheckpoint().SolverStates.Single().State.ToArray(),
+            Is.EqualTo(readOnly.CaptureCheckpoint().SolverStates.Single().State.ToArray()));
+    }
+
+    [Test]
+    public void SavedReplay_RoundTripsAListOfRecordsAsSolverState()
+    {
+        using var source = CreateCollectionWorld(out var solver);
+        var timeline = new AtmosWorldReplayTimeline(source, 0.1);
+        source.Tick();
+        source.Tick();
+        source.Tick();
+        timeline.ObserveLiveState();
+
+        var archive = timeline.CaptureReplay();
+        using var stream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(stream, new NumosWorldReplayDocument(Metadata(), archive));
+        stream.Position = 0;
+        var loaded = NumosWorldReplaySerializer.Deserialize(stream).Replay;
+
+        using var target = CreateCollectionWorld(out var restoredSolver);
+        List<IgnitionEvent> events = restoredSolver.Events;
+        var restored = AtmosWorldReplayTimeline.Restore(target, loaded, 0.1);
+        restored.ReturnToHead();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(target.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+            Assert.That(restoredSolver.Events, Is.SameAs(events));
+            Assert.That(restoredSolver.Events, Is.EqualTo(solver.Events));
+            Assert.That(restoredSolver.Events, Has.Count.EqualTo(3));
+        });
+    }
+
+    private static AtmosWorld CreateCollectionWorld(out CollectionSolver solver)
+    {
+        var world = new AtmosWorld(new TestAtmosConfig());
+        world.CreateSimulation(1, 1, 1);
+        solver = new CollectionSolver();
+        world.Solvers.Register(CollectionsName, solver);
+        return world;
+    }
+
     private static AtmosWorld CreateWorld(out CounterSolver solver)
     {
         return CreateWorld(out solver, out _, out _);
@@ -489,6 +615,51 @@ public sealed partial class CounterSolver : IAtmosWorldSolver
         RateSeenByOnRestored = Rate;
         LabelSeenByOnRestored = Label;
         Scratch = 0;
+    }
+}
+
+/// <summary>
+///     Grows its collections every tick. Restore must refill the instances it holds.
+/// </summary>
+public sealed partial class CollectionSolver : IAtmosWorldSolver
+{
+    [NumosSerialize] private readonly Dictionary<string, float> _heat = new();
+    [NumosSerialize] public List<int> Log { get; } = [];
+    [NumosSerialize] public HashSet<int> Seen { get; } = [];
+    [NumosSerialize] public float[] Weights = new float[3];
+    [NumosSerialize] public List<IgnitionEvent> Events = [];
+
+    public Dictionary<string, float> Heat => _heat;
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        int tick = Log.Count;
+        Log.Add(tick);
+        Seen.Add(tick);
+        Weights[0]++;
+        Events.Add(new IgnitionEvent(tick, 300f + tick));
+    }
+}
+
+public readonly partial record struct IgnitionEvent([property: NumosSerialize] int Cell, [property: NumosSerialize] float Temperature);
+
+public sealed partial class MutableListSolver : IAtmosWorldSolver
+{
+    [NumosSerialize] public List<int> Cells { get; } = [];
+    [NumosSerialize] public List<IgnitionEvent> Events { get; } = [];
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
+    }
+}
+
+public sealed partial class ReadOnlyListSolver : IAtmosWorldSolver
+{
+    [NumosSerialize] public IReadOnlyList<int> Cells { get; set; } = [];
+    [NumosSerialize] public IReadOnlyList<IgnitionEvent> Events { get; set; } = [];
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
     }
 }
 

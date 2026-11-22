@@ -14,6 +14,10 @@ namespace Numos.CoreSim.State;
 ///         record, mark the parameter with <c>[property: NumosSerialize]</c>.
 ///     </para>
 ///     <para>
+///         A <c>[ChunkComponent]</c> struct does not take part. On its fields the attribute marks a saved chunk field,
+///         and the name passed to <see cref="NumosSerializeAttribute(string)" /> is the last part of the field key.
+///     </para>
+///     <para>
 ///         A field's wire id is a hash of its name, so reordering members does not change ids.
 ///         Renaming a member changes its id. Pass the old name (<c>[NumosSerialize("OldName")]</c>) to keep reading
 ///         files written before the rename. A reader skips ids it does not know, so removing a member keeps old files readable.
@@ -48,7 +52,11 @@ namespace Numos.CoreSim.State;
 ///         On a class implementing <c>IAtmosWorldSolver</c>, marked members are the state of the solver. Numos
 ///         checkpoints, hashes, and saves them, and it records an edit the host makes between ticks. The reader writes
 ///         them back into the registered instance instead of using a constructor. Each one must therefore be assignable
-///         (no <see langword="readonly" /> fields, get-only, or <c>init</c> properties).
+///         (no <see langword="readonly" /> fields, get-only, or <c>init</c> properties), unless it is a
+///         <see cref="List{T}" />, <see cref="HashSet{T}" />, or <see cref="Dictionary{TKey, TValue}" /> that the reader
+///         refills. A <c>[SimulationComponent]</c> class follows the same rules. The reader refills a set or dictionary
+///         in canonical order, so its enumeration order after a restore can differ from the live instance's order. A
+///         solver whose results depend on that order diverges on replay.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -130,6 +138,30 @@ public sealed class NumosSerializeAttribute : Attribute
     ///     </code>
     /// </example>
     public string? Count { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether the host may change the member between ticks. The default is <see langword="true" />.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Only applies to a class solver or a <c>[SimulationComponent]</c> class. Numos finds host edits to those
+    ///         by hashing their marked members at every recording boundary. Set this to <see langword="false" /> on a
+    ///         large member that only the solver changes, such as a list that grows every tick. The boundary hash then
+    ///         skips it. The checkpoint, the world state hash, and a recorded state edit still cover it.
+    ///     </para>
+    ///     <para>
+    ///         The host must change such a member only through a solver command, which replay runs again. A direct
+    ///         edit between ticks is not recorded, so replay would diverge. A Debug build of Numos still hashes the
+    ///         member at each boundary and throws <see cref="InvalidOperationException" /> naming it when it changed.
+    ///     </para>
+    /// </remarks>
+    /// <example>
+    ///     <code>
+    ///     [NumosSerialize(HostEditable = false)]
+    ///     public readonly List&lt;PipeNode&gt; Nodes = [];
+    ///     </code>
+    /// </example>
+    public bool HostEditable { get; set; } = true;
 }
 
 /// <summary>
@@ -222,3 +254,61 @@ public sealed class NumosSnapshotOfAttribute(Type liveType) : Attribute
 /// </remarks>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
 public sealed class NumosIgnoreAttribute : Attribute;
+
+/// <summary>
+///     Says a field or property of a class solver is scratch: Numos resets it after a checkpoint restore, before
+///     <c>OnRestored</c> runs. Use it for buffers and caches that the solver refills on its own.
+/// </summary>
+/// <remarks>
+///     <para>
+///         The source generator writes <see cref="INumosScratchTarget.ResetScratch" /> for the class. The class must be
+///         <see langword="partial" />. The member is not saved, hashed, or recorded. A solver with scratch members and
+///         no <see cref="NumosSerializeAttribute" /> member still has no checkpoint entry.
+///     </para>
+///     <para>
+///         The reset follows the member's declaration:
+///     </para>
+///     <list type="bullet">
+///         <item>
+///             <description>
+///                 An assignable member with an initializer, such as <c>= new()</c>, gets the initializer again. An
+///                 assignable member is a field that is not <see langword="readonly" />, or a property with a
+///                 <see langword="set" /> accessor.
+///             </description>
+///         </item>
+///         <item>
+///             <description>
+///                 A <see langword="readonly" /> field or get-only property whose type is a class or interface with a
+///                 parameterless <c>Clear()</c> gets that call, so a <c>List&lt;T&gt;</c> keeps its instance and loses
+///                 its items.
+///             </description>
+///         </item>
+///         <item>
+///             <description>
+///                 An assignable member with no initializer gets <see langword="default" />.
+///             </description>
+///         </item>
+///     </list>
+///     <para>
+///         Any other member is a build error. The generator copies an initializer into a method body, so an initializer
+///         that reads a primary constructor parameter is also an error. Reset such a member in <c>OnRestored</c> and mark
+///         it <see cref="NumosIgnoreAttribute" />. The attribute cannot combine with <see cref="NumosSerializeAttribute" />
+///         or <see cref="NumosIgnoreAttribute" />. It only applies to class solvers and <c>[SimulationComponent]</c>
+///         classes. Numos resets a component's scratch members after a world checkpoint restore.
+///     </para>
+///     <para>
+///         A field of a <c>[ChunkComponent]</c> struct is the one exception. There the attribute makes a transient chunk
+///         field, which a restore clears, and the reset rules above do not apply.
+///     </para>
+/// </remarks>
+/// <example>
+///     <code>
+///     public sealed partial class FireSolver : IAtmosWorldSolver
+///     {
+///         [NumosScratch] private readonly List&lt;int&gt; _hot = new();
+///         [NumosScratch] private int _cursor;
+///     }
+///     </code>
+/// </example>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
+public sealed class NumosScratchAttribute : Attribute;

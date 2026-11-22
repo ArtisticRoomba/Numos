@@ -3,6 +3,10 @@
         <Project Path="benchmarks\Numos.CoreSim.Benchmarks\Numos.CoreSim.Benchmarks.csproj"/>
         <Project Path="benchmarks\Numos.Replay.Benchmarks\Numos.Replay.Benchmarks.csproj"/>
     </Folder>
+    <Folder Name="/Examples/">
+        <Project Path="examples\FireSolver\FireMod\FireMod.csproj"/>
+        <Project Path="examples\FireSolver\FireMod.Tests\FireMod.Tests.csproj"/>
+    </Folder>
     <Folder Name="/Tests/">
         <Project Path="tests\Numos.API.Dangerous.Tests\Numos.API.Dangerous.Tests.csproj"/>
         <Project Path="tests\Numos.API.Generators.Tests\Numos.API.Generators.Tests.csproj"/>
@@ -15,6 +19,7 @@
         <Project Path="tests\Numos.Replay.Generators.Tests\Numos.Replay.Generators.Tests.csproj"/>
         <Project Path="tests\Numos.Serialization.Tests\Numos.Serialization.Tests.csproj"/>
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
+        <Project Path="tests\Numos.Testing.Tests\Numos.Testing.Tests.csproj"/>
         <Project Path="tests\Numos.Viewer.Tests\Numos.Viewer.Tests.csproj"/>
         <Project Path="tests\Numos.Workbench.Tests\Numos.Workbench.Tests.csproj"/>
     </Folder>
@@ -30,6 +35,7 @@
     <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
     <Project Path="src\Numos.Serialization\Numos.Serialization.csproj"/>
     <Project Path="src\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj"/>
+    <Project Path="src\Numos.Testing\Numos.Testing.csproj"/>
     <Project Path="src\Numos.Viewer\Numos.Viewer.csproj"/>
     <Project Path="src\Numos.Workbench\Numos.Workbench.csproj"/>
 </Solution>

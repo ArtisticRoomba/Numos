@@ -46,9 +46,13 @@ public readonly struct AtmosDangerousApi
     public AtmosDangerousChunk GetChunk(AtmosChunkHandle chunk)
     {
         var kernel = _simulation.Kernel;
-        return new AtmosDangerousChunk(
+        var view = new AtmosDangerousChunk(
             kernel.GetChunkForDangerousAccess(chunk.Position),
             kernel.GetConfigSnapshotForDangerousAccess());
+
+        // Count only a view that was actually handed out.
+        _simulation.World.NoteDangerousAccess();
+        return view;
     }
 
     /// <summary>
@@ -95,6 +99,8 @@ public readonly struct AtmosDangerousApi
     /// </example>
     public FlatArray<T> GetChunkField<T>(AtmosChunkHandle chunk, ChunkField<T> field)
     {
-        return _simulation.GetOrCreateChunkField(chunk, field);
+        var values = _simulation.GetOrCreateChunkField(chunk, field);
+        _simulation.World.NoteDangerousAccess();
+        return values;
     }
 }

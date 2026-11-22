@@ -128,6 +128,41 @@ internal static class ReplayHistory
     }
 
     /// <summary>
+    ///     Checks that a hash trail could have come from recording <paramref name="operations" />.
+    /// </summary>
+    /// <returns>
+    ///     <see langword="true" /> when the ticks strictly increase inside the interval after <paramref name="start" />
+    ///     through <paramref name="head" />, and each hash carries the last sequence recorded before its tick.
+    /// </returns>
+    internal static bool IsValidTrail(
+        AtmosTimelinePosition start,
+        IReadOnlyList<AtmosWorldRecordedOperation> operations,
+        AtmosTimelinePosition head,
+        IReadOnlyList<AtmosWorldStateHash> hashes)
+    {
+        int index = 0;
+        ulong sequence = start.OperationSequence;
+        ulong previous = start.Tick;
+        foreach (var hash in hashes)
+        {
+            ulong tick = hash.Position.Tick;
+            if (tick <= previous || tick > head.Tick)
+                return false;
+
+            // Recording takes the hash at the end of the tick, before the operations stamped with that tick.
+            for (; index < operations.Count && operations[index].AfterTick < tick; index++)
+                sequence = operations[index].Sequence;
+
+            if (hash.Position.OperationSequence != sequence)
+                return false;
+
+            previous = tick;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     ///     Validates a <c>ReplayTo</c> batch, throwing the argument exception that describes the first problem.
     /// </summary>
     internal static void ThrowIfInvalidReplay(

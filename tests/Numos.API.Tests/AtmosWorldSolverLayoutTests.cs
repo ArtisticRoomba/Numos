@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -321,8 +322,8 @@ public sealed class AtmosWorldSolverLayoutTests
 
     private sealed class CountingSolver : IAtmosWorldSolver
     {
-        public int SolveCount { get; private set; }
-        public int RestoredCount { get; private set; }
+        [NumosIgnore] public int SolveCount { get; private set; }
+        [NumosIgnore] public int RestoredCount { get; private set; }
 
         public void Solve(AtmosWorldSolverContext context) => SolveCount++;
 

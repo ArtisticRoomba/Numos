@@ -27,6 +27,7 @@ public partial class SimulationViewer
         IReadOnlyList<AtmosWorldSolverLayoutEntry>? pendingLayout = null;
         (string Name, bool Enabled)? pendingToggle = null;
         (string Name, int Interval)? pendingInterval = null;
+        string? pendingCatalogRemoval = null;
 
         ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(3f, ImGui.GetStyle().CellPadding.Y));
         using (var table = ImGuiExtensions.BeginTable(
@@ -111,13 +112,19 @@ public partial class SimulationViewer
                     ImGui.EndDisabled();
                     ImGuiExtensions.ItemTooltip(Locale.GetString("move-down"));
                     ImGui.SameLine();
-                    ImGui.BeginDisabled(inspecting || !builtIn);
+                    bool catalog = !builtIn && SolverPipelineEditor.IsCatalogStage(step);
+                    ImGui.BeginDisabled(inspecting || (!builtIn && !catalog));
                     if (ImGui.Button("x", buttonBox))
-                        pendingLayout = SolverPipelineEditor.Remove(steps, index);
+                    {
+                        if (catalog)
+                            pendingCatalogRemoval = step.Name;
+                        else
+                            pendingLayout = SolverPipelineEditor.Remove(steps, index);
+                    }
 
                     ImGui.EndDisabled();
                     ImGuiExtensions.ItemTooltip(
-                        builtIn
+                        builtIn || catalog
                             ? Locale.GetString("remove-stage")
                             : Locale.GetString("custom-stage-removal-unavailable"));
                     ImGui.PopStyleVar();
@@ -135,6 +142,8 @@ public partial class SimulationViewer
             RunSolverEdit(session => session.SetSolverEnabled(toggle.Name, toggle.Enabled));
         else if (pendingLayout is { } layoutChange)
             RunSolverEdit(session => session.SetSolverLayout(layoutChange));
+        else if (pendingCatalogRemoval is { } removal)
+            RunSolverEdit(session => session.RemoveSolver(removal));
 
         foreach (string warning in SolverPipelineEditor.GetWarnings(steps))
         {
@@ -147,6 +156,7 @@ public partial class SimulationViewer
 
         ImGui.Separator();
         RenderSolverAddStage(steps, inspecting, focusAddStage);
+        RenderCatalogSolvers(steps, inspecting);
         RenderSolverPresets(steps, inspecting);
     }
 
@@ -176,6 +186,212 @@ public partial class SimulationViewer
         }
 
         ImGui.Unindent();
+        if (!AtmosWorldSolverPipeline.BuiltInStageNames.Contains(name))
+            RenderSolverState(name, inspecting);
+    }
+
+    /// <summary>
+    ///     Lists the catalog solvers that the pipeline does not hold, each with an add button, and the button that
+    ///     loads more.
+    /// </summary>
+    private void RenderCatalogSolvers(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
+    {
+        ImGui.Spacing();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextDisabled(Locale.GetString("catalog-solvers"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("catalog-solvers-help"));
+        ImGui.SameLine();
+        RenderLoadSolversButton();
+
+        var addable = SolverPipelineEditor.GetAddableCatalogSolvers(steps);
+        if (addable.Count == 0)
+        {
+            ImGui.TextDisabled(
+                AtmosSolverCatalog.Names.Count == 0
+                    ? Locale.GetString("catalog-solvers-empty")
+                    : Locale.GetString("catalog-solvers-all-added"));
+
+            return;
+        }
+
+        string? pendingAdd = null;
+        float addWidth = ImGui.CalcTextSize(Locale.GetString("common-add")).X + ImGui.GetStyle().FramePadding.X * 2f;
+        ImGui.BeginDisabled(inspecting);
+        foreach (string name in addable)
+        {
+            ImGui.PushID(name);
+            float rowEnd = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X;
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(name);
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip) && AtmosSolverCatalog.TryGet(name, out var descriptor))
+                ImGuiExtensions.WrappedTooltip(DescribeCatalogPlacement(descriptor), name);
+
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(MathF.Max(ImGui.GetCursorPosX(), rowEnd - addWidth));
+            if (ImGui.Button(Locale.GetString("common-add")))
+                pendingAdd = name;
+
+            ImGui.PopID();
+        }
+
+        ImGui.EndDisabled();
+        if (pendingAdd is { } added)
+            RunSolverEdit(session => session.AddSolver(added));
+    }
+
+    private static string DescribeCatalogPlacement(AtmosSolverDescriptor descriptor)
+    {
+        string placement = descriptor switch
+        {
+            { Before: { } before } => Locale.GetString("catalog-solver-before", ("stage", before)),
+            { After: { } after } => Locale.GetString("catalog-solver-after", ("stage", after)),
+            _ => Locale.GetString("catalog-solver-last")
+        };
+
+        string rate = descriptor switch
+        {
+            { RunsPerSecond: > 0 } => Locale.GetString("catalog-solver-runs-per-second",
+                ("rate", descriptor.RunsPerSecond)),
+            { Interval: > 0 } => Locale.GetString("catalog-solver-interval", ("interval", descriptor.Interval)),
+            _ => Locale.GetString("catalog-solver-every-tick")
+        };
+
+        return $"{placement} {rate}";
+    }
+
+    /// <summary>
+    ///     Draws the "Solver state" section: the stage's <c>[NumosSerialize]</c> members, with an editor for each one
+    ///     that a tool can write.
+    /// </summary>
+    private void RenderSolverState(string stage, bool inspecting)
+    {
+        var draft = _document.SolverState;
+        if (draft.TryBeginRefresh(stage, SolverStateVersion.From(_frame), ImGui.GetTime(), out int request))
+        {
+            Send(
+                session => (session.TryGetSolverState(stage, out var members), members),
+                result =>
+                {
+                    if (result.Exception is { } exception)
+                        draft.Fail(request, DescribeFailure(exception));
+                    else
+                        draft.Complete(request, result.Value.Item1, result.Value.Item2);
+                });
+        }
+
+        ImGui.Separator();
+        ImGui.TextUnformatted(Locale.GetString("solver-state"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("solver-state-help"));
+        DrawFeedback(draft.Feedback);
+        if (!draft.IsLoaded)
+        {
+            ImGui.TextDisabled(Locale.GetString("solver-state-loading"));
+            return;
+        }
+
+        if (!draft.HasState || draft.Members.Count == 0)
+        {
+            ImGui.TextDisabled(Locale.GetString("solver-state-none"));
+            return;
+        }
+
+        using var table = ImGuiExtensions.BeginTable(
+            "SolverState##solver-state",
+            2,
+            ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.NoSavedSettings);
+
+        if (!table.IsVisible)
+            return;
+
+        ImGui.TableSetupColumn("##member", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("##value", ImGuiTableColumnFlags.WidthStretch);
+        (string Member, string? Value)? pendingEdit = null;
+        foreach (var member in draft.Members)
+        {
+            ImGui.PushID(member.Name);
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(member.Name);
+            ImGuiExtensions.ItemTooltip(
+                member.Unit is { } unit ? $"{member.TypeName} ({unit})" : member.TypeName);
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.SetNextItemWidth(-1f);
+            var editor = SolverStateDraft.GetEditor(member);
+            ImGui.BeginDisabled(inspecting && editor != SolverStateEditor.ReadOnly);
+            switch (editor)
+            {
+                case SolverStateEditor.Boolean:
+                    bool flag = member.Value is true;
+                    if (ImGui.Checkbox("##value", ref flag))
+                        pendingEdit = (member.Name, flag ? "true" : "false");
+
+                    break;
+                case SolverStateEditor.Enum:
+                    string[] names = SolverStateDraft.GetEnumNames(member);
+                    if (ImGui.BeginCombo("##value", member.Text))
+                    {
+                        foreach (string option in names)
+                        {
+                            if (ImGui.Selectable(option, option == member.Text) && option != member.Text)
+                                pendingEdit = (member.Name, option);
+                        }
+
+                        ImGui.EndCombo();
+                    }
+
+                    break;
+                case SolverStateEditor.Number:
+                case SolverStateEditor.Text:
+                    string text = draft.TextDrafts.TryGetValue(member.Name, out string? typed) ? typed : member.Text;
+                    var flags = editor == SolverStateEditor.Number
+                        ? ImGuiInputTextFlags.CharsScientific
+                        : ImGuiInputTextFlags.None;
+
+                    if (ImGui.InputText("##value", ref text, 1024, flags))
+                        draft.TextDrafts[member.Name] = text;
+
+                    if (ImGui.IsItemDeactivatedAfterEdit())
+                    {
+                        draft.TextDrafts.Remove(member.Name);
+                        if (text != member.Text)
+                            pendingEdit = (member.Name, SolverStateDraft.ToValueText(member, text));
+                    }
+                    else if (!ImGui.IsItemActive())
+                    {
+                        draft.TextDrafts.Remove(member.Name);
+                    }
+
+                    break;
+                default:
+                    ImGui.TextDisabled(member.Text);
+                    break;
+            }
+
+            ImGui.EndDisabled();
+            ImGui.PopID();
+        }
+
+        if (pendingEdit is { } edit)
+            SetSolverStateMember(stage, edit.Member, edit.Value);
+    }
+
+    private void SetSolverStateMember(string stage, string member, string? value)
+    {
+        var draft = _document.SolverState;
+        Send(
+            session => session.SetSolverState(stage, member, value),
+            result =>
+            {
+                if (result.Exception is { } exception)
+                {
+                    draft.FailEdit(stage, DescribeFailure(exception));
+                    return;
+                }
+
+                draft.ApplyEdit(stage, result.Value!);
+            });
     }
 
     private void RenderSolverAddStage(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting, bool focus)

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        A tiny solver assembly for the solver loading tests. A test project references it with
+        ReferenceOutputAssembly="false" and copies the dll into a subfolder, so the test process does not load it until
+        a test asks the loader to. See NumosSolverAssembly in the Workbench and Viewer test projects.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <RootNamespace>Numos.Tests.SolverAssembly</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Numos.API\Numos.API.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+    </ItemGroup>
+
+</Project>

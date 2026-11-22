@@ -11,7 +11,7 @@ internal static class ChunkDataEmitter
 {
     internal const string ModuleInitializerHintName = "NumosChunkDataModuleInitializer.g.cs";
 
-    private const string HolderName = "__NumosChunkFields";
+    internal const string HolderName = "__NumosChunkFields";
     private const string SolverChunkType = "global::Numos.API.AtmosSolverChunk";
     private const string FlatArrayType = "global::Numos.Collections.FlatArray";
 
@@ -96,17 +96,20 @@ internal static class ChunkDataEmitter
     }
 
     /// <summary>
-    ///     Writes the assembly's module initializer, which registers every <c>[ChunkData]</c> field when the assembly
-    ///     loads.
+    ///     Writes the assembly's module initializer, which registers every <c>[ChunkData]</c> and
+    ///     <c>[ChunkComponent]</c> field when the assembly loads.
     /// </summary>
-    /// <param name="typeDisplays">The fully qualified declaring types, in a stable order.</param>
+    /// <param name="holders">
+    ///     The fully qualified holder classes, in a stable order. Each one is nested directly in the type that declares
+    ///     the fields.
+    /// </param>
     /// <remarks>
     ///     A file cannot be loaded until each saved key in it is registered. A fresh process may load one before
-    ///     anything has read the properties. Running the class constructor of the holder registers through the same
+    ///     anything has read the fields. Running the class constructor of the holder registers through the same
     ///     static initializer as the lazy path, so registration happens once either way. The static constructor of the
     ///     declaring type does not run early.
     /// </remarks>
-    public static string EmitModuleInitializer(EquatableArray<string> typeDisplays)
+    public static string EmitModuleInitializer(EquatableArray<string> holders)
     {
         var writer = new CodeWriter();
         writer.Header();
@@ -116,16 +119,22 @@ internal static class ChunkDataEmitter
             "RegisterChunkFields",
             "Saved chunk fields must be registered before a file that holds them can load.");
 
-        foreach (string type in typeDisplays)
+        foreach (string holder in holders)
         {
+            string declaringType = holder.Substring(0, holder.LastIndexOf('.')).Replace("global::", "");
             writer.Line(
-                "Register(typeof(" + type + "." + HolderName + "), " +
-                SymbolDisplay.FormatLiteral(type.Replace("global::", ""), true) + ");");
+                "Register(typeof(" + holder + "), " + SymbolDisplay.FormatLiteral(declaringType, true) + ");");
         }
 
         writer.Close();
         writer.Line();
-        writer.Line("private static void Register(global::System.Type holder, string declaringType)");
+        // The annotation tells the trim analyzer that the class constructor survives, so a trimmable consumer builds
+        // without IL2059.
+        writer.Line(
+            "private static void Register(" +
+            "[global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(" +
+            "global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.NonPublicConstructors)] " +
+            "global::System.Type holder, string declaringType)");
         writer.Open();
         writer.Line("try");
         writer.Open();
@@ -134,7 +143,7 @@ internal static class ChunkDataEmitter
         writer.Line("catch (global::System.TypeInitializationException exception) when (exception.InnerException is not null)");
         writer.Open();
         writer.Line("throw new global::System.InvalidOperationException(");
-        writer.Line("    \"Registering the [ChunkData] fields of '\" + declaringType + \"' failed: \" + exception.InnerException.Message,");
+        writer.Line("    \"Registering the chunk fields of '\" + declaringType + \"' failed: \" + exception.InnerException.Message,");
         writer.Line("    exception.InnerException);");
         writer.Close();
         writer.Close();

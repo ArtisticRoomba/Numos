@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <IsAotCompatible>true</IsAotCompatible>
+        <IsTrimmable>true</IsTrimmable>
+    </PropertyGroup>
+
+    <!--
+        A package consumer writes only <PackageReference Include="Numos.API"/>. The package carries the generator under
+        analyzers/, but a project reference does not pass an analyzer on, so the generator is referenced here by hand.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\Numos.API\Numos.API.csproj"/>
+        <ProjectReference Include="..\..\..\src\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+    </ItemGroup>
+
+</Project>

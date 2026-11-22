@@ -99,6 +99,7 @@ public sealed record SimulationConfigurationReport(
     float MinimumFlameSpeed,
     bool IgnitionTransferEnabled,
     float TransferSeedFraction,
+    ulong RandomSeed,
     GasConfigurationReport[] Gases,
     EulerFlowConfigurationReport? EulerFlow);
 

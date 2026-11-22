@@ -52,6 +52,7 @@ public static class AtmosConfigSettings
         destination.MinimumFlameSpeed = source.MinimumFlameSpeed;
         destination.IgnitionTransferEnabled = source.IgnitionTransferEnabled;
         destination.TransferSeedFraction = source.TransferSeedFraction;
+        destination.RandomSeed = source.RandomSeed;
     }
 
     /// <summary>

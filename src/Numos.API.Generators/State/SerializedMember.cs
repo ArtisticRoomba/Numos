@@ -29,6 +29,14 @@ internal enum WireNameChecks
 /// </summary>
 internal sealed class SerializedMember
 {
+    private const string SolverChoices =
+        "mark it [NumosSerialize] if it affects behavior, [NumosScratch] if a restore should reset it, or " +
+        "[NumosIgnore] if it's derived or OnRestored resets it";
+
+    private const string OtherChoices =
+        "mark it [NumosSerialize] if it affects behavior, or [NumosIgnore] if it's derived, scratch, or saved through " +
+        "another member";
+
     private SerializedMember(string displayName, string wireName, int id, AttributeData attribute, bool settable, bool initOnly)
     {
         DisplayName = displayName;
@@ -87,18 +95,34 @@ internal sealed class SerializedMember
     /// <param name="ownerDisplayName">The type that declares the member, for diagnostics.</param>
     /// <param name="location">Where diagnostics about the member point.</param>
     /// <param name="checks">The rules the wire name must meet.</param>
+    /// <param name="classSolver">
+    ///     Whether the owner is a class solver. Its readonly collections can draw the unmarked warning, and the warning
+    ///     offers <c>[NumosScratch]</c>.
+    /// </param>
     /// <param name="ids">The wire ids already claimed, with the member that claimed each. A success adds to it.</param>
     /// <param name="diagnostics">Receives the diagnostic for each check that fails.</param>
     /// <returns>The member, or null when it is not state or a check failed.</returns>
     /// <remarks>
-    ///     A failure at or before the id check leaves <paramref name="ids" /> alone. The caller's later checks run after
-    ///     the id is claimed, so a member they reject still blocks a second member with the same wire name.
+    ///     <para>
+    ///         A failure at or before the id check leaves <paramref name="ids" /> alone. The caller's later checks run
+    ///         after the id is claimed, so a member they reject still blocks a second member with the same wire name.
+    ///     </para>
+    ///     <para>
+    ///         <see cref="StateGenerator" /> hands every <c>[NumosScratch]</c> member to <see cref="ScratchMember" />
+    ///         first. One that reaches this method belongs to a snapshot or its live type, where it is misplaced.
+    ///     </para>
     /// </remarks>
     public static SerializedMember? TryParse(
         ISymbol member, AttributeData? serialize, bool hasStorage, string ownerDisplayName, LocationInfo? location,
-        WireNameChecks checks, Dictionary<int, string> ids, List<DiagnosticInfo> diagnostics)
+        WireNameChecks checks, bool classSolver, Dictionary<int, string> ids, List<DiagnosticInfo> diagnostics)
     {
         string displayName = ownerDisplayName + "." + member.Name;
+        if (StateSymbols.IsScratch(member))
+        {
+            ScratchMember.ReportMisplaced(member, serialize, displayName, location, diagnostics);
+            return null;
+        }
+
         if (member.IsStatic || member is IFieldSymbol { IsConst: true })
         {
             // Static members are never state. Flag only the ones claiming otherwise.
@@ -121,8 +145,14 @@ internal sealed class SerializedMember
             if (member is IPropertySymbol property && StateSymbols.HasMarkedBackingField(property))
                 return null;
 
-            if (!ignored && hasStorage && !member.IsImplicitlyDeclared && StateSymbols.IsMutable(member))
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.Unmarked, location, displayName, ownerDisplayName));
+            if (!ignored && hasStorage && !member.IsImplicitlyDeclared &&
+                (StateSymbols.IsMutable(member) || (classSolver && StateSymbols.HoldsMutableCollection(member))))
+            {
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        StateDiagnostics.Unmarked, location, displayName, ownerDisplayName,
+                        classSolver ? SolverChoices : OtherChoices));
+            }
 
             return null;
         }

@@ -35,9 +35,21 @@ public sealed partial class AtmosWorldCheckpoint
     ///     Version 14 adds the default and per-gas thermal conductivity, the ignition settings, the reaction ignition flag,
     ///     and the <c>SetIgnitionSource</c> operation. Version 15 adds the tick rate and each solver
     ///     stage's interval and schedule state. Version 16 adds the acoustic scaling settings to
-    ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />. Version 17 adds the gas mixture pool.
+    ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />. Version 17 adds the gas mixture pool. Version 18 adds
+    ///     <see cref="Numos.CoreSim.AtmosConfig.RandomSeed" /> to the configuration, <see cref="SimulationComponents" />,
+    ///     and the schema fingerprint of each solver state and simulation component entry.
     /// </remarks>
-    public const int CurrentFormatVersion = 17;
+    public const int CurrentFormatVersion = 18;
+
+    /// <summary>
+    ///     The combined schema fingerprint of every generated state type in <c>Numos.CoreSim</c> and <c>Numos.API</c>
+    ///     when <see cref="CurrentFormatVersion" /> was last reviewed.
+    /// </summary>
+    /// <remarks>
+    ///     A test recomputes it and fails when a built-in checkpoint, configuration, or solver type changes shape.
+    ///     Whoever updates it decides whether the change also moves <see cref="CurrentFormatVersion" />.
+    /// </remarks>
+    internal const ulong BuiltInSchemaFingerprint = 0x071A73493ABC4121UL;
 
     // Immutable once captured or read, so the digest is computed once. See AtmosSimulationCheckpoint.
     [NumosIgnore]
@@ -89,6 +101,17 @@ public sealed partial class AtmosWorldCheckpoint
     public partial IReadOnlyList<AtmosWorldSolverStateCheckpoint> SolverStates { get; }
 
     /// <summary>
+    ///     Gets the state of every simulation component, by simulation in stable simulation-ID order, then by ordinal
+    ///     key.
+    /// </summary>
+    /// <remarks>
+    ///     Restoring writes each entry into the receiving simulation's component in place, creates a missing one from
+    ///     <see cref="SimulationComponentCatalog" />, and drops a component the checkpoint lacks. Every key must be
+    ///     registered.
+    /// </remarks>
+    public partial IReadOnlyList<AtmosSimulationComponentCheckpoint> SimulationComponents { get; }
+
+    /// <summary>
     ///     Gets non-free link sets, including topology mutations waiting for a tick boundary.
     /// </summary>
     public IReadOnlyList<AtmosWorldLinkSetCheckpoint> LinkSets => _linkSets ??= CreateLinkSets(LinkSlots);
@@ -116,8 +139,53 @@ public sealed partial class AtmosWorldCheckpoint
     }
 
     /// <summary>
+    ///     Lists where this checkpoint's state differs from <paramref name="other" />'s, field by field.
+    /// </summary>
+    /// <param name="other">The checkpoint to compare with. It is the right side of each entry.</param>
+    /// <param name="maxDifferences">The most entries to return.</param>
+    /// <returns>
+    ///     An empty list when the two <see cref="ComputeStateHash" /> results are equal. Otherwise at least one entry.
+    ///     Entries come in a fixed order: timeline position, tick rate, configuration, solvers, solver states,
+    ///     simulation components, simulations, and then the world's other fields.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         The diff walks the same generated state the hash walks, so it covers every hashed field. Simulations match
+    ///         by simulation index, chunks by grid position, and solvers and solver states by name. Simulation components
+    ///         match by simulation index and key. Solver configurations and rollback chunk fields match by key. An item
+    ///         only one side has is one entry. A differing array is one entry, at its first differing element.
+    ///     </para>
+    ///     <para>
+    ///         A solver state or component payload has no type in the checkpoint, so its fields print as bytes. Small
+    ///         payloads also print as integers and floats.
+    ///     </para>
+    ///     <para>
+    ///         The diff copies both states in full. Use it to investigate a divergence, not on a tick.
+    ///     </para>
+    /// </remarks>
+    /// <example>
+    ///     <code>
+    ///     var replayed = world.CaptureCheckpoint();
+    ///     foreach (var difference in expected.Diff(replayed))
+    ///         Console.WriteLine(difference);
+    ///     // Simulations / 0 / Chunks / (1,0,0) / Temperatures[412]: 300 vs 301.5; 17 of 4096 elements differ
+    ///     </code>
+    /// </example>
+    /// <exception cref="ArgumentNullException"><paramref name="other" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxDifferences" /> is less than 1.</exception>
+    public IReadOnlyList<AtmosStateDifference> Diff(AtmosWorldCheckpoint other, int maxDifferences = 64)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxDifferences, 1);
+        if (ComputeStateHash() == other.ComputeStateHash())
+            return [];
+
+        return AtmosStateDiffer.Compare(this, other, maxDifferences);
+    }
+
+    /// <summary>
     ///     Checks what a file holds beyond its framing: solver metadata, that solver states follow custom solvers in
-    ///     pipeline order, and link-set states.
+    ///     pipeline order, that simulation components are ordered and registered, and link-set states.
     /// </summary>
     /// <exception cref="InvalidDataException">The checkpoint is inconsistent.</exception>
     partial void OnDecoded()
@@ -144,6 +212,25 @@ public sealed partial class AtmosWorldCheckpoint
                 throw new InvalidDataException($"World solver state '{state.Name}' doesn't follow a custom solver in pipeline order.");
 
             next++;
+        }
+
+        // Loading needs the class behind every key, so an unknown one fails here and not partway through a restore.
+        AtmosSimulationComponentCheckpoint? previous = null;
+        foreach (var component in SimulationComponents)
+        {
+            if (string.IsNullOrWhiteSpace(component.Key) ||
+                Simulations.All(simulation => simulation.Simulation != component.Simulation) ||
+                previous is { } prior && AtmosSimulationComponentCheckpoint.CompareOrder(prior, component) >= 0)
+            {
+                throw new InvalidDataException(
+                    "The world checkpoint's simulation components have a blank key, an unknown simulation, or the " +
+                    "wrong order.");
+            }
+
+            if (!SimulationComponentCatalog.Contains(component.Key))
+                throw new InvalidDataException(SimulationComponentCatalog.DescribeUnknown(component.Key));
+
+            previous = component;
         }
 
         // The public view maps states lazily, so reject unknown ones while reading.
@@ -211,7 +298,55 @@ public readonly partial record struct AtmosWorldSolverCheckpoint(
 /// </param>
 public readonly partial record struct AtmosWorldSolverStateCheckpoint(
     [property: NumosSerialize] string Name,
-    [property: NumosSerialize] ReadOnlyMemory<byte> State);
+    [property: NumosSerialize] ReadOnlyMemory<byte> State)
+{
+    /// <summary>
+    ///     Gets the <see cref="INumosStateSchema.SchemaFingerprint" /> of the solver type that wrote
+    ///     <see cref="State" />, or 0 when it was not recorded.
+    /// </summary>
+    /// <remarks>
+    ///     A restore compares it with the registered solver's fingerprint. A difference does not stop the restore (see
+    ///     <see cref="AtmosWorld.RestoreCheckpoint(AtmosWorldCheckpoint, AtmosSchemaCheck)" />).
+    /// </remarks>
+    [NumosSerialize]
+    public ulong SchemaFingerprint { get; init; }
+}
+
+/// <summary>
+///     Holds the state of one simulation component as written by its generated state walker.
+/// </summary>
+/// <param name="Simulation">The simulation that holds the component.</param>
+/// <param name="Key">The <see cref="SimulationComponentAttribute" /> key.</param>
+/// <param name="State">
+///     The component's state payload: its marked members as field-id records, the same encoding solver state uses.
+///     Opaque without the component class, so the world hash covers these bytes as they are.
+/// </param>
+public readonly partial record struct AtmosSimulationComponentCheckpoint(
+    [property: NumosSerialize] AtmosSimulationId Simulation,
+    [property: NumosSerialize] string Key,
+    [property: NumosSerialize] ReadOnlyMemory<byte> State)
+{
+    /// <summary>
+    ///     Gets the <see cref="INumosStateSchema.SchemaFingerprint" /> of the component class that wrote
+    ///     <see cref="State" />, or 0 when it was not recorded.
+    /// </summary>
+    /// <remarks>
+    ///     A restore compares it with the fingerprint of the class registered for <see cref="Key" />. A difference
+    ///     does not stop the restore (see
+    ///     <see cref="AtmosWorld.RestoreCheckpoint(AtmosWorldCheckpoint, AtmosSchemaCheck)" />).
+    /// </remarks>
+    [NumosSerialize]
+    public ulong SchemaFingerprint { get; init; }
+
+    /// <summary>
+    ///     Orders entries by simulation, then by ordinal key, the order a checkpoint lists them in.
+    /// </summary>
+    internal static int CompareOrder(AtmosSimulationComponentCheckpoint left, AtmosSimulationComponentCheckpoint right)
+    {
+        int simulation = left.Simulation.CompareTo(right.Simulation);
+        return simulation != 0 ? simulation : string.CompareOrdinal(left.Key, right.Key);
+    }
+}
 
 /// <summary>
 ///     Associates one stable world registration with its independent voxel-storage checkpoint.

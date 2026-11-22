@@ -255,6 +255,64 @@ public sealed record EditVoxelBoxOperation(
 }
 
 /// <summary>
+///     Writes a run of elements into one chunk's storage for a rollback chunk field.
+/// </summary>
+/// <remarks>
+///     <para>
+///         <see cref="Values" /> holds the elements in the encoding of the checkpoint's chunk-field arrays: each element
+///         little-endian, one after another. Replay resolves <see cref="Key" /> in the process-wide field registry.
+///         It throws <see cref="InvalidOperationException" /> when no rollback field with that element size is
+///         registered under the key.
+///     </para>
+///     <para>
+///         The write creates the field's storage in the chunk when it has none. It does not wake the chunk.
+///     </para>
+/// </remarks>
+/// <param name="Position">Target chunk-grid address.</param>
+/// <param name="Key">The field's registered key.</param>
+/// <param name="ElementSize">The size of one element, in bytes.</param>
+/// <param name="Start">The index of the first element written.</param>
+/// <param name="Values">The elements, a whole number of <paramref name="ElementSize" />-byte elements.</param>
+public sealed record WriteChunkFieldOperation(
+    Int3 Position,
+    string Key,
+    int ElementSize,
+    int Start,
+    ReadOnlyMemory<byte> Values) : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.WriteChunkField;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
+
+/// <summary>
+///     Stores one element in every voxel of a box, in global voxel coordinates, for a per-voxel rollback chunk field.
+/// </summary>
+/// <remarks>
+///     Voxels in chunks that do not exist are skipped, and the fill never creates a chunk. It creates the field's
+///     storage in each chunk the box touches. <see cref="Value" /> uses the encoding of
+///     <see cref="WriteChunkFieldOperation.Values" />. Replay fails the same way when the key does not resolve.
+/// </remarks>
+/// <param name="Min">Inclusive minimum corner, in global voxel coordinates.</param>
+/// <param name="Max">Inclusive maximum corner, in global voxel coordinates.</param>
+/// <param name="Key">The field's registered key.</param>
+/// <param name="ElementSize">The size of one element, in bytes.</param>
+/// <param name="Value">The element stored in every voxel, exactly <paramref name="ElementSize" /> bytes.</param>
+public sealed record FillChunkFieldBoxOperation(
+    Int3 Min,
+    Int3 Max,
+    string Key,
+    int ElementSize,
+    ReadOnlyMemory<byte> Value) : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.FillChunkFieldBox;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
+
+/// <summary>
 ///     Sets a voxel's resolved gas, thermal, and momentum state, including caches and channel order, independent of
 ///     detached mixture identity.
 /// </summary>

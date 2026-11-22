@@ -251,7 +251,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <summary>
     ///     Gets whether the owning world is recording external semantic operations.
     /// </summary>
-    /// <remarks>Recording always covers the whole <see cref="World" />; see <see cref="AtmosWorld.StartRecording" />.</remarks>
+    /// <remarks>Recording always covers the whole <see cref="World" />; see <see cref="AtmosWorld.StartRecording()" />.</remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool IsRecording
@@ -353,7 +353,10 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Releases all registered chunks and resources owned by the simulation.
     /// </summary>
     /// <remarks>Disposal is idempotent outside solver execution.</remarks>
-    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Called from a solver callback. A simulation built by a public constructor disposes its private world too, so
+    ///     it also throws from an event handler or a solver command.
+    /// </exception>
     [PublicAPI]
     public void Dispose()
     {
@@ -366,8 +369,14 @@ public sealed partial class AtmosSimulation : IDisposable
                 return;
 
             _kernel.EnsureCanExecuteTick();
+
+            // Before anything changes, so a world that refuses disposal keeps this simulation too.
+            if (_ownsWorld)
+                World.ThrowIfCannotDispose();
+
             World.UnregisterSimulation(this);
             _kernel.Dispose();
+            ClearComponents();
             _disposed = true;
         }
 
@@ -386,6 +395,7 @@ public sealed partial class AtmosSimulation : IDisposable
                 return;
 
             _kernel.Dispose();
+            ClearComponents();
             _disposed = true;
         }
     }

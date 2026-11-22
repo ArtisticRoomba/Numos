@@ -27,7 +27,9 @@ public sealed class AtmosWorldReplayTimeline
 {
     private readonly ReadOnlyCollection<AtmosWorldReplayVerificationPoint> _checkpointView;
     private readonly List<AtmosWorldReplayVerificationPoint> _checkpoints = [];
+    private readonly AtmosRecordingOptions? _recordingOptions;
     private readonly AtmosWorld _world;
+    private AtmosWorldStateHash[] _committedHashes = [];
     private AtmosWorldRecordedOperation[] _committedPrefix = [];
     private AtmosWorldCheckpoint? _headCheckpoint;
     private AtmosWorldRecording? _history;
@@ -53,11 +55,54 @@ public sealed class AtmosWorldReplayTimeline
     ///     The world cannot start recording at its current execution state.
     /// </exception>
     public AtmosWorldReplayTimeline(AtmosWorld world, double? checkpointSpacingSeconds = null)
-        : this(world, checkpointSpacingSeconds, true)
+        : this(world, checkpointSpacingSeconds, null, true)
     {
     }
 
-    private AtmosWorldReplayTimeline(AtmosWorld world, double? checkpointSpacingSeconds, bool initializeLive)
+    /// <summary>
+    ///     Starts inspection history at a world's current state and records with <paramref name="recordingOptions" />.
+    /// </summary>
+    /// <param name="world">The world to observe; its lifetime remains owned by the caller.</param>
+    /// <param name="checkpointSpacingSeconds">
+    ///     Simulated seconds between automatic checkpoint samples, or <see langword="null" /> for
+    ///     <see cref="DefaultCheckpointSpacingSeconds" />.
+    /// </param>
+    /// <param name="recordingOptions">
+    ///     Options for every recording the timeline starts. A nonzero <see cref="AtmosRecordingOptions.HashInterval" />
+    ///     puts state hashes into the archives that <see cref="CaptureReplay" /> returns.
+    /// </param>
+    /// <remarks>
+    ///     If the world already records, the timeline adopts that recording with its own options.
+    ///     <paramref name="recordingOptions" /> then applies to the recordings the timeline starts later, such as the
+    ///     branch that <see cref="SimulateFromHere" /> starts. A branch counts hash ticks from the branch position.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    ///     <paramref name="world" /> or <paramref name="recordingOptions" /> is <see langword="null" />.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="checkpointSpacingSeconds" /> is not a positive finite number.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException"><paramref name="world" /> has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The world cannot start recording at its current execution state.
+    /// </exception>
+    public AtmosWorldReplayTimeline(
+        AtmosWorld world,
+        double? checkpointSpacingSeconds,
+        AtmosRecordingOptions recordingOptions)
+        : this(
+            world,
+            checkpointSpacingSeconds,
+            recordingOptions ?? throw new ArgumentNullException(nameof(recordingOptions)),
+            true)
+    {
+    }
+
+    private AtmosWorldReplayTimeline(
+        AtmosWorld world,
+        double? checkpointSpacingSeconds,
+        AtmosRecordingOptions? recordingOptions,
+        bool initializeLive)
     {
         ArgumentNullException.ThrowIfNull(world);
         double spacing = checkpointSpacingSeconds ?? DefaultCheckpointSpacingSeconds;
@@ -65,13 +110,14 @@ public sealed class AtmosWorldReplayTimeline
             throw new ArgumentOutOfRangeException(nameof(checkpointSpacingSeconds));
 
         _world = world;
+        _recordingOptions = recordingOptions;
         CheckpointSpacingSeconds = spacing;
         _checkpointView = _checkpoints.AsReadOnly();
         if (!initializeLive)
             return;
 
         if (!world.IsRecording)
-            world.StartRecording();
+            StartRecording();
 
         AddCheckpoint();
     }
@@ -181,9 +227,15 @@ public sealed class AtmosWorldReplayTimeline
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only imported timeline positioned at its initial state.</returns>
     /// <remarks>
-    ///     Import reconstructs the archive through its head to verify the final digest. It then restores the initial
-    ///     checkpoint. Import reports progress and checks for cancellation between checkpoint intervals. If the caller
-    ///     cancels reconstruction, the supplied world stays at its most recently reconstructed position.
+    ///     <para>
+    ///         Import reconstructs the archive through its head to verify the final digest. It then restores the
+    ///         initial checkpoint. Import reports progress and checks for cancellation between checkpoint intervals. If
+    ///         the caller cancels reconstruction, the supplied world stays at its most recently reconstructed position.
+    ///     </para>
+    ///     <para>
+    ///         A portable archive can use custom solvers that <see cref="AtmosSolverCatalog" /> holds. The restore
+    ///         creates them in <paramref name="world" />, which needs no registration of its own.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -191,7 +243,10 @@ public sealed class AtmosWorldReplayTimeline
     /// </exception>
     /// <exception cref="InvalidOperationException"><paramref name="world" /> is recording.</exception>
     /// <exception cref="InvalidDataException">A reference digest does not match reconstructed state.</exception>
-    /// <exception cref="NotSupportedException"><paramref name="archive" /> contains host-defined solver state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     <paramref name="archive" /> contains host-defined solver state (see
+    ///     <see cref="AtmosWorldReplayArchive.UnsupportedFeatures" />).
+    /// </exception>
     /// <exception cref="ObjectDisposedException"><paramref name="world" /> has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken" /> requests cancellation.</exception>
     public static AtmosWorldReplayTimeline Import(
@@ -217,9 +272,10 @@ public sealed class AtmosWorldReplayTimeline
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only restored timeline positioned at its initial state.</returns>
     /// <remarks>
-    ///     Unlike <see cref="Import" />, this method does not require a portable archive. Matching custom solver
-    ///     registrations and their host delegates must already be attached to the supplied world. Use this method for
-    ///     histories retained inside one host process. Use <see cref="Import" /> for standalone replay files.
+    ///     Unlike <see cref="Import" />, this method does not require a portable archive. Host-registered custom
+    ///     solvers and their delegates must already be attached to the supplied world. Catalog solvers need no
+    ///     registration, because the restore creates them. Use this method for histories retained inside one host
+    ///     process. Use <see cref="Import" /> for standalone replay files.
     /// </remarks>
     /// <example>
     ///     Restore a branch captured earlier in the same host, then inspect its fork:
@@ -267,7 +323,7 @@ public sealed class AtmosWorldReplayTimeline
         if (world.IsRecording)
             throw new InvalidOperationException("Stop recording before restoring a world replay archive.");
 
-        var timeline = new AtmosWorldReplayTimeline(world, checkpointSpacingSeconds, false);
+        var timeline = new AtmosWorldReplayTimeline(world, checkpointSpacingSeconds, null, false);
         var initial = archive.InitialCheckpoint;
         if (initial.ComputeStateHash() != archive.InitialStateHash)
             throw new InvalidDataException("The replay's initial world checkpoint does not match its reference digest.");
@@ -307,6 +363,7 @@ public sealed class AtmosWorldReplayTimeline
         world.RestoreCheckpoint(initial);
         timeline._history = archive.Recording;
         timeline._committedPrefix = archive.Recording.Operations.ToArray();
+        timeline._committedHashes = archive.Recording.Hashes.ToArray();
         timeline.IsImported = true;
         timeline.IsInspecting = true;
         timeline.IsVerified = true;
@@ -472,8 +529,13 @@ public sealed class AtmosWorldReplayTimeline
             return;
 
         var position = Position;
-        _committedPrefix = ReplayHistory.TakeThrough(_history!.Operations, position.OperationSequence);
-        _world.StartRecording();
+        var prefix = ReplayHistory.TakeThrough(_history!.Operations, position.OperationSequence);
+        var hashes = _history.Hashes.Where(hash => !IsAfter(hash.Position, position)).ToArray();
+
+        // Before any field changes, so a world that refuses to record leaves the timeline inspecting as it was.
+        StartRecording();
+        _committedPrefix = prefix;
+        _committedHashes = hashes;
         _checkpoints.RemoveAll(point => IsAfter(point.Checkpoint.Position, position));
         if (_checkpoints[^1].Checkpoint.Position != position)
             AddCheckpoint();
@@ -495,8 +557,20 @@ public sealed class AtmosWorldReplayTimeline
             initial.Position.OperationSequence,
             head.Position.OperationSequence);
 
-        var recording = AtmosWorldRecording.Adopt(initial.Position, head.Position, operations);
+        var hashes = (IsInspecting ? _history!.Hashes : CombineHashes(_committedHashes, _world.CopyRecordedHashes()))
+            .Where(hash => IsAfter(hash.Position, initial.Position) && !IsAfter(hash.Position, head.Position))
+            .ToArray();
+
+        var recording = AtmosWorldRecording.Adopt(initial.Position, head.Position, operations, hashes);
         return new AtmosWorldReplayArchive(initial, recording, initial.ComputeStateHash(), head.ComputeStateHash());
+    }
+
+    private void StartRecording()
+    {
+        if (_recordingOptions == null)
+            _world.StartRecording();
+        else
+            _world.StartRecording(_recordingOptions);
     }
 
     private void BeginInspection()
@@ -505,7 +579,11 @@ public sealed class AtmosWorldReplayTimeline
             return;
 
         var tail = _world.StopRecording(out var head);
-        _history = AtmosWorldRecording.Adopt(Start, tail.Head, CombineOperations(_committedPrefix, tail.Operations));
+        _history = AtmosWorldRecording.Adopt(
+            Start,
+            tail.Head,
+            CombineOperations(_committedPrefix, tail.Operations),
+            CombineHashes(_committedHashes, tail.Hashes));
         _headCheckpoint = head;
         if (_checkpoints[^1].Checkpoint.Position != head.Position)
             _checkpoints.Add(new AtmosWorldReplayVerificationPoint(head, head.ComputeStateHash()));
@@ -579,6 +657,14 @@ public sealed class AtmosWorldReplayTimeline
             combined[prefix.Count + index] = tail[index];
 
         return combined;
+    }
+
+    private static AtmosWorldStateHash[] CombineHashes(
+        IReadOnlyList<AtmosWorldStateHash> prefix,
+        IReadOnlyList<AtmosWorldStateHash> tail)
+    {
+        // The prefix ends at or before the branch position, and the timeline started the tail's recording there.
+        return prefix.Concat(tail).ToArray();
     }
 
     private static bool IsNotAfter(AtmosTimelinePosition candidate, AtmosTimelinePosition position)

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <RootNamespace>Numos.Testing.Tests</RootNamespace>
+        <NumosSharedApiTestSupport>true</NumosSharedApiTestSupport>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Numos.API\Numos.API.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.Testing\Numos.Testing.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+    </ItemGroup>
+
+</Project>

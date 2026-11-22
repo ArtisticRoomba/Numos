@@ -134,4 +134,13 @@ internal static class ChunkDataDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
+
+    public static readonly DiagnosticDescriptor SavedWithUnportableType = new(
+        "NUMOSCHUNK016",
+        "Saved chunk field can't be written to a replay file",
+        "Chunk data property '{0}' has element type '{1}', which rolls back in memory but can't be saved to a " +
+        ".numos file. Use a primitive or enum element type, or set Transient = true.",
+        Category,
+        DiagnosticSeverity.Warning,
+        true);
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim;
 using Numos.CoreSim.Solvers;
 
@@ -15,10 +16,15 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Register an instance with
+///         Mark the class with <see cref="AtmosSolverAttribute" /> and add it with
+///         <see cref="AtmosWorldSolverPipeline.Add{T}" />. The world then creates and owns the instance. Numos can also
+///         create the stage by name for a replay, a checkpoint restore, or an imported replay file.
+///     </para>
+///     <para>
+///         The manual form registers an instance with
 ///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?, int)" />.
-///         The caller owns the instance. Numos never clones or disposes it. The pipeline's checkpoint metadata is the
-///         same as for a delegate registered under the same name.
+///         The caller owns that instance. Numos never clones or disposes it, and a restore needs it registered already.
+///         The pipeline's checkpoint metadata is the same as for a delegate registered under the same name.
 ///     </para>
 ///     <para>
 ///         Fields marked <c>[NumosSerialize]</c> (the class must be <see langword="partial" />) are the solver's state.
@@ -29,10 +35,22 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///         costs nothing for settings and counters but adds up for a large marked array.
 ///     </para>
 ///     <para>
-///         Unmarked fields are invisible to replay. Keep them to scratch work that <see cref="OnRestored" /> can throw
-///         away, plus references to services, other solvers, and chunk fields. Per-voxel state belongs in a rollback
-///         <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
-///         <see cref="SolverDataKey{T}" />.
+///         A <see langword="partial" /> method marked <see cref="SolverCommandAttribute" /> is a recorded input. A host
+///         call between ticks runs the method's <c>Apply{Name}</c> body and records one
+///         <see cref="InvokeAtmosSolverCommandOperation" />, which replay runs again. The host calls inside the body
+///         are not recorded on their own.
+///     </para>
+///     <para>
+///         Fields marked <c>[NumosScratch]</c> are scratch work. Numos never saves them, and it resets each one after a
+///         checkpoint restore, before <see cref="OnRestored" />. The class must be <see langword="partial" /> for
+///         that too. A class with scratch members and no <c>[NumosSerialize]</c> member has no checkpoint entry.
+///     </para>
+///     <para>
+///         Unmarked fields are invisible to replay. Keep them to references to services, other solvers, and chunk
+///         fields, plus scratch that <see cref="OnRestored" /> resets by hand. A mutable one without a mark is a
+///         build warning (<c>NUMOSSTATE016</c>), even when the class marks nothing. So is a <see langword="readonly" />
+///         array or collection. Per-voxel state belongs in a rollback <see cref="ChunkField{T}" />. Caches rebuilt from
+///         authoritative inputs can live under a <see cref="SolverDataKey{T}" />.
 ///     </para>
 ///     <para>
 ///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and
@@ -48,9 +66,10 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///         public static partial ChunkField&lt;float&gt; Exposure { get; }
 ///     }
 /// 
-///     public sealed class ExposureDecaySolver : IAtmosWorldSolver
+///     [AtmosSolver("my-mod/exposure-decay", After = AtmosBuiltInSolvers.Thermodynamics, RunsPerSecond = 10)]
+///     public sealed partial class ExposureDecaySolver : IAtmosWorldSolver
 ///     {
-///         private int _chunksVisited; // transient; reset on restore
+///         [NumosScratch] private int _chunksVisited; // transient, reset on restore
 /// 
 ///         public void Solve(AtmosWorldSolverContext context)
 ///         {
@@ -66,11 +85,9 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///                 _chunksVisited += chunks.Count;
 ///             }
 ///         }
-/// 
-///         public void OnRestored() =&gt; _chunksVisited = 0;
 ///     }
 /// 
-///     world.Solvers.Register("my-mod/exposure-decay", new ExposureDecaySolver(), after: AtmosBuiltInSolvers.Thermodynamics);
+///     world.Solvers.Add&lt;ExposureDecaySolver&gt;();
 ///     </code>
 /// </example>
 public interface IAtmosWorldSolver
@@ -92,10 +109,11 @@ public interface IAtmosWorldSolver
     ///     <para>
     ///         Numos calls this on every custom class solver, enabled or not, in pipeline order. The call happens once
     ///         the restored state is fully installed (including every solver's <c>[NumosSerialize]</c> members) and
-    ///         before any replayed tick. That covers
-    ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
+    ///         before any replayed tick. The solver's <c>[NumosScratch]</c> members are already reset. That covers
+    ///         <see cref="AtmosWorld.RestoreCheckpoint(AtmosWorldCheckpoint)" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
     ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
-    ///         <c>ReplayTo</c>. A single host call can trigger it more than once, so make it idempotent.
+    ///         <c>ReplayTo</c>. An instance that a restore created from <see cref="AtmosSolverCatalog" /> gets the call
+///         too. A single host call can trigger it more than once, so make it idempotent.
     ///         A timeline seek that continues forward from the current inspection position restores nothing and does
     ///         not call it.
     ///     </para>
@@ -314,6 +332,72 @@ public sealed class AtmosWorldSolverContext
     }
 
     /// <summary>
+    ///     Gets one simulation's <typeparamref name="T" /> component, and creates it on first use.
+    /// </summary>
+    /// <param name="simulation">A simulation from <see cref="Simulations" />.</param>
+    /// <typeparam name="T">A <see cref="SimulationComponentAttribute" /> class.</typeparam>
+    /// <returns>The one instance of <typeparamref name="T" /> the simulation holds.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         What a stage does to a component is derived work, like its writes to chunk fields. Numos does not record
+    ///         it, because replay runs the stage again. A component the stage creates is in the next checkpoint.
+    ///     </para>
+    ///     <para>
+    ///         Worker threads can call this. The lookup takes a short lock of the simulation's own, so call it once per
+    ///         simulation outside a voxel loop.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not part of this tick.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The tick has ended, or another class holds the key of <typeparamref name="T" />.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     foreach (var simulation in context.Simulations)
+    ///     {
+    ///         PipeNetwork pipes = context.Get&lt;PipeNetwork&gt;(simulation);
+    ///         pipes.Nodes.Add(new PipeNode(pipes.NextId++));
+    ///     }
+    ///     </code>
+    /// </example>
+    public T Get<T>(AtmosSimulation simulation) where T : class, ISimulationComponentDefinition<T>
+    {
+        ThrowIfNotInTick(simulation);
+        return simulation.GetOrCreateComponent<T>();
+    }
+
+    /// <summary>
+    ///     Gets one simulation's <typeparamref name="T" /> component when it has one.
+    /// </summary>
+    /// <param name="simulation">A simulation from <see cref="Simulations" />.</param>
+    /// <param name="component">The component, or <see langword="null" /> when the simulation has none.</param>
+    /// <typeparam name="T">A <see cref="SimulationComponentAttribute" /> class.</typeparam>
+    /// <returns><see langword="true" /> when the simulation holds the component.</returns>
+    /// <remarks>
+    ///     The call never creates a component. Worker threads can call it, as they can <see cref="Get{T}" />.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not part of this tick.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The tick has ended, or another class holds the key of <typeparamref name="T" />.
+    /// </exception>
+    public bool TryGet<T>(AtmosSimulation simulation, [NotNullWhen(true)] out T? component)
+        where T : class, ISimulationComponentDefinition<T>
+    {
+        ThrowIfNotInTick(simulation);
+        return simulation.TryGetComponentCore(out component);
+    }
+
+    private void ThrowIfNotInTick(AtmosSimulation simulation)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        _solverScope.ThrowIfClosed();
+        if (_solverScope.IndexOf(simulation) < 0)
+            throw new ArgumentException("The simulation is not registered in the world running this tick.", nameof(simulation));
+    }
+
+    /// <summary>
     ///     Gets lock-free views of the pages that hold the world's standalone <see cref="GasMixture" /> instances, in
     ///     index order and valid until the tick ends.
     /// </summary>
@@ -388,6 +472,96 @@ public sealed class AtmosWorldSolverContext
 
         chunk = default;
         return false;
+    }
+
+    /// <summary>
+    ///     Buffers an event for the host. Numos delivers it through <see cref="AtmosWorld.Events" /> after the tick.
+    /// </summary>
+    /// <typeparam name="T">The event type. Subscriptions match the exact type.</typeparam>
+    /// <param name="value">The event. Numos copies it into the buffer.</param>
+    /// <remarks>
+    ///     <para>
+    ///         Use this instead of calling a host service and checking <see cref="AtmosWorld.IsReplaying" />. Numos
+    ///         delivers to each subscription only when its <see cref="AtmosEventDelivery" /> allows it, so a replay does
+    ///         not repeat sounds or damage. An event that no subscription would receive costs one lookup and allocates
+    ///         nothing.
+    ///     </para>
+    ///     <para>
+    ///         Call it on the callback thread. Handlers see events in emit order, and a worker thread would make that
+    ///         order differ from run to run. A parallel stage collects its events per chunk inside the loop. After the
+    ///         loop it emits them in grid order.
+    ///     </para>
+    ///     <para>
+    ///         Events are not simulation state. A stage must not rely on a handler to change the world, because a
+    ///         <see cref="AtmosEventDelivery.LiveOnly" /> handler does not run during a replay.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     Called from a thread other than the callback thread, or after the tick has ended.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     var chunks = context.Chunks(simulation);
+    ///     var spread = new List&lt;FireSpread&gt;[chunks.Count];
+    ///     Parallel.For(0, chunks.Count, index => spread[index] = FindSpread(chunks[index]));
+    ///     foreach (var list in spread)
+    ///     {
+    ///         foreach (var fire in list)
+    ///             context.Emit(fire);
+    ///     }
+    ///     </code>
+    /// </example>
+    public void Emit<T>(in T value) where T : struct
+    {
+        _solverScope.ThrowIfClosed();
+        if (Environment.CurrentManagedThreadId != _solverScope.ThreadId)
+        {
+            throw new InvalidOperationException(
+                "Emit events on the solver callback thread. A parallel stage collects them per chunk and emits them " +
+                "after the loop, in grid order.");
+        }
+
+        _solverScope.World.Events.Emit(in value);
+    }
+
+    /// <summary>
+    ///     Creates a random generator for this tick, this stage, and one stream.
+    /// </summary>
+    /// <param name="stream">
+    ///     A number that tells this draw apart from the stage's other draws in the same tick, such as a voxel index or
+    ///     a decision number.
+    /// </param>
+    /// <returns>
+    ///     A generator that starts from <see cref="AtmosConfigSnapshot.RandomSeed" />, <see cref="TickCount" />, the
+    ///     stage's name, and <paramref name="stream" />.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         The same inputs always give the same sequence, so a replay draws what the original run drew. Numos stores
+    ///         nothing, and the generator needs no checkpoint entry. Two calls with the same stream in one tick and
+    ///         stage give the same numbers. Use a different stream for each voxel or decision that must be independent.
+    ///     </para>
+    ///     <para>
+    ///         The call never locks, so worker threads can make it. A parallel stage can then draw per voxel without
+    ///         making the result depend on thread timing.
+    ///     </para>
+    ///     <para>
+    ///         Use this instead of <see cref="System.Random" />. A <see cref="System.Random" /> keeps state outside the
+    ///         checkpoint, so a replay draws different numbers (<c>NUMOSSOLVER003</c>).
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The tick has ended.</exception>
+    /// <example>
+    ///     <code>
+    ///     AtmosRandom random = context.Random(stream: (ulong)cell.LocalVoxelIndex);
+    ///     if (random.NextSingle() &lt; chance)
+    ///         Ignite(cell);
+    ///     </code>
+    /// </example>
+    public AtmosRandom Random(ulong stream)
+    {
+        _solverScope.ThrowIfClosed();
+        return AtmosRandom.Create(_solverScope.Config.RandomSeed, _solverScope.Tick, _solverScope.StageNameHash, stream);
     }
 }
 

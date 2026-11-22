@@ -82,6 +82,13 @@ internal sealed partial class HeadlessOperations
             "resetSolvers" => ResetSolvers(request),
             "setSolverLayout" => SetSolverLayout(request),
             "applyTransportPreset" => ApplyTransportPreset(request),
+            "listSolverCatalog" => ListSolverCatalog(),
+            "addSolver" => AddSolver(request),
+            "removeSolver" => RemoveSolver(request),
+            "getSolverState" => GetSolverState(request),
+            "setSolverState" => SetSolverState(request),
+            "getSimulationComponents" => GetSimulationComponents(request),
+            "setSimulationComponentState" => SetSimulationComponentState(request),
             "createPortal" => CreatePortal(request),
             "createDock" => CreateDock(request),
             "destroyLinkSet" => DestroyLinkSet(request),
@@ -95,6 +102,7 @@ internal sealed partial class HeadlessOperations
             "continueBranch" => ContinueBranch(),
             "listBranches" => ListBranches(),
             "timelineInfo" => TimelineInformation(),
+            "verifyDeterminism" => VerifyDeterminism(request),
             "saveReplay" => SaveReplay(request),
             "loadReplay" => LoadReplay(request),
             "observe" => Observe(request),
@@ -112,10 +120,11 @@ internal sealed partial class HeadlessOperations
         "setVoxelMomentum", "injectGas", "clearVoxelGas",
         "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
         "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "setSolverInterval", "resetSolvers", "setSolverLayout",
-        "applyTransportPreset", "createPortal", "createDock",
+        "applyTransportPreset", "listSolverCatalog", "addSolver", "removeSolver", "getSolverState", "setSolverState",
+        "getSimulationComponents", "setSimulationComponentState", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
-        "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
-        "renderSlice"
+        "selectBranch", "continueBranch", "listBranches", "timelineInfo", "verifyDeterminism", "saveReplay", "observe",
+        "exportField", "renderSlice"
     ];
 
     internal SessionState? GetState()
@@ -1128,6 +1137,38 @@ internal sealed partial class HeadlessOperations
         };
 
         return Result(new CommandResult { Timeline = info });
+    }
+
+    private CommandExecution VerifyDeterminism(HeadlessRequest request)
+    {
+        int ticks = Require(request.Ticks, "ticks");
+        if (ticks <= 0 || ticks > MaximumTicksPerRequest)
+        {
+            throw new HeadlessRequestException(
+                "invalidTickCount",
+                $"ticks must be between 1 and {MaximumTicksPerRequest}.");
+        }
+
+        var report = _session.VerifyDeterminism(ticks);
+        return Result(new CommandResult
+        {
+            TicksExecuted = ticks,
+            Determinism = new DeterminismInfo
+            {
+                Deterministic = report.IsDeterministic,
+                StartTick = report.Start.Tick,
+                EndTick = report.End.Tick,
+                FirstHash = FormatHash(report.FirstRun.Digest),
+                SecondHash = FormatHash(report.SecondRun.Digest),
+                Differences = report.Differences
+                    .Select(static difference => new StateDifferenceInfo
+                    {
+                        Path = difference.Path,
+                        Detail = difference.Detail
+                    })
+                    .ToArray()
+            }
+        });
     }
 
     private static string FormatHash(ulong digest)

@@ -58,6 +58,19 @@ public sealed class ChunkDataGeneratedTests
     }
 
     [Test]
+    public void EnsureRegistered_RunsTheAssemblyRegistrationsWithoutTouchingTheirTypes()
+    {
+        // The generator emits NumosModule into this assembly because it declares [ChunkData] fields.
+        NumosModule.EnsureRegistered();
+
+        Assert.That(
+            () => ChunkField<int>.Register(UnreadChunkData.Key, rollback: true, length: 4),
+            Throws.InvalidOperationException.With.Message.Contains("already registered"));
+
+        Assert.That(UnreadChunkDataProbe.TypeInitialized, Is.False);
+    }
+
+    [Test]
     public void GeneratedFields_MatchTheirAttributes()
     {
         Assert.Multiple(() =>

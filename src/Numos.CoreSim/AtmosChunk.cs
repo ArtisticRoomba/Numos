@@ -72,6 +72,16 @@ internal class AtmosChunk
     internal long AirTopologyVersion;
 
     /// <summary>
+    ///     Nonzero while a solver chunk editor has opened this chunk and Numos has not yet repaired it.
+    /// </summary>
+    /// <remarks>
+    ///     The editor sets it from any worker. The pipeline reads and clears it on the tick thread after the stage
+    ///     returns, so it is always zero between stages. It is not checkpointed.
+    /// </remarks>
+    [NumosIgnore]
+    internal int PendingSolverEdit;
+
+    /// <summary>
     ///     Gas channels currently present in this chunk.
     /// </summary>
     /// <remarks>

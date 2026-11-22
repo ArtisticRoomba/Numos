@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.State;
 
 namespace Numos.API.Tests;
 
@@ -518,7 +519,7 @@ public sealed partial class AtmosSolverDependencyTests
         [SolverDependency(Optional = true)]
         public partial ExtraService? Extra { get; }
 
-        public int Solves { get; private set; }
+        [NumosIgnore] public int Solves { get; private set; }
 
         public void Solve(AtmosWorldSolverContext context)
         {
@@ -528,7 +529,7 @@ public sealed partial class AtmosSolverDependencyTests
 
     private sealed class HandWrittenConsumer : IConsumer, IAtmosSolverDependencies
     {
-        public int Injections { get; private set; }
+        [NumosIgnore] public int Injections { get; private set; }
 
         public void InjectDependencies(AtmosSolverDependencyResolver resolver)
         {
@@ -538,10 +539,10 @@ public sealed partial class AtmosSolverDependencyTests
             Injections++;
         }
 
-        public IClock? Clock { get; private set; }
-        public ProducerSolver? Producer { get; private set; }
-        public ExtraService? Extra { get; private set; }
-        public int Solves { get; private set; }
+        [NumosIgnore] public IClock? Clock { get; private set; }
+        [NumosIgnore] public ProducerSolver? Producer { get; private set; }
+        [NumosIgnore] public ExtraService? Extra { get; private set; }
+        [NumosIgnore] public int Solves { get; private set; }
 
         public void Solve(AtmosWorldSolverContext context)
         {
@@ -576,7 +577,7 @@ public sealed partial class AtmosSolverDependencyTests
 
         public ProducerSolver DerivedProducer => Producer;
 
-        public bool SawBoth { get; private set; }
+        [NumosIgnore] public bool SawBoth { get; private set; }
 
         public override void Solve(AtmosWorldSolverContext context)
         {

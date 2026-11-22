@@ -29,3 +29,6 @@ replay-file-load-error = Could not load the replay. { $message }
 replay-file-save-error = Could not save the replay. { $message }
 
 replay-file-drop-single-file-error = Drop exactly one .numos replay file.
+
+replay-file-missing-solvers-error = The replay needs solvers that are not loaded: { $solvers }. Load the assemblies that declare them with File > Load Solvers, then open the replay again.
+replay-file-missing-solvers-unavailable-error = The replay needs solvers that are not loaded: { $solvers }. This build cannot load solver assemblies. Open the replay in a JIT build of the viewer.

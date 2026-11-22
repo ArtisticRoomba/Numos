@@ -65,6 +65,7 @@ public partial class AtmosConfig : IAtmosConfig
         MinimumFlameSpeed = source.MinimumFlameSpeed;
         IgnitionTransferEnabled = source.IgnitionTransferEnabled;
         TransferSeedFraction = source.TransferSeedFraction;
+        RandomSeed = source.RandomSeed;
     }
 
     /// <summary>
@@ -322,6 +323,17 @@ public partial class AtmosConfig : IAtmosConfig
     /// <remarks>Negative values are normalized to zero.</remarks>
     [NumosSerialize]
     public Scalar TransferSeedFraction { get; set; } = AtmosConfigDefaults.TransferSeedFraction;
+
+    /// <summary>
+    ///     Seed of the random numbers that stages draw with <c>AtmosWorldSolverContext.Random</c>.
+    /// </summary>
+    /// <remarks>
+    ///     Every value is valid, so the snapshot keeps it as it is. Two worlds with the same seed and the same history
+    ///     draw the same numbers. Changing the seed changes every draw from the next tick on. A recording stores the
+    ///     change like any other setting.
+    /// </remarks>
+    [NumosSerialize]
+    public ulong RandomSeed { get; set; } = AtmosConfigDefaults.RandomSeed;
 
     /// <summary>
     ///     Returns the temperature the solvers use for a stored voxel temperature.

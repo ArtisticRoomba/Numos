@@ -122,6 +122,57 @@ internal static class DerivedStateRefresh
     }
 
     /// <summary>
+    ///     Brings a chunk that a custom stage wrote through a solver chunk editor back to a consistent state.
+    /// </summary>
+    /// <param name="chunk">The edited chunk.</param>
+    /// <param name="config">The configuration snapshot of the chunk's simulation for this tick.</param>
+    /// <remarks>
+    ///     <para>
+    ///         A sleeping chunk wakes, and the sleep timer restarts, as after a gas or temperature write through the
+    ///         facade. Gas and momentum in solid and void voxels are cleared, because such voxels hold neither.
+    ///         <see cref="RefreshChunk" /> then rebuilds pressure, heat capacity, and the vacuum flags. A voxel left
+    ///         without gas is emptied through <see cref="AtmosChunk.SetVoxelToVacuum" />, which also zeroes its
+    ///         momentum. Last, the revision advances.
+    ///     </para>
+    ///     <para>
+    ///         The repair reads nothing outside the chunk, so the order in which chunks are repaired does not change
+    ///         the result.
+    ///     </para>
+    /// </remarks>
+    internal static void RepairSolverEdit(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    {
+        if (!chunk.IsAwake)
+            chunk.Wake();
+
+        chunk.SleepTimer = 0;
+        ClearNonAirVoxels(chunk);
+        RefreshChunk(chunk, config);
+        chunk.MarkChanged();
+    }
+
+    /// <summary>
+    ///     Zeroes the gas and momentum of every solid and void voxel.
+    /// </summary>
+    /// <remarks>
+    ///     Pressure and heat capacity are left to <see cref="RefreshChunk" />, which clears them over the whole chunk.
+    ///     Temperature and custom fields stay as they are.
+    /// </remarks>
+    internal static void ClearNonAirVoxels(AtmosChunk chunk)
+    {
+        ReadOnlySpan<int> rooms = chunk.VoxelRoomMap.AsSpan();
+        for (ushort voxel = 0; voxel < rooms.Length; voxel++)
+        {
+            if (VoxelClassification.IsAirRoom(rooms[voxel]))
+                continue;
+
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                chunk.ActiveGases[gas].Moles[voxel] = 0f;
+
+            chunk.ZeroMomentum(voxel);
+        }
+    }
+
+    /// <summary>
     ///     Refreshes one chunk like <see cref="RefreshChunk" /> and keeps the voxel mole totals.
     /// </summary>
     /// <param name="chunk">The chunk to refresh.</param>

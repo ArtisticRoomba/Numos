@@ -1,3 +1,4 @@
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -229,7 +230,7 @@ public sealed class AtmosWorldServicesTests
 
     private sealed class RegisterOnRestore(AtmosWorld world) : IAtmosWorldSolver
     {
-        internal Exception? Failure { get; private set; }
+        [NumosIgnore] internal Exception? Failure { get; private set; }
 
         public void Solve(AtmosWorldSolverContext context)
         {

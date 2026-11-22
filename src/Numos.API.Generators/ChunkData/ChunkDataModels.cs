@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using Numos.API.Generators.Common;
 
 namespace Numos.API.Generators.ChunkData;
@@ -39,9 +40,9 @@ internal sealed record ChunkDataDeclaration(
     EquatableArray<DiagnosticInfo> Diagnostics)
 {
     /// <summary>
-    ///     Gets whether a per-property check failed. Every check made in the transform is an error.
+    ///     Gets whether a per-property check reported an error. A warning leaves the property usable.
     /// </summary>
-    public bool HasErrors => Diagnostics.Count > 0;
+    public bool HasErrors => Diagnostics.Any(static diagnostic => diagnostic.Descriptor.DefaultSeverity == DiagnosticSeverity.Error);
 }
 
 /// <summary>

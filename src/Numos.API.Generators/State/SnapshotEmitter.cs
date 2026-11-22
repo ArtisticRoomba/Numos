@@ -24,7 +24,7 @@ internal static class SnapshotEmitter
         var writer = new CodeWriter();
         writer.Header();
         writer.OpenNamespace(model.Type);
-        writer.OpenTypeChain(model.Type, " : " + stateInterface);
+        writer.OpenTypeChain(model.Type, " : " + stateInterface + ", " + StateEmitter.SchemaInterface);
 
         foreach (SnapshotMemberModel member in model.Members)
         {
@@ -68,6 +68,7 @@ internal static class SnapshotEmitter
 
         writer.CloseTypeChain(model.Type);
         writer.CloseNamespace(model.Type);
+        StateEmitter.EmitFieldNames(writer, model.State);
         return (model.Type.HintName + ".NumosSnapshot.g.cs", writer.ToString());
     }
 

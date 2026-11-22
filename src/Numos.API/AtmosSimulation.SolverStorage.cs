@@ -1,5 +1,7 @@
 using JetBrains.Annotations;
 using Numos.Collections;
+using Numos.CoreSim.Replay;
+using Numos.Maths;
 
 namespace Numos.API;
 
@@ -158,6 +160,192 @@ public sealed partial class AtmosSimulation
         return field.CreateView(values, ChunkDimensions);
     }
 
+    /// <summary>
+    ///     Stores one element of a rollback chunk field and records one replay operation.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="chunk">The chunk that owns the storage.</param>
+    /// <param name="field">The field to write. It must be registered with rollback.</param>
+    /// <param name="index">
+    ///     The element index in the field's array. For a per-voxel field it is the flat local voxel index.
+    /// </param>
+    /// <param name="value">The value to store.</param>
+    /// <remarks>
+    ///     This is <see cref="WriteChunkData{T}" /> with one element. Its remarks apply.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="field" /> is transient.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="index" /> is outside the field's array.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A tick is running and the caller is not the tick's thread.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">The chunk is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     simulation.SetChunkData(chunk, FireData.BurnCount, 0, 3);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void SetChunkData<T>(AtmosChunkHandle chunk, ChunkField<T> field, int index, T value)
+    {
+        WriteChunkDataCore(chunk, field, new ReadOnlySpan<T>(in value), index, nameof(SetChunkData), nameof(index));
+    }
+
+    /// <summary>
+    ///     Copies a run of elements into a rollback chunk field and records one replay operation.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="chunk">The chunk that owns the storage.</param>
+    /// <param name="field">The field to write. It must be registered with rollback.</param>
+    /// <param name="values">The elements to copy.</param>
+    /// <param name="start">
+    ///     The index in the field's array of the first element written. For a per-voxel field it is the flat local
+    ///     voxel index.
+    /// </param>
+    /// <remarks>
+    ///     <para>
+    ///         Use this, rather than a <c>Dangerous().GetChunkField</c> view, when host code changes a field between
+    ///         ticks. The write is recorded, so
+    ///         <see cref="AtmosWorld.ReplayTo(AtmosWorldCheckpoint, AtmosWorldRecording)" /> and saved replays reproduce it.
+    ///     </para>
+    ///     <para>
+    ///         Only rollback fields accept writes. A restore clears a transient field, so a recorded write to one would
+    ///         mean nothing. Numos checks the field and the range before it changes anything. A failed call changes
+    ///         nothing and records nothing. An empty <paramref name="values" /> also changes and records nothing.
+    ///     </para>
+    ///     <para>
+    ///         The write creates the field's storage in the chunk when it has none, as <see cref="AtmosSolverChunk.Get{T}" />
+    ///         does. It does not wake a sleeping chunk and does not advance the chunk's revision. Creating the storage
+    ///         is the exception: it advances the revision once.
+    ///     </para>
+    ///     <para>
+    ///         A call from a solver callback on the tick's thread applies and is not recorded, because replay reruns
+    ///         the solver. Any other thread gets an <see cref="InvalidOperationException" /> while a tick runs.
+    ///     </para>
+    ///     <para>
+    ///         Only primitive and enum fields can be saved to a replay file. A recorded write to a struct field works
+    ///         in memory, and <see cref="AtmosWorldReplayArchive.UnsupportedFeatures" /> lists it.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="field" /> is transient.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="start" /> is negative, or the run does not fit in the field's array.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A tick is running and the caller is not the tick's thread.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">The chunk is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     float[] exposure = new float[simulation.ChunkDimensions.X];
+    ///     exposure.AsSpan().Fill(0.5f);
+    ///     simulation.WriteChunkData(chunk, FireData.Exposure, exposure); // the first row of voxels
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void WriteChunkData<T>(AtmosChunkHandle chunk, ChunkField<T> field, ReadOnlySpan<T> values, int start = 0)
+    {
+        WriteChunkDataCore(chunk, field, values, start, nameof(WriteChunkData), nameof(start));
+    }
+
+    /// <summary>
+    ///     Stores one value in every voxel of a box for a per-voxel rollback chunk field and records one replay
+    ///     operation.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="min">The inclusive minimum corner, in global voxel coordinates.</param>
+    /// <param name="max">The inclusive maximum corner, in global voxel coordinates.</param>
+    /// <param name="field">The field to write. It must be per-voxel and registered with rollback.</param>
+    /// <param name="value">The value to store in every voxel of the box.</param>
+    /// <remarks>
+    ///     <para>
+    ///         The box uses the coordinates of <see cref="EditVoxelBox" />, so it can span many chunks. Voxels in chunks
+    ///         that do not exist are skipped, and the fill never creates a chunk. A box that touches no chunk still
+    ///         records its operation.
+    ///     </para>
+    ///     <para>
+    ///         The rules of <see cref="WriteChunkData{T}" /> for validation, storage, sleep, threading, and saving apply.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="field" /> is transient or has a fixed length, or <paramref name="min" /> exceeds
+    ///     <paramref name="max" /> on an axis.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A tick is running and the caller is not the tick's thread.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     simulation.FillChunkData(new Int3(0, 0, 0), new Int3(31, 31, 0), FireData.Exposure, 1f);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void FillChunkData<T>(Int3 min, Int3 max, ChunkField<T> field, T value)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+        ThrowIfChunkFieldWriteFromWorker(nameof(FillChunkData));
+        RequireRecordableField(field);
+        if (field.Length != null)
+        {
+            throw new ArgumentException(
+                $"Chunk field '{field.Key}' has a fixed length, so it has no voxels to fill. Use WriteChunkData.",
+                nameof(field));
+        }
+
+        if (min.X > max.X || min.Y > max.Y || min.Z > max.Z)
+            throw new ArgumentException("The box minimum must not exceed its maximum.", nameof(min));
+
+        var descriptor = field.Descriptor;
+        _kernel.FillChunkFieldBox(new FillChunkFieldBoxOperation(
+            min,
+            max,
+            descriptor.Key,
+            descriptor.ElementSize,
+            descriptor.Encode(new ReadOnlySpan<T>(in value))));
+    }
+
+    private void WriteChunkDataCore<T>(
+        AtmosChunkHandle chunk, ChunkField<T> field, ReadOnlySpan<T> values, int start, string member, string startName)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+        ThrowIfChunkFieldWriteFromWorker(member);
+        RequireRecordableField(field);
+        var dimensions = ChunkDimensions;
+        int length = field.Length ?? dimensions.X * dimensions.Y * dimensions.Z;
+        if (start < 0 || start > length - values.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                startName,
+                start,
+                $"Chunk field '{field.Key}' has {length} elements, so {values.Length} elements cannot start at index {start}.");
+        }
+
+        var descriptor = field.Descriptor;
+        _kernel.WriteChunkField(new WriteChunkFieldOperation(
+            chunk.Position,
+            descriptor.Key,
+            descriptor.ElementSize,
+            start,
+            descriptor.Encode(values)));
+    }
+
+    private static void RequireRecordableField<T>(ChunkField<T> field)
+    {
+        if (!field.Rollback)
+        {
+            throw new ArgumentException(
+                $"Chunk field '{field.Key}' is transient. A restore clears it, so only rollback fields accept recorded writes.",
+                nameof(field));
+        }
+    }
+
     private void ThrowIfChunkFieldAccessFromWorker(string member)
     {
         if (World.IsTickExecuting && !Monitor.IsEntered(_kernel.StateGate))
@@ -166,6 +354,17 @@ public sealed partial class AtmosSimulation
                 $"Chunk fields cannot be read through {member} from another thread while a tick is running. " +
                 "Inside a solver callback, use AtmosWorldSolverContext.Chunks or TryGetChunk and the returned " +
                 "AtmosSolverChunk views, which are safe on worker threads.");
+        }
+    }
+
+    private void ThrowIfChunkFieldWriteFromWorker(string member)
+    {
+        if (World.IsTickExecuting && !Monitor.IsEntered(_kernel.StateGate))
+        {
+            throw new InvalidOperationException(
+                $"Chunk fields cannot be written through {member} from another thread while a tick is running. " +
+                "Inside a solver callback, write through the AtmosSolverChunk views of AtmosWorldSolverContext.Chunks, " +
+                "which are safe on worker threads.");
         }
     }
 }

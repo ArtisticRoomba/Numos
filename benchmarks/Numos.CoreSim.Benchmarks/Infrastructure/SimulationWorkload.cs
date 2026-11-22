@@ -67,10 +67,12 @@ internal sealed class SimulationWorkload : IDisposable
         for (int index = 0; index < positions.Length; index++)
             CreateChunk(options, positions[index], index, index < options.AwakeChunkCount);
 
-        ThermodynamicsStep = new BenchmarkSolverStep("thermodynamics", _solvers.SolveThermodynamics);
-        ThermalBoundaryStep = new BenchmarkSolverStep("thermal-boundary", _solvers.SolveThermalBoundary);
-        ReactionsStep = new BenchmarkSolverStep("gas-reactions", _solvers.SolveGasReactions);
-        var vacuumCleanupStep = new BenchmarkSolverStep("vacuum-cleanup", DefaultAtmosSolvers.SolveVacuumCleanup);
+        ThermodynamicsStep = new BenchmarkSolverStep(BuiltInStageTable.Thermodynamics, _solvers.SolveThermodynamics);
+        ThermalBoundaryStep = new BenchmarkSolverStep(BuiltInStageTable.ThermalBoundary, _solvers.SolveThermalBoundary);
+        ReactionsStep = new BenchmarkSolverStep(BuiltInStageTable.GasReactions, _solvers.SolveGasReactions);
+        var vacuumCleanupStep =
+            new BenchmarkSolverStep(BuiltInStageTable.VacuumCleanup, DefaultAtmosSolvers.SolveVacuumCleanup);
+
         switch (options.TransportModel)
         {
             case AtmosTransportModel.Legacy:
@@ -78,7 +80,7 @@ internal sealed class SimulationWorkload : IDisposable
                 // AtmosKernel.TickSimulation marks the awake chunks changed between these two stages too. Without that,
                 // the refreshed mole totals fail the revision check and advection sums the moles itself.
                 FlowStep = new BenchmarkSolverStep(
-                    "advection",
+                    BuiltInStageTable.Advection,
                     context =>
                     {
                         DefaultAtmosSolvers.SolveDerivedRefresh(context);
@@ -86,24 +88,29 @@ internal sealed class SimulationWorkload : IDisposable
                         _solvers.SolveAdvection(context);
                     });
 
-                _boundaryFlowStep = new BenchmarkSolverStep("boundary-flow", _solvers.SolveBoundaryFlow);
-                Steps =
-                [
-                    FlowStep, vacuumCleanupStep, _boundaryFlowStep.Value, ThermodynamicsStep, ThermalBoundaryStep,
-                    ReactionsStep
-                ];
-
+                _boundaryFlowStep = new BenchmarkSolverStep(BuiltInStageTable.BoundaryFlow, _solvers.SolveBoundaryFlow);
                 break;
             case AtmosTransportModel.Euler:
                 FlowStep = new BenchmarkSolverStep(
-                    "euler-flow",
+                    BuiltInStageTable.EulerFlow,
                     context => LastFlowDiagnostics = _solvers.SolveEulerFlow(context));
 
-                Steps = [FlowStep, vacuumCleanupStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(options), options.TransportModel, "Unknown transport model.");
         }
+
+        // The default layout gives the order. It skips derived-refresh, which FlowStep runs, and the explicit-link
+        // stages, which a lone kernel has no links for.
+        BenchmarkSolverStep?[] candidates =
+            [FlowStep, vacuumCleanupStep, _boundaryFlowStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
+
+        Steps =
+        [
+            ..BuiltInStageTable.GetLayout(options.TransportModel)
+                .Select(stage => Array.Find(candidates, step => step?.Name == stage.Name))
+                .OfType<BenchmarkSolverStep>()
+        ];
 
         Kernel.TickCount = InitialTickCount;
         Initial = Kernel.CaptureCheckpoint();

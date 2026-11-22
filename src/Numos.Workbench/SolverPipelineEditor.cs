@@ -49,8 +49,12 @@ public static class SolverPipelineEditor
     /// <param name="index">The stage to remove.</param>
     /// <returns>
     ///     The new layout, or <see langword="null" /> when the index is out of range or the stage is custom.
-    ///     The host owns custom stages, so an editor cannot recreate one after it removes it.
     /// </returns>
+    /// <remarks>
+    ///     The editor removes only built-in stages, the ones that <see cref="Add" /> can put back. A layout can also
+    ///     omit an <see cref="AtmosSolverCatalog" /> stage to remove it. A stage registered with
+    ///     <c>AtmosWorldSolverPipeline.Register</c> must stay in the layout.
+    /// </remarks>
     public static IReadOnlyList<AtmosWorldSolverLayoutEntry>? Remove(IReadOnlyList<AtmosWorldSolverStep> steps, int index)
     {
         ArgumentNullException.ThrowIfNull(steps);
@@ -72,6 +76,40 @@ public static class SolverPipelineEditor
         return AtmosWorldSolverPipeline.BuiltInStageNames
             .Where(name => steps.All(step => step.Name != name))
             .ToArray();
+    }
+
+    /// <summary>
+    ///     Lists the <see cref="AtmosSolverCatalog" /> solvers that the pipeline does not contain, in ordinal order.
+    /// </summary>
+    /// <param name="steps">The current stages in execution order.</param>
+    /// <returns>Names to pass to <see cref="WorkbenchSession.AddSolver" />.</returns>
+    public static IReadOnlyList<string> GetAddableCatalogSolvers(IReadOnlyList<AtmosWorldSolverStep> steps)
+    {
+        return GetAddableCatalogSolvers(steps, AtmosSolverCatalog.Names);
+    }
+
+    /// <summary>
+    ///     Lists the names of <paramref name="catalog" /> that the pipeline does not contain, in the catalog's order.
+    /// </summary>
+    /// <param name="steps">The current stages in execution order.</param>
+    /// <param name="catalog">Catalog stage names, such as a snapshot of <see cref="AtmosSolverCatalog.Names" />.</param>
+    public static IReadOnlyList<string> GetAddableCatalogSolvers(
+        IReadOnlyList<AtmosWorldSolverStep> steps,
+        IReadOnlyList<string> catalog)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(catalog);
+        return catalog.Where(name => steps.All(step => step.Name != name)).ToArray();
+    }
+
+    /// <summary>
+    ///     Gets whether a stage holds a solver from <see cref="AtmosSolverCatalog" />, so that
+    ///     <see cref="WorkbenchSession.RemoveSolver" /> can take it out.
+    /// </summary>
+    /// <param name="step">A stage of the pipeline.</param>
+    public static bool IsCatalogStage(AtmosWorldSolverStep step)
+    {
+        return step.Kind == AtmosWorldSolverKind.Custom && step.Name != null && AtmosSolverCatalog.TryGet(step.Name, out _);
     }
 
     /// <summary>
@@ -159,7 +197,10 @@ public static class SolverPipelineEditor
     ///     Returns a one-line description of a stage.
     /// </summary>
     /// <param name="name">A stage name.</param>
-    /// <returns>The description of a built-in stage, or a generic line for any other name.</returns>
+    /// <returns>
+    ///     The description of a built-in stage, a line for an <see cref="AtmosSolverCatalog" /> solver, or a generic
+    ///     line for any other name.
+    /// </returns>
     public static string Describe(string name)
     {
         return name switch
@@ -184,6 +225,7 @@ public static class SolverPipelineEditor
                 "Heat transport across chunk faces.",
             AtmosBuiltInSolvers.GasReactions =>
                 "Per-voxel gas reactions from the reaction configuration.",
+            _ when AtmosSolverCatalog.TryGet(name, out _) => "A catalog solver from a loaded assembly.",
             _ => "A stage registered by the host."
         };
     }

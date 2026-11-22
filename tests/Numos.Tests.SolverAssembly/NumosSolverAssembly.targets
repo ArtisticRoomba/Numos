@@ -1,0 +1,25 @@
+<Project>
+
+    <!--
+        Imported by a test project that loads Numos.Tests.SolverAssembly at run time. The reference builds the assembly
+        without referencing it, so it is not in the test's deps.json and the process holds it only after a test loads
+        it. The copy puts the assembly and the dependencies beside it into solver-assembly/ in the test output, the way
+        a mod folder looks.
+    -->
+    <ItemGroup>
+        <ProjectReference Include="$(MSBuildThisFileDirectory)Numos.Tests.SolverAssembly.csproj"
+                          ReferenceOutputAssembly="false"
+                          OutputItemType="NumosSolverAssembly"/>
+    </ItemGroup>
+
+    <Target Name="CopyNumosSolverAssembly" AfterTargets="Build">
+        <ItemGroup>
+            <_NumosSolverAssemblyFile Include="%(NumosSolverAssembly.RootDir)%(NumosSolverAssembly.Directory)*.dll"/>
+        </ItemGroup>
+
+        <Copy SourceFiles="@(_NumosSolverAssemblyFile)"
+              DestinationFolder="$(OutDir)solver-assembly"
+              SkipUnchangedFiles="true"/>
+    </Target>
+
+</Project>

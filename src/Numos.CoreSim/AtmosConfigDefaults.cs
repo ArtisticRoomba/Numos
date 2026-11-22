@@ -144,4 +144,9 @@ public static class AtmosConfigDefaults
     /// </summary>
     public const Scalar TransferSeedFraction = 0.01f;
 
+    /// <summary>
+    ///     Default for <see cref="AtmosConfig.RandomSeed" />.
+    /// </summary>
+    public const ulong RandomSeed = 0;
+
 }

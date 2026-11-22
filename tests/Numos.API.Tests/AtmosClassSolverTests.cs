@@ -1,10 +1,11 @@
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
 
 [TestFixture]
-public sealed class AtmosClassSolverTests
+public sealed partial class AtmosClassSolverTests
 {
     [Test]
     public void ClassAndDelegateSolvers_RunInterleavedInPipelineOrder()
@@ -234,6 +235,46 @@ public sealed class AtmosClassSolverTests
     }
 
     [Test]
+    public void ResumeRecordingFromOnRestored_IsRejectedDuringReplay()
+    {
+        using var world = new AtmosWorld();
+        world.CreateSimulation(1, 1, 1);
+        bool armed = false;
+        world.Solvers.Register(
+            "resumer",
+            new RestoreObserver(() =>
+            {
+                // Once only, so the rollback restore runs the hook without throwing again.
+                if (!armed)
+                    return;
+
+                armed = false;
+                world.ResumeRecording();
+            }));
+
+        world.StartRecording();
+        world.Tick();
+        var recording = world.StopRecording();
+        var head = world.CaptureCheckpoint();
+        world.Tick();
+        var before = world.ComputeStateHash();
+        armed = true;
+
+        // Replay installs the head checkpoint before the hook runs, so the state matches the stopped head there.
+        Assert.That(
+            () => world.ReplayTo(head, recording),
+            Throws.InvalidOperationException.With.Message.EqualTo("Recording cannot resume while the world is replaying."));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(armed, Is.False, "the hook ran");
+            Assert.That(world.IsRecording, Is.False);
+            Assert.That(world.IsReplaying, Is.False);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(before).And.Not.EqualTo(head.ComputeStateHash()));
+        });
+    }
+
+    [Test]
     public void OnRestoredFailure_PropagatesWithTheRestoredStateInstalled()
     {
         using var world = new AtmosWorld();
@@ -253,6 +294,28 @@ public sealed class AtmosClassSolverTests
             Assert.That(world.TickCount, Is.Zero);
             Assert.That(simulation.TickCount, Is.Zero);
             Assert.That(world.ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
+        });
+    }
+
+    [Test]
+    public void Restore_ResetsScratchMembersBeforeOnRestored()
+    {
+        using var world = new AtmosWorld();
+        world.CreateSimulation(1, 1, 1);
+        var solver = new ScratchSolver();
+        world.Solvers.Register("scratch", solver);
+        var checkpoint = world.CaptureCheckpoint();
+        world.Tick();
+        world.Tick();
+
+        world.RestoreCheckpoint(checkpoint);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(solver.SeenOnRestore, Is.EqualTo((0, 5, (string?)null)));
+            Assert.That(solver.Hot, Is.Empty);
+            Assert.That(checkpoint.SolverStates, Is.Empty);
+            Assert.That(solver, Is.Not.InstanceOf<Numos.CoreSim.State.Advanced.INumosStateTarget>());
         });
     }
 
@@ -280,7 +343,7 @@ public sealed class AtmosClassSolverTests
 
     private sealed class NeighborProbe(AtmosCellRef cell) : IAtmosWorldSolver
     {
-        internal AtmosNeighbor[] Neighbors { get; private set; } = [];
+        [NumosIgnore] internal AtmosNeighbor[] Neighbors { get; private set; } = [];
 
         public void Solve(AtmosWorldSolverContext context)
         {
@@ -301,14 +364,39 @@ public sealed class AtmosClassSolverTests
     }
 
     /// <summary>
+    ///     Has one scratch member for each reset rule, and records what OnRestored sees.
+    /// </summary>
+    private sealed partial class ScratchSolver : IAtmosWorldSolver
+    {
+        [NumosScratch] private readonly List<int> _hot = [];
+        [NumosScratch] private int _cursor = 5;
+        [NumosScratch] private string? _last;
+
+        internal IReadOnlyList<int> Hot => _hot;
+        [NumosIgnore] internal (int HotCount, int Cursor, string? Last) SeenOnRestore { get; private set; }
+
+        public void Solve(AtmosWorldSolverContext context)
+        {
+            _hot.Add(_cursor);
+            _cursor++;
+            _last = "solved";
+        }
+
+        public void OnRestored()
+        {
+            SeenOnRestore = (_hot.Count, _cursor, _last);
+        }
+    }
+
+    /// <summary>
     ///     Counts solves since the last restore, the kind of host-side scratch state OnRestored exists to reset.
     /// </summary>
     private sealed class TransientSolver : IAtmosWorldSolver
     {
-        internal List<string> Log { get; } = [];
-        internal int Restores { get; private set; }
-        internal int SolvesSinceRestore { get; private set; }
-        internal int ThrowOnReplayedSolve { get; set; }
+        [NumosIgnore] internal List<string> Log { get; } = [];
+        [NumosIgnore] internal int Restores { get; private set; }
+        [NumosIgnore] internal int SolvesSinceRestore { get; private set; }
+        [NumosIgnore] internal int ThrowOnReplayedSolve { get; set; }
 
         public void Solve(AtmosWorldSolverContext context)
         {

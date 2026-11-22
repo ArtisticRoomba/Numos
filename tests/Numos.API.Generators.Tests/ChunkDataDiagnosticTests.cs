@@ -134,6 +134,117 @@ public sealed class ChunkDataDiagnosticTests
     }
 
     [Test]
+    public void SavedFieldWithStructElement_Reports016AndStillGenerates()
+    {
+        GeneratorRunResult result = GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            sources: Wrap(
+                "[Numos.API.ChunkData(\"tests/struct\")] " +
+                "public static partial Numos.API.ChunkField<System.Numerics.Vector2> Value { get; }",
+                attribute: false));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK016" }));
+        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("Data.Value").And.Contain("System.Numerics.Vector2"));
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
+        Assert.That(GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs"), Does.Contain("Value =>"));
+    }
+
+    [TestCase("char")]
+    [TestCase("decimal")]
+    [TestCase("float?")]
+    [TestCase("System.DateTime")]
+    public void SavedFieldWithOtherUnmanagedElement_Reports016(string element)
+    {
+        AssertReports(
+            "NUMOSCHUNK016",
+            DiagnosticSeverity.Warning,
+            Wrap(
+                "[Numos.API.ChunkData(\"tests/unmanaged\")] " +
+                $"public static partial Numos.API.ChunkField<{element}> Value {{ get; }}",
+                attribute: false));
+    }
+
+    [TestCase("bool")]
+    [TestCase("byte")]
+    [TestCase("sbyte")]
+    [TestCase("short")]
+    [TestCase("ushort")]
+    [TestCase("int")]
+    [TestCase("uint")]
+    [TestCase("long")]
+    [TestCase("ulong")]
+    [TestCase("System.Half")]
+    [TestCase("float")]
+    [TestCase("double")]
+    [TestCase("Flags")]
+    [TestCase("Wide")]
+    public void SavedFieldWithPortableElement_ReportsNothing(string element)
+    {
+        const string types = """
+                             public enum Flags : byte { None }
+                             public enum Wide : ulong { None }
+                             """;
+
+        GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            sources:
+            [
+                types,
+                .. Wrap(
+                    "[Numos.API.ChunkData(\"tests/portable\")] " +
+                    $"public static partial Numos.API.ChunkField<{element}> Value {{ get; }}",
+                    attribute: false),
+            ]);
+
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
+    }
+
+    [Test]
+    public void SavedFieldWithUnresolvedQuantityAlias_DoesNotReport016()
+    {
+        // In a project that owns a units catalog, an alias such as Kelvin is an error type when the generator runs.
+        GeneratorHarness.Run(
+            out _,
+            out var diagnostics,
+            sources: Wrap(
+                "[Numos.API.ChunkData(\"tests/alias\")] " +
+                "public static partial Numos.API.ChunkField<Kelvin> Value { get; }",
+                attribute: false));
+
+        Assert.That(diagnostics.Select(static d => d.Id), Does.Not.Contain("NUMOSCHUNK016"));
+    }
+
+    [Test]
+    public void TransientStructElement_ReportsNothing()
+    {
+        GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            sources: Wrap("public static partial Numos.API.ChunkField<System.Numerics.Vector2> Value { get; }"));
+
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(RoslynTestSupport.Errors(output), Is.Empty);
+    }
+
+    [Test]
+    public void SavedManagedElement_ReportsOnly008()
+    {
+        GeneratorHarness.Run(
+            out _,
+            out var diagnostics,
+            sources: Wrap(
+                "[Numos.API.ChunkData(\"tests/managed-only\")] " +
+                "public static partial Numos.API.ChunkField<string> Value { get; }",
+                attribute: false));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK008" }));
+    }
+
+    [Test]
     public void NegativeLength_Reports009()
     {
         AssertReports(
@@ -239,6 +350,8 @@ public sealed class ChunkDataDiagnosticTests
     [TestCase("Position")]
     [TestCase("Dangerous")]
     [TestCase("Get")]
+    [TestCase("Temperature")]
+    [TestCase("Edit")]
     public void AccessorNamedLikeViewMember_Reports014(string name)
     {
         GeneratorRunResult result = GeneratorHarness.Run(
@@ -261,7 +374,7 @@ public sealed class ChunkDataDiagnosticTests
         GeneratorHarness.Run(
             out _,
             out var diagnostics,
-            sources: Wrap("public static partial Numos.API.ChunkField<float> Temperature { get; }"));
+            sources: Wrap("public static partial Numos.API.ChunkField<float> SleepTimer { get; }"));
 
         Assert.That(diagnostics, Is.Empty);
     }
@@ -372,8 +485,7 @@ public sealed class ChunkDataDiagnosticTests
         Diagnostic[] matching = diagnostics.Where(diagnostic => diagnostic.Id == id).ToArray();
         Assert.That(matching, Has.Length.EqualTo(1), string.Join("\n", diagnostics));
         Assert.That(matching[0].Severity, Is.EqualTo(severity));
-        // Generator diagnostics carry a path and span rather than a syntax tree; see LocationInfo.
-        Assert.That(matching[0].Location.GetLineSpan().Path, Does.StartWith("Source"));
+        Assert.That(matching[0].Location.SourceTree?.FilePath, Does.StartWith("Source"));
         return matching[0];
     }
 }

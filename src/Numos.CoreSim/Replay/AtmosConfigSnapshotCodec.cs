@@ -18,7 +18,7 @@ namespace Numos.CoreSim.Replay;
 ///         A hand-written configuration (one without <see cref="NumosSerializeAttribute" /> members) has no wire format,
 ///         so writing one to anything but a <see cref="StateHashSink" /> throws. The hash takes its own
 ///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead. A world with such a configuration stays
-///         hashable.
+///         hashable. A <see cref="StateTraceSink" /> gets the same hash, so a state diff sees what the hash sees.
 ///     </para>
 /// </remarks>
 internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnapshot>
@@ -35,7 +35,7 @@ internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnaps
             {
                 state.WriteState(ref sink);
             }
-            else if (typeof(TSink) == typeof(StateHashSink))
+            else if (typeof(TSink) == typeof(StateHashSink) || typeof(TSink) == typeof(StateTraceSink))
             {
                 sink.WriteUInt64(configuration.ComputeStateHash());
             }

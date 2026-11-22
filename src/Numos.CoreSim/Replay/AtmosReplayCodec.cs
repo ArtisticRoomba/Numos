@@ -268,6 +268,77 @@ internal static partial class AtmosReplayCodec
             gases);
     }
 
+    // The element bytes are already little-endian, so they go to the wire as one length-prefixed run.
+    private static void WriteWriteChunkFieldOperation(BinaryWriter writer, WriteChunkFieldOperation operation)
+    {
+        RequirePortableChunkField(operation.Key);
+        WriteInt3(writer, operation.Position);
+        WriteString(writer, operation.Key);
+        writer.Write(operation.ElementSize);
+        writer.Write(operation.Start);
+        WritePayload(writer, operation.Values.Span);
+    }
+
+    private static WriteChunkFieldOperation ReadWriteChunkFieldOperation(BinaryReader reader, int maxStringBytes)
+    {
+        var position = ReadInt3(reader);
+        string key = ReadString(reader, maxStringBytes);
+        int elementSize = ReadElementSize(reader, key);
+        int start = reader.ReadInt32();
+        if (start < 0)
+            throw new InvalidDataException($"The write to chunk field '{key}' starts at a negative index.");
+
+        byte[] values = ReadPayload(reader, ReadCount(reader, int.MaxValue, "chunk field byte"));
+        if (values.Length % elementSize != 0)
+            throw new InvalidDataException($"The write to chunk field '{key}' holds a partial element.");
+
+        return new WriteChunkFieldOperation(position, key, elementSize, start, values);
+    }
+
+    private static void WriteFillChunkFieldBoxOperation(BinaryWriter writer, FillChunkFieldBoxOperation operation)
+    {
+        RequirePortableChunkField(operation.Key);
+        WriteInt3(writer, operation.Min);
+        WriteInt3(writer, operation.Max);
+        WriteString(writer, operation.Key);
+        writer.Write(operation.ElementSize);
+        WritePayload(writer, operation.Value.Span);
+    }
+
+    private static FillChunkFieldBoxOperation ReadFillChunkFieldBoxOperation(BinaryReader reader, int maxStringBytes)
+    {
+        var min = ReadInt3(reader);
+        var max = ReadInt3(reader);
+        string key = ReadString(reader, maxStringBytes);
+        int elementSize = ReadElementSize(reader, key);
+        byte[] value = ReadPayload(reader, ReadCount(reader, int.MaxValue, "chunk field byte"));
+        if (value.Length != elementSize)
+            throw new InvalidDataException($"The fill of chunk field '{key}' does not hold exactly one element.");
+
+        return new FillChunkFieldBoxOperation(min, max, key, elementSize, value);
+    }
+
+    private static int ReadElementSize(BinaryReader reader, string key)
+    {
+        int size = reader.ReadInt32();
+        if (size <= 0)
+            throw new InvalidDataException($"The recorded write to chunk field '{key}' has an invalid element size.");
+
+        return size;
+    }
+
+    // AtmosWorldReplayArchive.EnsureSerializable reports these first. This stops a direct codec call writing native
+    // struct bytes that no reader could interpret.
+    private static void RequirePortableChunkField(string key)
+    {
+        if (ChunkFieldRegistry.TryGet(key, out var field) && !field.IsPortable)
+        {
+            throw new NotSupportedException(
+                $"A recorded write to chunk field '{key}' holds {field.ElementType.FullName}, which can't be saved. " +
+                "Only primitives and enums over them can.");
+        }
+    }
+
     private static void WriteVoxelClassification(BinaryWriter writer, VoxelClassification value)
     {
         writer.Write(value.RoomId);

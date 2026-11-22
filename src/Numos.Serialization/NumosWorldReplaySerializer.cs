@@ -21,6 +21,9 @@ public static class NumosWorldReplaySerializer
     private const ushort MetadataSection = 1;
     private const ushort CheckpointSection = 2;
     private const ushort OperationsSection = 3;
+    // Optional, and written only when the recording has hashes, so files without a trail keep their exact bytes.
+    private const ushort StateHashesSection = 4;
+    private const int StateHashBytes = 3 * sizeof(ulong);
     private const ushort RequiredSection = 1;
     private static readonly byte[] Magic = [0x4e, 0x55, 0x4d, 0x4f, 0x53, 0x0d, 0x0a, 0x1a];
 
@@ -50,11 +53,12 @@ public static class NumosWorldReplaySerializer
         document.Replay.EnsureSerializable();
 
         var replay = document.Replay;
+        bool hasHashes = replay.Recording.Hashes.Count != 0;
         using var writer = new BinaryWriter(destination, AtmosReplayCodec.Utf8, true);
         writer.Write(Magic);
         writer.Write(ContainerVersion);
         writer.Write(WorldReplayContentKind);
-        writer.Write(3u);
+        writer.Write(hasHashes ? 4u : 3u);
 
         using var scratch = destination.CanSeek ? null : new MemoryStream();
         WriteSection(destination, writer, scratch, MetadataSection, 0, section => WriteMetadata(section, document.Metadata, replay));
@@ -73,6 +77,17 @@ public static class NumosWorldReplaySerializer
             OperationsSection,
             RequiredSection,
             section => WriteOperations(section, replay.Recording));
+
+        if (hasHashes)
+        {
+            WriteSection(
+                destination,
+                writer,
+                scratch,
+                StateHashesSection,
+                0,
+                section => WriteHashes(section, replay.Recording.Hashes));
+        }
     }
 
     /// <summary>
@@ -100,12 +115,20 @@ public static class NumosWorldReplaySerializer
     /// </exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {
-        var (metadata, checkpoint, recording) = ReadContainer(source, options);
+        var (metadata, checkpoint, recording, hashes) = ReadContainer(source, options);
 
         if (recording.Start != checkpoint.Checkpoint.Position)
             throw new InvalidDataException("The world recording does not begin at its initial checkpoint.");
 
         ValidateRecording(recording);
+        if (hashes != null)
+        {
+            if (!ReplayHistory.IsValidTrail(recording.Start, recording.Operations, recording.Head, hashes))
+                throw new InvalidDataException("The recorded state hashes do not match the recording's ticks and operations.");
+
+            recording = recording.WithHashes(hashes);
+        }
+
         if (!metadata.Matches(
                 recording.Start,
                 recording.Head,
@@ -169,12 +192,13 @@ public static class NumosWorldReplaySerializer
     }
 
     /// <summary>
-    ///     Validates the container header and decodes the metadata, checkpoint, and operation sections. Unknown optional
-    ///     sections are skipped.
+    ///     Validates the container header and decodes the metadata, checkpoint, operation, and state hash sections.
+    ///     Unknown optional sections are skipped.
     /// </summary>
     private static (MetadataPayload Metadata,
         (AtmosWorldCheckpoint Checkpoint, AtmosWorldStateHash InitialHash, AtmosWorldStateHash HeadHash) Checkpoint,
-        AtmosWorldRecording Recording)
+        AtmosWorldRecording Recording,
+        AtmosWorldStateHash[]? Hashes)
         ReadContainer(Stream source, NumosReplayReadOptions? options)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -205,6 +229,7 @@ public static class NumosWorldReplaySerializer
         MetadataPayload? metadata = null;
         (AtmosWorldCheckpoint, AtmosWorldStateHash, AtmosWorldStateHash)? checkpoint = null;
         AtmosWorldRecording? recording = null;
+        AtmosWorldStateHash[]? hashes = null;
         long totalPayload = 0;
         for (uint index = 0; index < sectionCount; index++)
         {
@@ -237,6 +262,11 @@ public static class NumosWorldReplaySerializer
 
                     recording = ReadOperations(section, options);
                     break;
+                case StateHashesSection:
+                    if (hashes != null) throw new InvalidDataException("The replay contains duplicate state hash sections.");
+
+                    hashes = ReadHashes(section, limited);
+                    break;
                 default:
                     if ((flags & RequiredSection) != 0) throw new InvalidDataException($"Required Numos section {id} is unsupported.");
 
@@ -250,7 +280,7 @@ public static class NumosWorldReplaySerializer
         if (metadata == null || checkpoint == null || recording == null)
             throw new InvalidDataException("The world replay is missing a required section.");
 
-        return (metadata, checkpoint.Value, recording);
+        return (metadata, checkpoint.Value, recording, hashes);
     }
 
     /// <summary>
@@ -354,6 +384,36 @@ public static class NumosWorldReplaySerializer
         }
 
         return AtmosWorldRecording.Adopt(start, head, operations);
+    }
+
+    /// <summary>
+    ///     Writes the state hash section: a count, then each hash's position and digest.
+    /// </summary>
+    private static void WriteHashes(BinaryWriter writer, IReadOnlyList<AtmosWorldStateHash> hashes)
+    {
+        writer.Write(hashes.Count);
+        foreach (var hash in hashes)
+        {
+            AtmosReplayCodec.WritePosition(writer, hash.Position);
+            writer.Write(hash.Digest);
+        }
+    }
+
+    /// <summary>
+    ///     Reads a state hash section written by <see cref="WriteHashes" />. The count must fill the section exactly, so
+    ///     a corrupt count cannot allocate more than the section holds.
+    /// </summary>
+    private static AtmosWorldStateHash[] ReadHashes(BinaryReader reader, LimitedReadStream section)
+    {
+        int count = AtmosReplayCodec.ReadCount(reader, int.MaxValue, "state hash");
+        if ((long)count * StateHashBytes != section.Remaining)
+            throw new InvalidDataException("The state hash count does not match its section length.");
+
+        var hashes = new AtmosWorldStateHash[count];
+        for (int index = 0; index < count; index++)
+            hashes[index] = new AtmosWorldStateHash(AtmosReplayCodec.ReadPosition(reader), reader.ReadUInt64());
+
+        return hashes;
     }
 
     private static void Drain(Stream stream)

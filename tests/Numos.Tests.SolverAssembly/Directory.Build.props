@@ -1,0 +1,5 @@
+<!--
+    The Workbench and Viewer tests load this project's assembly at run time, the way a user loads a mod. It is not a
+    test project, so this file stops MSBuild from importing tests/Directory.Build.props and its NUnit references.
+-->
+<Project/>

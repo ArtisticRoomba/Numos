@@ -31,13 +31,7 @@ internal static class GeneratorOutput
         Func<T, (string HintName, string Source)> emit)
         where T : IEquatable<T>
     {
-        context.RegisterSourceOutput(
-            output.Select(static (result, _) => result.Diagnostics),
-            static (production, diagnostics) =>
-            {
-                foreach (DiagnosticInfo diagnostic in diagnostics)
-                    production.ReportDiagnostic(diagnostic.ToDiagnostic());
-            });
+        DiagnosticReporter.Register(context, output.Select(static (result, _) => result.Diagnostics));
 
         IncrementalValuesProvider<T> types = output
             .SelectMany(static (result, _) => result.Types)

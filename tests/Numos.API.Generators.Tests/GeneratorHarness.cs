@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Numos.API.Generators.ChunkData;
+using Numos.API.Generators.Common;
 using Numos.API.Generators.SolverDependency;
 using Numos.API.Generators.State;
 
@@ -26,8 +27,21 @@ internal static class GeneratorHarness
         CSharpParseOptions parseOptions,
         IEnumerable<MetadataReference> extraReferences, params string[] sources)
     {
+        return CreateCompilation(parseOptions, extraReferences, [], sources);
+    }
+
+    /// <summary>
+    ///     Creates a compilation that leaves out the Numos assemblies named in <paramref name="excludedAssemblies" />.
+    /// </summary>
+    public static CSharpCompilation CreateCompilation(
+        CSharpParseOptions parseOptions,
+        IEnumerable<MetadataReference> extraReferences, IReadOnlyCollection<string> excludedAssemblies,
+        params string[] sources)
+    {
         IEnumerable<MetadataReference> references = RoslynTestSupport.FrameworkReferences
-            .Concat(NumosReferences().Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path)))
+            .Concat(NumosReferences()
+                .Where(path => !excludedAssemblies.Contains(Path.GetFileNameWithoutExtension(path)))
+                .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path)))
             .Concat(extraReferences);
 
         return CSharpCompilation.Create(
@@ -108,6 +122,24 @@ internal static class GeneratorHarness
         return driver.GetRunResult().Results.ToArray();
     }
 
+    /// <summary>
+    ///     Runs the chunk data generator together with the state generator, which has to stay out of its way on
+    ///     <c>[ChunkComponent]</c> structs.
+    /// </summary>
+    public static GeneratorRunResult[] RunComponents(
+        out Compilation output, out ImmutableArray<Diagnostic> diagnostics,
+        LanguageVersion version = LanguageVersion.CSharp14, params string[] sources)
+    {
+        CSharpParseOptions parseOptions = ParseOptions(version);
+        CSharpCompilation compilation = CreateCompilation(parseOptions, sources);
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new ChunkDataGenerator().AsSourceGenerator(), new StateGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
+        return driver.GetRunResult().Results.ToArray();
+    }
+
     public static GeneratorDriver CreateDriver(
         CSharpParseOptions parseOptions, bool trackSteps = false,
         IIncrementalGenerator? generator = null)
@@ -122,6 +154,36 @@ internal static class GeneratorHarness
     {
         GeneratedSourceResult source = result.GeneratedSources.Single(source => source.HintName == hintName);
         return source.SourceText.ToString();
+    }
+
+    /// <summary>
+    ///     Gets the run reasons of every source output except diagnostic reporting.
+    /// </summary>
+    /// <remarks>
+    ///     A reporting node reads the compilation to find each diagnostic's syntax tree, so it reruns on every edit. Only
+    ///     the outputs that add sources have to stay cached.
+    /// </remarks>
+    public static IncrementalStepRunReason[] SourceOutputReasons(GeneratorRunResult result)
+    {
+        return OutputReasons(result, reporting: false);
+    }
+
+    /// <summary>
+    ///     Gets the run reasons of every diagnostic reporting output.
+    /// </summary>
+    public static IncrementalStepRunReason[] ReportingOutputReasons(GeneratorRunResult result)
+    {
+        return OutputReasons(result, reporting: true);
+    }
+
+    private static IncrementalStepRunReason[] OutputReasons(GeneratorRunResult result, bool reporting)
+    {
+        return result.TrackedOutputSteps
+            .SelectMany(static step => step.Value)
+            .Where(run => run.Inputs.Any(static input => input.Source.Name == DiagnosticReporter.StepName) == reporting)
+            .SelectMany(static run => run.Outputs)
+            .Select(static output => output.Reason)
+            .ToArray();
     }
 
     public static Diagnostic[] Errors(Compilation compilation)

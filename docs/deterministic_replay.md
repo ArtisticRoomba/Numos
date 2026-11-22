@@ -50,15 +50,14 @@ bool matches = world.ComputeStateHash() == expected;
 ```
 
 `AtmosWorldCheckpoint` captures registry generations and pending or active topology, plus each simulation's grid
-checkpoint. Restore keeps simulation objects that match the checkpoint. It disposes registrations that the checkpoint
-lacks. It recreates a missing simulation, with its recorded identifier, when that simulation used only built-in solvers.
-
-Restore rejects a missing simulation that used a custom solver. Numos does not capture host delegates, so it cannot
-recreate that simulation.
+checkpoint. Restore keeps simulation objects that match the checkpoint. It disposes simulations that the checkpoint
+lacks. It recreates a missing simulation with its recorded identifier.
 
 Custom world solver names, kinds, and neighbor-selection keys are part of checkpoint compatibility. The whole stage list
 is part of the world state hash. So is any `[NumosSerialize]` state a class solver holds (see "Solver state is
-checkpointed and recorded" below). Register matching callbacks before you restore or replay a checkpoint that uses them.
+checkpointed and recorded" below). Numos creates a missing `[AtmosSolver]` class from the solver catalog by its name.
+Register matching delegates and host instances before you restore or replay a checkpoint that uses them, because Numos
+cannot create those.
 
 ### One grid is a one-simulation world
 
@@ -98,7 +97,7 @@ The main replay types have separate jobs:
 | `AtmosWorldRecording`       | A detached interval with its start, fixed capture head, and ordered external operations.      |
 | `AtmosTimelinePosition`     | An exact point identified by completed tick and incorporated operation sequence.              |
 | `AtmosWorldStateHash`       | A timeline position and non-cryptographic digest used to detect divergent continuation state. |
-| `AtmosWorldReplayResult`    | Reconstruction diagnostics from a successful `ReplayTo` or timeline seek.                     |
+| `AtmosWorldReplayResult`    | Reconstruction diagnostics and changed schemas from a successful `ReplayTo` or timeline seek. |
 | `AtmosWorldReplayTimeline`  | An in-memory controller that retains checkpoints and history for inspection or branching.     |
 | `AtmosWorldReplayArchive`   | One initial checkpoint, semantic operations, bounds, and initial/final verification hashes.   |
 
@@ -142,7 +141,9 @@ idle. Those calls still apply immediately, and a query right afterwards sees the
 the recorder adds a canonical operation envelope.
 
 Calls made while a solver tick executes are internal simulation work, so the recorder excludes them. Recording them
-would replay derived effects as new external causes.
+would replay derived effects as new external causes. A solver command is the other exclusion. Numos records the
+command as one operation and skips the host calls inside it, because replay runs the command again (see
+[Recorded input from a mod](#recorded-input-from-a-mod)).
 
 `CaptureRecording()` copies the current interval without stopping it. `StopRecording()` fixes the interval head and
 returns another detached copy. Advancing the world after a stop does not move that saved head.
@@ -167,10 +168,11 @@ grid's data:
 |-----------------------|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Timeline              | World      | Captures the completed tick and last semantic operation sequence.                                                                                                          |
 | Applied configuration | World      | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
-| Solver pipeline       | World      | Captures names, custom/built-in kinds, execution order, enable flags, and neighbor-selection keys. Restore installs the built-in layout and validates the custom stages.   |
+| Solver pipeline       | World      | Captures names, custom/built-in kinds, execution order, enable flags, and neighbor-selection keys. Restore installs the layout, creating built-in and catalog stages.     |
 | Tick rate             | World      | Captures `TickRate`. |
 | Stage schedule        | World      | Captures each stage's interval, next due tick, and last run tick. |
-| Solver state          | World      | Captures every class solver's `[NumosSerialize]` members, keyed by solver name in pipeline order. Delegates and solvers without marked members have no entry.              |
+| Solver state          | World      | Captures every class solver's `[NumosSerialize]` members and the schema fingerprint of its type, keyed by solver name in pipeline order. Delegates and solvers without marked members have no entry. |
+| Simulation components | World      | Captures every `[SimulationComponent]` instance as its simulation, key, `[NumosSerialize]` members, and schema fingerprint, by simulation and then ordinal key.            |
 | Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
 | Gas mixtures          | World      | Captures the mixture pool's pages, cell volumes, slot generations, and allocation flags.                                                                                   |
 | Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, per-voxel momentum (three components), valid gas channels, and per-voxel moles.    |
@@ -183,7 +185,7 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 17. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 18. The grid schema inside it is format
 version 12, compatibility version 5. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them. The version history is:
 
@@ -217,6 +219,20 @@ of translating them. The version history is:
   their defaults, so an old checkpoint would replay the same way. The hash covers the wire encoding, so every digest
   moved with the new fields. The bump makes Numos reject older data instead of failing on a digest mismatch.
 - World 17 added the gas mixture pool.
+- World 18 added `RandomSeed` to the configuration. It also added the `SimulationComponents` list and the
+  `SetSimulationComponentState` (15) and `RemoveSimulationComponent` (16) world operations. Each solver state and
+  component entry also carries the `SchemaFingerprint` of the type that wrote it.
+
+`AtmosWorldCheckpoint.BuiltInSchemaFingerprint`, next to `CurrentFormatVersion`, pins one combined fingerprint over
+every generated state type in `Numos.CoreSim` and `Numos.API` (see "Schema fingerprints flag state saved with another
+shape"). A new, removed, or changed member in a checkpoint, configuration, or built-in solver type changes the value.
+`SchemaFingerprintTests.BuiltInSchemas_MatchThePinnedFingerprint` then fails. The pin exists so that no format change
+merges without a decision about the version. When the test fails:
+
+1. Decide whether `CurrentFormatVersion` moves. It moves when an older file would replay differently, or when the
+   hashes stored in that file would no longer match (see World 16 above).
+2. If it moves, add a line to the list above.
+3. Set `BuiltInSchemaFingerprint` to the value in the failure message.
 
 ### Checkpoints are generated from the live types
 
@@ -261,10 +277,10 @@ Restore writes members in the declaration order of the live type. It checks ever
 such as a chunk's `Dimensions` must already match, and so must array lengths. A list of live children makes a snapshot
 capture-only, because creating or dropping children is the owner's job. The kernel and the world therefore restore
 themselves. The kernel materializes each saved chunk (`new AtmosChunk(dimensions)`, then
-`AtmosChunkCheckpoint.RestoreInto`) and swaps the whole map in at once. The world restores solver state first. It then
-restores solver flags, simulation membership, configuration, grids, the gas mixture pool, topology, and time, in that
-order. The pool comes after the configuration, so it holds the restored one. It comes before the topology, because a
-link can end at a mixture.
+`AtmosChunkCheckpoint.RestoreInto`) and swaps the whole map in at once. The world restores simulation components and
+solver state first. It then restores solver flags, simulation membership, configuration, grids, the gas mixture pool,
+topology, and time, in that order. The pool comes after the configuration, so it holds the restored one. It comes
+before the topology, because a link can end at a mixture.
 
 Field ids hash the wire name. On a live type the wire name is the snapshot member's name. That is the member name unless
 `[NumosSerialize("Name")]` gives another one, as `AtmosChunk.Temperature` does to keep the `Temperatures` name. Renaming
@@ -305,12 +321,16 @@ restored settings. A custom configuration must capture every authoritative value
 Some data stays outside the checkpoint:
 
 - Custom solver delegates, closure state, unmarked fields on `IAtmosWorldSolver` instances, and `world.Services`
-  entries belong to the host. Numos never checkpoints, clears, or disposes them. A solver class's unmarked fields
-  should be scratch that `OnRestored` resets. Anything that must survive a restore gets `[NumosSerialize]`.
-- Per-tick event queues and solver workspaces are transient. Numos clears or rebuilds them.
+  entries belong to the host. Numos never checkpoints, clears, or disposes them. A solver class keeps scratch in
+  `[NumosScratch]` members, which Numos resets after a restore, or in `[NumosIgnore]` members that `OnRestored`
+  resets. Anything that must survive a restore gets `[NumosSerialize]`.
+- Per-tick event queues and solver workspaces are transient. Numos clears or rebuilds them. This includes the events
+  that stages emit for `world.Events`, and their subscriptions. A restore discards undelivered events.
 - Values cached under a `SolverDataKey<T>` are transient too. Restore and configuration changes discard them, even when
   the configuration is unchanged. This includes the built-in boundary event batches and the reaction solver's per-gas
   data. Solvers reacquire them on each callback, and the key's factory rebuilds them from authoritative inputs.
+  Per-simulation state that must survive a restore goes in a `[SimulationComponent]` class (see "Simulation components
+  are per-simulation solver state").
 - `ChunkField<T>` storage registered without `rollback: true` is transient. Restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state. `AtmosSimulation.LastFlowDiagnostics` is one of these: a restore zeroes it.
@@ -337,11 +357,18 @@ a process-local slot index inside every chunk. Numos never persists, hashes, or 
 registered fields in different orders still produce identical checkpoint contents and hashes.
 
 Values use the exact element representation, including floating-point bits and custom struct padding. Compatible solvers
-need matching types, layout, and runtime byte order. Direct writes outside solver callbacks are not recorded operations.
-The supported API gives host code only a read-only view, `AtmosSimulation.TryGetChunkField`, and that view never
-allocates storage. A host that must write goes through `AtmosSimulation.Dangerous().GetChunkField`, which bypasses
-recording and creates the storage on first use. Creating a rollback field's storage changes the next checkpoint and
-state hash. Initialize such state before the starting checkpoint, then update it as deterministic solver work.
+need matching types, layout, and runtime byte order. Host code reads a field through `AtmosSimulation.TryGetChunkField`,
+which never allocates storage. It writes a rollback field through `SetChunkData`, `WriteChunkData`, or `FillChunkData`
+on `AtmosSimulation`, and those writes are recorded (see "Write chunk data from host code"). A write through
+`AtmosSimulation.Dangerous().GetChunkField` bypasses recording. Use that view only to seed state before the starting
+checkpoint. Creating a rollback field's storage changes the next checkpoint and state hash.
+
+Numos cannot see a write through a Dangerous view, but it can see the view handed out. While a world records,
+`Dangerous().GetChunk` and `Dangerous().GetChunkField` count each view they hand to host code outside a tick.
+`AtmosWorld.UnrecordedAccessCount` reports the count since `StartRecording`, and
+`AtmosWorldRecording.UnrecordedAccessCount` keeps the value from the capture. A nonzero count means replay may not
+match the original run. A read-only use also counts, and access from a solver callback does not. The count is not part
+of the archive, so a recording loaded from a file reports 0.
 
 ## Solver state is checkpointed and recorded
 
@@ -351,21 +378,20 @@ then treats them like any other world state:
 ```csharp
 public sealed partial class FireSolver : IAtmosWorldSolver
 {
-    [NumosSerialize] public Kelvin IgnitionTemperature = 600f; // a setting the host can change
+    [NumosSerialize] public float IgnitionTemperature = 600f; // kelvins, a setting the host can change
     [NumosSerialize] private int _ticksSinceSpread;           // state the solver updates itself
-    private readonly List<int> _scratch = [];                  // not serialized, rebuilt in OnRestored
+    [NumosScratch] private readonly List<int> _scratch = [];  // not serialized, cleared on restore
 
     public void Solve(AtmosWorldSolverContext context) { /* ... */ }
-
-    public void OnRestored() => _scratch.Clear();
 }
 ```
 
 The marked members behave as follows:
 
 - `CaptureCheckpoint` writes each stateful solver's marked members into `AtmosWorldCheckpoint.SolverStates`. Restore
-  writes them back into the registered instance before anything else in the restore runs. `OnRestored` therefore sees
-  the restored values. Restore leaves unmarked fields alone, and `OnRestored` resets them.
+  writes them back into the registered instance, or into the instance it just created from the catalog, before any
+  other host code in the restore runs. `OnRestored` therefore sees the restored values. Restore resets
+  `[NumosScratch]` members before `OnRestored` and leaves other unmarked fields alone. `OnRestored` resets those.
 - The world state hash and the `.numos` checkpoint section include the entries.
 - Numos records host edits. Setting `fire.IgnitionTemperature = 650f` between ticks while recording produces a
   `SetAtmosWorldSolverStateOperation` with the new state of the solver. Replay applies it at the same position.
@@ -373,14 +399,51 @@ The marked members behave as follows:
   so Numos never records it.
 
 The generated reader skips field ids it does not know. It leaves members missing from the payload at their current
-value. A marked member must be assignable, because the reader writes into an existing instance. A `readonly` field or a
-get-only or `init` property gives `NUMOSSTATE020`.
+value. The reader writes into the existing instance. It clears and refills a `List<T>`, `HashSet<T>`, or
+`Dictionary<TKey, TValue>` that the solver already holds, and it assigns every other member. A marked member must be
+assignable unless it is a non-nullable collection of one of those three types. Any other `readonly` field, get-only
+property, or `init` property gives `NUMOSSTATE020`.
 
 Restore is strict about which solvers have state. The checkpoint must hold an entry for exactly the stateful class
-solvers registered on the receiving world, in pipeline order. Two cases raise an `ArgumentException`. One is an entry
-for a solver that is unregistered, registered as a delegate, or registered as a class without marked members. The other
-is a stateful solver with no entry. In either case state would be dropped or kept from before the restore. Replay would
+solvers the world has once the checkpoint's layout is installed, in pipeline order. Two cases raise an
+`ArgumentException`. One is an entry for a solver that is missing, registered as a delegate, or registered as a class
+without marked members. The other is a stateful solver with no entry. In either case state would be dropped or kept from before the restore. Replay would
 then diverge from the history of the checkpoint.
+
+### Schema fingerprints flag state saved with another shape
+
+A mod that renames a marked field or changes its type still restores its old checkpoints, because the reader skips
+unknown fields. The restored solver then lacks state it used to have, and replay can drift with no error. To make that
+visible, each solver state and component entry stores the schema fingerprint of the type that wrote it.
+
+The generator computes the fingerprint at build time from the wire name and codec shape of every marked member
+(`INumosStateSchema` has the exact rule). A C# rename that keeps the wire name with `[NumosSerialize("OldName")]` keeps
+the fingerprint, and so does a new member order. A nested `[NumosSerialize]` type adds only the word `State` to the
+fingerprint of its parent. A change inside the nested type therefore does not reach the parent's fingerprint. A base
+class is different: it shares the derived class's wire object, so a change in a base class's members changes the
+derived class's fingerprint.
+
+Restore compares each stored fingerprint with the fingerprint of the receiving type. A difference does not fail the
+restore by default. The overload that takes an `AtmosSchemaCheck` returns the names that differ:
+
+```csharp
+IReadOnlyList<string> changed = world.RestoreCheckpoint(checkpoint, AtmosSchemaCheck.Tolerant);
+// ["my-mod/fire"]: the saved state of the fire solver has another shape than FireSolver has now.
+
+world.RestoreCheckpoint(checkpoint, AtmosSchemaCheck.Strict); // throws InvalidOperationException instead
+```
+
+The two options and the replay path behave as follows:
+
+- `Tolerant` applies every entry and returns the solver names in pipeline order, then the component keys. The
+  one-argument `RestoreCheckpoint` is tolerant too, but it returns nothing.
+- `Strict` throws an `InvalidOperationException` at the first difference. The message names the type and says that
+  its saved state has another shape. The world stays as it was.
+- `ReplayTo` restores tolerantly. It puts the same list in `AtmosWorldReplayResult.ChangedSchemas`.
+- An entry with no stored fingerprint (0) is never reported.
+
+Use the tolerant list to warn that a save came from another version of a mod. Use `Strict` where replay must match
+the recording exactly, such as a test or a server that verifies replays.
 
 ### Recording at the boundary
 
@@ -394,13 +457,15 @@ idle window collapse into one operation. The boundaries are:
 - `CaptureCheckpoint`, and so `ComputeStateHash` and every timeline checkpoint and archive capture
 - `StopRecording`, before the stop is applied, which also covers the timeline's first seek
 - `CaptureRecording`, unless a tick calls it
+- a solver command called between ticks, before the command runs
 
 `StartRecording` and `ResumeRecording` take fresh baselines without recording. An edit made before a recording starts
 therefore belongs to its starting state. With no recording live, Numos hashes nothing. `ReplayTo` and branching need no
 boundary of their own. Both require recording to be stopped, and stopping is a boundary.
 
 The operation lands at the boundary, after any other operations from the same idle window. It does not land where the
-assignment happened. This is equivalent because no external operation reads class solver state:
+assignment happened. This is equivalent because no external operation except a solver command reads class solver
+state:
 
 - Grid operations go straight to chunk storage.
 - Configuration changes swap the snapshot.
@@ -410,6 +475,13 @@ assignment happened. This is equivalent because no external operation reads clas
   topology applies at the start of a tick, which is after the boundary. It also compiles them during a restore, after
   solver state has been written.
 
+Simulation components follow the same rule. No external operation reads them, and a solver command is a boundary.
+
+A solver command reads and writes its solver's state, and that is safe because the command is a boundary of its own.
+Numos records pending edits before the command runs, so replay applies them before it too. After the command returns,
+Numos takes fresh baselines. Replay makes the command's own writes when it reruns the command, so they must not come
+back as a state edit.
+
 A new operation must keep that true. If its `Apply` needed solver state, it would see the edit at a different point in
 replay than it did live.
 
@@ -418,6 +490,36 @@ negligible. Three solvers with a few scalars each added about 0.15 µs to a tick
 marks a large array hashes all of it twice a tick while recording. Keep bulky per-voxel state in a `[ChunkData]` field
 instead. A 64-bit hash finds edits, so Numos would miss a change that hashes the same as the baseline. The world state
 hash relies on the same digest.
+
+A large member that only the solver changes, such as a list that grows every tick, can be
+`[NumosSerialize(HostEditable = false)]`. The boundary hash skips it, so it costs nothing there. The checkpoint, the
+world state hash, and every recorded state payload still hold it. The host must then change it only through a solver
+command, which replay runs again. A direct edit between ticks would not be recorded. A Debug build of Numos hashes
+such members at each boundary anyway and throws `InvalidOperationException` naming the member when one changed.
+
+### Simulation components are per-simulation solver state
+
+A `[SimulationComponent("my-mod/pipes")]` class is restored, hashed, and recorded like the state of a class solver,
+with one instance per simulation and key. A stage reaches it with `context.Get<T>(simulation)`, and host code with
+`simulation.GetComponent<T>()`. The rules that differ from solver state come from the fact that a component can come
+and go:
+
+- The checkpoint's `SimulationComponents` list holds one entry per component that exists: simulation, key, payload,
+  and schema fingerprint. Entries are ordered by simulation, then by ordinal key, so two worlds that hold the same
+  components hash the same.
+- Restore validates every entry first. An unknown key fails the restore with an `ArgumentException` that names the key
+  and points at `NumosModule.EnsureRegistered()`. In the phase that can fail, Numos restores an existing instance in
+  place, creates a missing one from `SimulationComponentCatalog`, and drops one the checkpoint lacks. A later failure
+  writes the earlier state back into each instance it restored. After the restore, Numos resets each component's
+  `[NumosScratch]` members, before any solver's `OnRestored`.
+- A host edit becomes a `SetAtmosSimulationComponentStateOperation` at the next boundary. A component the host
+  creates has no baseline, so the boundary records its whole state the same way. `RemoveComponent` records a
+  `RemoveAtmosSimulationComponentOperation` at once, unless the component was created since the last boundary. Neither
+  operation has been recorded for it yet, so replay never sees it.
+- A component that a stage or a solver command creates or changes is derived. Numos takes its baseline when the tick
+  or the command ends.
+- Destroying a simulation drops its components. `AtmosSimulation.RestoreCheckpoint` restores only the grid, so it is
+  rejected while the simulation holds a component.
 
 ## Restore validates the receiving world
 
@@ -429,31 +531,38 @@ A custom solver name is a promise from the host that the receiving world has the
 World services are part of that promise. Restore leaves whatever the host registered in place, so a service whose
 answers feed simulation state must behave the same in the receiving world.
 
-The solver check compares custom stages only. The checkpoint's custom stages must have the same names, kinds, and
-neighbor-selection keys as the world's custom stages. Their order may differ. Numos can recreate every built-in stage by
-name, so restore installs the checkpoint's whole layout (order and enabled flags) and keeps the existing registrations
-of the custom stages. A legacy archive therefore restores into a world that starts on the Euler stages, and the world
-runs the legacy stages afterwards. A mismatch in custom stages fails with an `ArgumentException` that lists both stage
-lists.
+Numos can create every built-in stage by name, so restore installs the checkpoint's whole layout (order, enabled flags,
+and intervals). A legacy archive therefore restores into a world that starts on the Euler stages, and the world runs
+the legacy stages afterwards. The custom stages are checked by name. Their order may differ:
 
-Numos validates everything before it changes anything, including the framing of each solver state payload. The
-restore then runs in two phases, so a restore that fails before `OnRestored()` leaves the world as it was.
+- A custom stage that both have keeps its existing instance. Its neighbor-selection key must match.
+- A custom stage that only the checkpoint has must be in `AtmosSolverCatalog`. Numos creates it, and its catalog entry
+  must declare the checkpoint's neighbor-selection key. The message of a missing name lists every name the catalog
+  lacks.
+- A catalog stage that only the world has is removed, and its instance is disposed.
+- A stage registered with `Register` that only the world has fails the restore. Only `Unregister` removes such a stage.
+
+Each failure is an `ArgumentException`. Numos validates everything it can before it changes anything, including the
+framing of each solver state payload. The restore then runs in two phases, so a restore that fails before
+`OnRestored()` leaves the world as it was.
 
 The first phase does all the work that can fail. Numos materializes the replacement chunk storage of every simulation
 and the new mixture pool pages. It builds the simulations that the checkpoint adds, but does not register them yet. It
-then adopts the checkpoint's tick rate and solver layout, writes solver state back, and compiles the explicit topology.
-These steps run host code (`[NumosSerialize]` setters and neighbor selection predicates). The setters write into the
-live solver objects, and the selectors must see the restored solver state, so neither can run on a copy. If anything
-in this phase throws, Numos puts the previous rate, layout, and solver state back. It then releases the new storage,
-disposes the new simulations, and rethrows.
+then adopts the checkpoint's tick rate and solver layout, which creates and removes catalog stages. It writes solver
+state back and compiles the explicit topology. These steps run host code (catalog solver constructors,
+`[NumosSerialize]` setters, and neighbor selection predicates). The setters write into the live solver objects, and
+the selectors must see the restored solver state, so neither can run on a copy. If anything in this phase throws,
+Numos puts the previous rate, layout, stage instances, and solver state back. It then disposes the instances it
+created, releases the new storage, disposes the new simulations, and rethrows. A removed catalog instance is disposed
+only once the restore succeeds, so the rollback can put the same object back.
 
 The second phase runs no host code. Numos disposes the simulations that the checkpoint lacks and registers the new
 ones. It applies the checkpoint's configuration once and swaps the prepared storage and topology in. Restore keeps
 existing simulation objects and host integrations, clears transient solver state, and resets profiling data. Until the
 swap, a restore holds the old and the new storage at the same time.
 
-Last, restore calls `OnRestored()` on every `IAtmosWorldSolver` in the pipeline, enabled or not. The hook therefore sees
-time, configuration, and topology already restored. An exception from that hook propagates with the restored state
+Last, restore visits every `IAtmosWorldSolver` in the pipeline, enabled or not. It resets the solver's `[NumosScratch]`
+members and then calls `OnRestored()`. The hook therefore sees time, configuration, and topology already restored. An exception from that hook propagates with the restored state
 already in place.
 
 Address-only `AtmosChunkHandle` values can still identify the same chunk positions after restore. Voxel mixture objects
@@ -480,24 +589,36 @@ After validation, replay follows this order:
 4. Repeat until the target sequence is incorporated, then run ticks up to the target tick.
 
 If an operation, a solver, or dependency injection throws, Numos restores the world state from before the `ReplayTo`
-call (calling `OnRestored()` again) and propagates the exception. Numos cannot undo side effects in host code.
+call (calling `OnRestored()` again) and propagates the exception. A catalog stage the replay removed comes back as the
+same instance, and the world disposes the ones the replay created. Numos cannot undo side effects in host code.
 
-Custom solvers should use `world.IsReplaying` (or `simulation.IsReplaying`, which reads the same flag) to suppress
-damage, audio, spawning, telemetry, and similar effects. They must still perform the same Numos mutations:
+A successful replay can leave a different instance in a catalog stage than the one the world had before. The restore
+of the starting checkpoint removes a stage that the checkpoint lacks, and a recorded layout operation creates a new
+one. Call `world.Solvers.Get<T>()` again after a replay.
+
+A custom solver that drives damage, audio, spawning, telemetry, or similar host effects emits events through
+`context.Emit` (see "Tell the host about something" in `using.md`). Replayed ticks deliver only to `Always`
+subscriptions, with `IsReplay` set, so a replay or a timeline seek does not repeat the effects. Events are not
+recorded or checkpointed. A handler that changes the world on a live tick records an ordinary operation after that
+tick. The solver must still perform the same Numos mutations on every run:
 
 ```csharp
 world.Solvers.Register("life-support-v1", context =>
 {
     RunDeterministicAtmosLogic(context);
-
-    if (!context.World.IsReplaying)
-        EmitHostEffects();
+    context.Emit(new LifeSupportReport(context.TickCount));
 });
+
+world.Events.Subscribe((in LifeSupportReport report) => EmitHostEffects(report));
 ```
 
-Numos rejects registering, removing, or resetting custom solver definitions while recording or replaying. Numos cannot
-recreate a custom solver from a name, so a replay could not reproduce the change. Changing the order and enabled flags
-of the stages stays supported, because every built-in stage is recreatable by name. See
+For an effect that does not fit an event, read `world.IsReplaying` (or `simulation.IsReplaying`, which reads the same
+flag) and skip the effect while it is set.
+
+A catalog solver (an `[AtmosSolver]` class) can be added and removed while recording. Numos records the change as a
+solver layout operation, and replay creates or removes the stage from the catalog by name. Numos rejects registering,
+removing, or resetting a stage that `Register` added while recording or replaying. Numos cannot recreate a host
+delegate or instance from a name, so a replay could not reproduce the change. See
 [Change the solver layout while recording](#change-the-solver-layout-while-recording).
 
 World services follow the same rule. A solver that resolved a different service halfway through a recording would not
@@ -614,6 +735,67 @@ histories, and repeated backward and forward reconstruction. Run the determinism
 instruction-set architecture before you claim bitwise compatibility there. Investigate the first divergent position
 before you change a golden value.
 
+### Record a hash trail to find the first divergent tick
+
+A head hash only says that a replay went wrong somewhere in a long recording. A hash trail narrows that to an interval.
+Start the recording with a hash interval, and the world takes `ComputeStateHash()` at regular ticks while it records:
+
+```csharp
+AtmosWorldCheckpoint start = world.CaptureCheckpoint();
+world.StartRecording(new AtmosRecordingOptions { HashInterval = 20 });
+// ... tick and edit as usual ...
+AtmosWorldRecording recording = world.StopRecording();
+
+world.ReplayTo(start, recording);
+```
+
+With an interval of `n`, the world hashes at the end of every tick whose distance from the recording start is a
+multiple of `n`. Each entry in `AtmosWorldRecording.Hashes` is an ordinary positioned world hash. It is taken before
+any operation recorded after that tick. Each entry costs one checkpoint capture, so a large world needs a longer
+interval. The trail changes nothing that gets recorded. The capture skips the solver-state boundary, because no host
+edit can be pending at the end of a tick.
+
+`ReplayTo(start, recording)` replays through `recording.Head`. After each replayed tick that has a trail entry, it
+compares the hashes. On the first mismatch it restores the pre-call state and throws `AtmosReplayDivergedException`.
+The exception's `Position` is the first trail position after the divergence, so the divergence lies between it and
+the previous entry. Replay to that position with `ReplayTo(start, operations, target)`, which never checks a trail.
+Then compare the state with a checkpoint from the original run.
+
+`ResumeRecording` keeps the interval and the trail. `StartRecording` starts an empty trail. The parameterless
+`StartRecording()` and an interval of 0 record no hashes. An `AtmosWorldReplayTimeline` created with recording options
+carries the trail into the archives it captures. A branch from `SimulateFromHere` keeps the entries up to the branch
+position. Its new recording counts hash ticks from the branch position.
+
+## Find where two states differ
+
+Two different hashes say only that two states differ. `AtmosWorldCheckpoint.Diff(other)` says where. It returns one
+`AtmosStateDifference` per place, with a path and a detail. The left value comes first:
+
+```text
+Position / Tick: 0 vs 1
+Config / BulkFlowCoefficient: 0.125 vs 0.25
+Config / SolverConfigurations / euler-flow / CourantNumber: 0.5 vs 0.4
+SolverStates / my-mod/fire / SpreadRate: 1056964608 vs 1061158912 as int32, 0.5 vs 0.75 as float32
+Simulations / 0 / Chunks / (1,0,0) / Temperatures[412]: 300 vs 301.5; 17 of 4096 elements differ
+Simulations / 0 / Chunks / (1,0,0): present only on the right
+```
+
+The list is empty exactly when the two state hashes are equal. The diff drives the generated state walker that the
+hash uses, with a sink that records the structure instead of hashing it. It therefore covers every hashed field,
+including fields added later. Simulations, chunks, solvers, solver states, solver configurations, and rollback chunk
+fields match by identity (simulation index, grid position, name, or key). One extra chunk is then one entry, and the
+chunks after it still line up. Everything else compares by position. A differing array is one entry, at its first
+differing element.
+
+Generated module initializers register each field's wire name, and a field with no registered name prints as `#id`. A
+solver state payload is opaque without the solver type. Its fields print as bytes, and a 4-byte or 8-byte field also prints as
+an integer and a float. Floats print in round-trip form. When two floats print the same or compare equal
+(`0` and `-0`, NaN payloads), the detail adds the raw bits.
+
+To investigate a divergence, find the first position whose hashes differ. Capture the expected and the replayed
+checkpoint at that position and diff them. `maxDifferences` (64 by default) caps the list. The diff copies both
+states, so keep it off the tick path.
+
 ## Keep new state inside the replay contract
 
 Any value that can change a later tick belongs in the checkpoint, or Numos must rebuild it deterministically from
@@ -628,7 +810,8 @@ When you add a public mutation, decide whether it represents an external cause. 
 - Add coverage for replay to an exact position.
 
 Mutations through `Numos.API.Dangerous` bypass recording and invalidate the guarantee. The exceptions are deterministic
-solver work and mutations followed by a new authoritative checkpoint.
+solver work, writes inside a solver command (replay repeats the command), and mutations followed by a new
+authoritative checkpoint.
 
 The replay benchmark shows checkpoint-copy costs and the effect of checkpoint spacing:
 
@@ -700,14 +883,135 @@ pass, which at the default schedule can be up to 50 ms later.
 `AtmosSimulation.VentGasToVoxel` records one `VentGasToVoxelOperation` (opcode 16). It has the same fields as
 `AddGasToVoxelOperation`. Replay differs only in the energy rule: the voxel gains the gas's enthalpy.
 
+### Recorded input from a mod
+
+A mod changes Numos state from game code: a player lights a fire, a machine vents gas, a script marks a room as
+burning. Replay does not run the game code, so each change has to reach the recording. The grid, world, and mixture
+calls already record themselves. Two more paths cover what a mod adds:
+
+- Chunk-data writes store per-voxel values in a `ChunkField<T>`, one recorded operation per call.
+- A solver command runs the mod's own logic as one recorded operation. Replay runs the logic again.
+
+A write through a Dangerous view takes neither path. Numos counts each view handed out in `UnrecordedAccessCount`,
+except inside a command.
+
+#### Write chunk data from host code
+
+A mod often keeps per-voxel state in a `ChunkField<T>` and changes it from game code between ticks. A write through a
+Dangerous view would not replay. Three calls on `AtmosSimulation` write the field and record the write:
+
+```csharp
+simulation.SetChunkData(chunk, FireData.BurnCount, 0, 3);
+simulation.WriteChunkData(chunk, FireData.Exposure, exposureRow, start: 0);
+simulation.FillChunkData(new Int3(0, 0, 0), new Int3(15, 15, 0), FireData.Exposure, 0f);
+```
+
+`SetChunkData` and `WriteChunkData` record one `WriteChunkFieldOperation` (opcode 17). `FillChunkData` records one
+`FillChunkFieldBoxOperation` (opcode 18) for a box in global voxel coordinates, like `EditVoxelBox`. The fill skips
+chunks that do not exist and never creates one. It accepts only per-voxel fields.
+
+Only rollback fields accept these writes. A restore clears a transient field, so a recorded write to one would mean
+nothing. Such a call throws `ArgumentException`. An index outside the field's array also throws before anything
+changes. A write creates the field's storage when the chunk has none, which advances the chunk's revision once, as a
+solver's first `Get` does. Otherwise a write does not advance the revision, and it never wakes a sleeping chunk. A call
+from a solver callback applies and is not recorded, because replay reruns the solver.
+
+Each operation holds the field's key, its element size, and the elements in the byte order of the checkpoint's
+chunk-field arrays (each element little-endian). Replay resolves the key in the process-wide field registry. An
+unregistered key, a transient field, or a different element size throws `InvalidOperationException` that names the key,
+because the replay has no such field. Register the field before the replay, or call the declaring assembly's
+`NumosModule.EnsureRegistered()`.
+
+A recorded write to a struct field works in memory. `AtmosWorldReplayArchive.UnsupportedFeatures` lists it, and saving
+fails as it does for a struct field in a checkpoint. Hand-written codec pairs write the element bytes, because the
+generator cannot encode a byte run.
+
+#### Run mod logic as one recorded solver command
+
+A chunk-data write records the result. A command records the cause. Fire ignition might check a threshold, ignite the
+voxel, mark a chunk field, and bump a counter on the solver. As separate calls those are two recorded operations and a
+state edit, and the threshold check never reaches the recording. A command records one operation, and replay reaches
+the same result because it runs the same code.
+
+A class solver declares a command as a partial method. The generator writes the method. The author writes the body as
+`Apply{Name}`:
+
+```csharp
+[AtmosSolver("my-mod/fire", After = AtmosBuiltInSolvers.Thermodynamics, RunsPerSecond = 20)]
+public sealed partial class FireSolver : IAtmosWorldSolver
+{
+    [NumosSerialize] public float IgnitionTemperature = 600f;
+    [NumosSerialize] public int Ignitions;
+
+    [SolverCommand]
+    public partial void Ignite(AtmosCellRef cell, float temperature);
+
+    // The world parameter is optional. The generated code passes the world that holds this instance.
+    private void ApplyIgnite(AtmosWorld world, AtmosCellRef cell, float temperature)
+    {
+        if (temperature < IgnitionTemperature || !world.TryGetSimulation(cell.Simulation, out AtmosSimulation? station))
+            return;
+
+        // Ordinary host calls. Inside a command they apply but are not recorded on their own.
+        station.IgniteVoxel(cell.Chunk, cell.LocalVoxelIndex, temperature, 0.01f);
+        station.SetChunkData(cell.Chunk, FireData.Burning, cell.LocalVoxelIndex, true);
+        Ignitions++;
+    }
+
+    public void Solve(AtmosWorldSolverContext context) { /* ... */ }
+}
+
+world.Solvers.Get<FireSolver>().Ignite(cell, 900f); // between ticks: applied, then recorded as one operation
+```
+
+`Apply{Name}` takes the command's parameters, optionally after an `AtmosWorld`. The world is not part of the
+recording. A restore or `AtmosWorldReplayTimeline.Import` creates a catalog stage from its constructor, so the new
+instance has no field that points at a simulation. The world parameter is how its replayed commands reach the grid.
+
+A call between ticks follows these steps:
+
+1. Numos records pending host edits of `[NumosSerialize]` solver state, as at the start of a tick.
+2. Numos takes the world gate and every gate a tick takes. A host call on another thread waits, so it cannot land
+   between two of the command's changes.
+3. `Apply{Name}` runs. The grid, chunk-data, world, and mixture calls it makes apply without recording. A Dangerous view
+   handed out here does not count as unrecorded access.
+4. When a recording is live, Numos records one `InvokeAtmosSolverCommandOperation` (world opcode 14). It then takes
+   fresh solver-state baselines, so the command's field writes do not come back as a state edit.
+
+If `Apply{Name}` throws, Numos records nothing and the exception propagates. The calls made before the throw stay
+applied and unrecorded, so validate every argument before the first change.
+
+A command called from a solver during a tick runs and records nothing, because replay reruns the solver. A command
+called during a replay, from inside another command, or with no recording live also records nothing. A command cannot
+tick, update, replay, restore, or dispose the world, change the solver layout, or start, stop, or resume recording.
+Replay could not repeat these calls inside the command, so each one throws. A checkpoint captured inside a command pairs
+the command's partial changes with the position before it, so a replay from it applies the command twice.
+
+The operation holds the stage name, the command id, and the arguments. The id is `NumosState.FieldId` of the wire name,
+which is the method name or the name passed as `[SolverCommand("OldName")]`. Keep the old name there after a rename,
+and old recordings still replay. The arguments use the solver-state encoding: one field per parameter, keyed by the
+parameter name. Replay skips an argument no parameter names and passes `default` for a parameter the recording lacks.
+Gases travel by name and resolve against the world's registry. A hand-written codec pair writes the payload, like
+`SetAtmosWorldSolverStateOperation`.
+
+Replay finds the stage by name and calls the generated `IAtmosSolverCommands.InvokeCommand`. A missing stage, a stage
+without commands, or an unknown id throws `InvalidOperationException` with the stage and the command name. The
+instance must be a stage of a world when the host calls a command, or the call throws. An instance with commands can be
+in only one live world, because the command records into the world that holds it. Commands work on catalog stages and
+on instances passed to `Register`.
+
+A stage class can derive from a class that has commands of its own. The derived dispatch falls back to the base's for
+an id it doesn't know, so a base command replays through a derived instance. A derived command with the id of a base
+command is `NUMOSCOMMAND005`.
+
 ### Change the solver layout while recording
 
 A tool such as a pipeline editor needs to switch transport models or reorder stages in the middle of a session. Numos
 allows this because each built-in stage is a named piece of code that Numos can recreate. `AtmosWorldSolverPipeline.SetLayout`
 takes the full ordered list of `(name, enabled, interval)` entries and records one `SetAtmosWorldSolverLayoutOperation`
 (opcode 8). An interval of zero keeps the stage's current interval. A call that changes nothing records nothing.
-`SetInterval` changes one stage's interval and records the same operation with every interval filled in. Registering a
-custom stage with an interval stays rejected during recording, like any registration.
+`SetInterval` changes one stage's interval and records the same operation with every interval filled in.
+`world.Solvers.Add<T>()` and the removal of a catalog stage record the same operation with the resulting layout.
 
 The operation stores resolved intervals, never zero. A checkpoint stores them too. A replay or restore therefore keeps the
 original schedule even when a later Numos version changes a default interval. For example, an archive from before
@@ -719,10 +1023,14 @@ list, with no `vacuum-cleanup` and, for a legacy world, no `derived-refresh`. Re
 the original run. The format version did not change. A sleeping chunk saved before the change has a positive sleep
 timer, so a `vacuum-cleanup` stage covers it once after loading (technical documentation §9).
 
-Custom stages are different. The checkpoint stores a custom stage's name but not its delegate, so a replay can only
-reuse a registration that already exists. `SetLayout` therefore requires every registered custom stage in the list and
-keeps its instance, topology, and injected dependencies. `Register`, `Unregister`, and `ResetToDefaults` stay rejected
-during recording.
+A catalog stage is the same kind of named code. A layout that names a catalog entry the world lacks creates the stage,
+and a layout that omits a catalog stage removes it. A replay that needs a name the catalog lacks fails with an
+`ArgumentException` that names it.
+
+Stages added with `Register` are different. The checkpoint stores such a stage's name but not its delegate, so a replay
+can only reuse a registration that already exists. `SetLayout` therefore requires every such stage in the list and
+keeps its instance, topology, and injected dependencies. `Register`, `Unregister` of such a stage, and
+`ResetToDefaults` stay rejected during recording.
 
 The same rule makes restore adopt the checkpoint's layout. Replay applies the operation through the non-recording core
 of the pipeline. A host that calls `SetLayout` from inside a solver tick is not recorded, because replay reproduces that
@@ -774,8 +1082,8 @@ When the record's shape does not fit (a nested snapshot, a variable-length list)
 `static void Write{OperationName}(BinaryWriter, TOperation)` and
 `static TOperation Read{OperationName}(BinaryReader[, int maxStringBytes])` on the family's codec. The generator then
 calls those. A mismatched signature is `NUMOSREPLAYGEN007`. `SetVoxelMixtureOperation`,
-`SetAtmosWorldConfigOperation`, `CreateAtmosLinkSetOperation`, and `SetAtmosWorldSolverStateOperation` are the worked
-examples.
+`SetAtmosWorldConfigOperation`, `CreateAtmosLinkSetOperation`, `SetAtmosWorldSolverStateOperation`,
+`InvokeAtmosSolverCommandOperation`, and `SetAtmosSimulationComponentStateOperation` are the worked examples.
 
 The generator also fails the build for an enum member that no operation returns (`NUMOSREPLAYGEN008`). It fails the
 build for two operations that return the same code (`NUMOSREPLAYGEN004`).
@@ -814,10 +1122,16 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 2.5 s of simulated time, so those large acceleration snapshots never enter the file.
 
-The checkpoint section holds the world checkpoint format version (17) and the archive's initial and head hashes. It ends
+The checkpoint section holds the world checkpoint format version (18) and the archive's initial and head hashes. It ends
 with the generated payload of the checkpoint and its length. Each simulation inside carries the grid format version
 (12). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
 version history above lists the layout changes.
+
+A recording with a hash trail adds an optional fourth section after the operations. The section holds the hash count,
+then each hash's tick, operation sequence, and digest. The serializer writes it only when the trail is not empty, so a
+file without a trail keeps its exact bytes. A reader that does not know the section skips it and loads the file
+without the trail. The current reader rejects a trail whose positions do not match the recorded ticks and operations.
+
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
 
@@ -825,11 +1139,24 @@ Saving or loading rejects two things: rollback chunk fields whose element type i
 hand-written solver configurations. The format has no encoding for them. The built-in `EulerFlowConfig` and
 `GasReactionConfig` both carry `[NumosSerialize]` members, so a world with either one is portable.
 
-Custom world solvers are saved by name, with their `[NumosSerialize]` state. A file that has them loads anywhere. Only a
-host that registers the same solvers can replay it, through `AtmosWorldReplayTimeline.Restore`. `Import`, which the
-Viewer uses, still rejects them through `EnsurePortable`. Readers reject unknown required versions, sections, opcodes,
-and configuration keys. Future readers can skip optional length-prefixed metadata. `NumosReplayReadOptions` configures
-the payload limits. `AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
+Custom world solvers are saved by name, with their `[NumosSerialize]` state. A file that has them loads anywhere.
+`AtmosWorldReplayArchive.RequiredSolvers` lists every custom stage name that replaying the file needs, from the initial
+checkpoint and from recorded layout operations. `AtmosWorldReplayTimeline.Import`, which the Viewer uses, accepts the
+file when the solver catalog holds every one of them, and the restore creates them. Load the declaring assembly, or call
+its `NumosModule.EnsureRegistered()`, before the import. A stage added with `Register` is not in the catalog.
+`EnsurePortable` rejects it as `custom world solver 'name' (not in the solver catalog)`. Only a host that registers the
+same solver can replay such a file, through `AtmosWorldReplayTimeline.Restore`. `RequiredSimulationComponents` lists the
+simulation component keys that the file needs, from the initial checkpoint and from recorded component operations.
+
+Opening a file never loads an assembly, because a solver name cannot vouch for the code behind it. The Workbench checks
+`RequiredSolvers` first and throws `MissingSolversException`, which lists every name the catalog lacks. A JIT build of
+the Viewer loads the assemblies the user names, through `--solvers <path>` or File > Load Solvers. The release archives
+and `dotnet run` are JIT builds. A NativeAOT or trimmed publish turns both off. NativeAOT cannot run a loaded assembly,
+and trimming can remove members that the assembly calls.
+
+Readers reject unknown required versions, sections, opcodes, and configuration keys. Future readers can skip optional
+length-prefixed metadata. `NumosReplayReadOptions` configures the payload limits.
+`AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
 
 ### Solver configurations in the file
 
@@ -861,8 +1188,9 @@ name the registry lacks is an `InvalidDataException`.
 Loading has to turn a key back into a type. The generator reads each configuration's constant `Key` at build time. It
 adds a module initializer to the assembly of the configuration, which registers the type process-wide. Every
 configuration whose assembly has run is then known to every `SolverConfigurationTypes`, built-in ones included.
-`Register<T>()` on `NumosReplayReadOptions.SolverConfigurations` covers a load that happens before the assembly has run.
-It also picks a winner when two assemblies claim one key (loading that key fails until one does). A key with no
+Calling the generated `MyMod.NumosModule.EnsureRegistered()` of an assembly (see "Rollback chunk fields in the file") registers
+its configurations before a load that comes first. `Register<T>()` on `NumosReplayReadOptions.SolverConfigurations`
+also picks a winner when two assemblies claim one key (loading that key fails until one does). A key with no
 registered type fails the load with a `NotSupportedException` that names it. Numos does not drop the configuration,
 because losing it changes what the solvers do. Replay would quietly diverge from the recording. A configuration whose
 decoded `Key` disagrees with the key it was saved under is corrupt data.
@@ -873,8 +1201,9 @@ is part of the format now. Renaming one means files saved under the old name no 
 ### Solver state in the file
 
 In the checkpoint, solver state is the world's `SolverStates` field. It is a list of entries. Each entry is a record
-with the solver's `Name` and its `State` payload as a length and the bytes. A recorded
-`SetAtmosWorldSolverStateOperation` carries one entry directly:
+with the solver's `Name`, its `State` payload as a length and the bytes, and the `SchemaFingerprint` (uint64) of the
+solver type. A reader that finds no fingerprint reads 0. A recorded `SetAtmosWorldSolverStateOperation` carries the
+name and payload without a fingerprint:
 
 ```text
 string name         (int32 UTF-8 byte length, then the bytes)
@@ -885,6 +1214,23 @@ bytes  state        (the generated WriteState walk through StateBinarySink)
 Entries are in pipeline order. Each one must name a custom solver in the checkpoint's solver list, or the reader throws
 an `InvalidDataException`. A world with no stateful solvers has an empty list. Numos learns whether the receiving
 world's solver can take the payload only at restore.
+
+Simulation components are the world's `SimulationComponents` field. Each entry is a record with the `Simulation`
+identifier, the component `Key`, the `State` payload, and the `SchemaFingerprint` of the component class. A recorded
+`SetAtmosSimulationComponentStateOperation` carries the first three fields, and a
+`RemoveAtmosSimulationComponentOperation` carries the first two:
+
+```text
+int32  simulation index
+uint32 simulation generation
+string key          (int32 UTF-8 byte length, then the bytes)
+int32  length       (set operation only)
+bytes  state        (set operation only, the generated WriteState walk through StateBinarySink)
+```
+
+Loading needs a class behind every key. A key that `SimulationComponentCatalog` lacks, in the checkpoint or in an
+operation, fails the load with an `InvalidDataException` that names it. The reader also rejects entries out of order
+and entries for a simulation the checkpoint does not list.
 
 ### Rollback chunk fields in the file
 
@@ -908,15 +1254,20 @@ Only primitives (`bool`, `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `lon
 each element, the same way the codec handles the built-in float arrays. Numos rejects structs even when they contain no
 references and no padding, because nothing pins their layout. A rollback field of any other reference-free type still
 works for in-memory checkpoints and `AtmosWorldReplayTimeline.Restore`. `UnsupportedFeatures` lists it, and saving fails
-with a `NotSupportedException` that names the key.
+with a `NotSupportedException` that names the key. A `[ChunkData]` field of such a type gets the build warning
+`NUMOSCHUNK016`.
 
 Loading looks each key up in the process-wide `ChunkField<T>` registry. Every field the file might contain must be
 registered before the load. The `[ChunkData]` generator emits a module initializer that registers every field the
-assembly declares. Those fields are in place once anything in that assembly has run. `ChunkField<T>.Register` registers
-a field when that call runs. Make sure it has run before loading:
+assembly declares. That initializer runs only after something in the assembly has run. The generator also emits a public
+`NumosModule` class in a namespace named after the assembly (`MyMod.NumosModule` for an assembly named `MyMod`). Its
+`EnsureRegistered()` method forces the initializer. An assembly that registers solver configurations gets the same
+class. Call it before loading. A field made with
+`ChunkField<T>.Register` registers when that call runs, so call it before loading too:
 
 ```csharp
-ChunkField<int>.Register("my-mod/fire/counts", rollback: true, length: 1); // same definition the mod uses
+MyMod.NumosModule.EnsureRegistered();
+ChunkField<int>.Register("my-mod/fire/counts", rollback: true, length: 1); // hand-registered field, same definition the mod uses
 NumosWorldReplayDocument document = NumosReplayFile.Load(path);
 ```
 
@@ -926,5 +1277,5 @@ may be registered under the key as transient, the element type name or size may 
 (the chunk's voxel count for a per-voxel field, the registered length otherwise). Numos checks a length against the bytes left before it
 allocates anything, so a corrupt file cannot make the reader allocate more than it holds.
 
-Numos does not yet provide compression, network transport, replay of custom solver registration changes, or certified
+Numos does not yet provide compression, network transport, replay of `Register` and `Unregister` calls, or certified
 bitwise compatibility across runtime and CPU architectures.

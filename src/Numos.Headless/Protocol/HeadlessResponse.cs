@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Numos.Headless.Diagnostics;
 
 namespace Numos.Headless.Protocol;
@@ -64,6 +65,72 @@ internal sealed class CommandResult
     public RenderInfo? Render { get; init; }
     public ProbeInfo? Probes { get; init; }
     public LogInfo? Log { get; init; }
+    public DeterminismInfo? Determinism { get; init; }
+    public CatalogSolverInfo[]? SolverCatalog { get; init; }
+    public StateMemberInfo[]? Members { get; init; }
+    public StateMemberInfo? Member { get; init; }
+    public SimulationComponentInfo[]? Components { get; init; }
+}
+
+/// <summary>
+///     One entry of listSolverCatalog. Zero rates and missing placements are left out.
+/// </summary>
+internal sealed class CatalogSolverInfo
+{
+    public required string Name { get; init; }
+    public string? Before { get; init; }
+    public string? After { get; init; }
+    public int? RunsPerSecond { get; init; }
+    public int? Interval { get; init; }
+    public required bool Added { get; init; }
+}
+
+/// <summary>
+///     One state member of a class solver or a simulation component.
+/// </summary>
+internal sealed class StateMemberInfo
+{
+    public required string Name { get; init; }
+    public required string WireName { get; init; }
+    public required string Type { get; init; }
+    public string? Unit { get; init; }
+    public required bool CanWrite { get; init; }
+    public required bool Scalar { get; init; }
+
+    /// <summary>
+    ///     The value of a scalar member as a JSON number, boolean, string, or null. Any other member has its summary text,
+    ///     such as `3 items`.
+    /// </summary>
+    public required JsonElement Value { get; init; }
+}
+
+internal sealed class SimulationComponentInfo
+{
+    public required string Key { get; init; }
+    public required StateMemberInfo[] Members { get; init; }
+}
+
+/// <summary>
+///     The two runs of a verifyDeterminism request. Hashes are 16 hex digits, as timelineInfo prints them.
+/// </summary>
+internal sealed class DeterminismInfo
+{
+    public required bool Deterministic { get; init; }
+    public required ulong StartTick { get; init; }
+    public required ulong EndTick { get; init; }
+    public required string FirstHash { get; init; }
+    public required string SecondHash { get; init; }
+
+    /// <summary>
+    ///     Where the second run differs, with the first run's value first in each detail. Empty when the hashes match.
+    /// </summary>
+    public required StateDifferenceInfo[] Differences { get; init; }
+}
+
+internal sealed class StateDifferenceInfo
+{
+    public required string Path { get; init; }
+    public required string Detail { get; init; }
 }
 
 internal sealed class LogInfo

@@ -192,7 +192,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                     StateSymbols.TryGetMember(live, member, out _, out bool hasStorage))
                 {
                     SerializedMember.TryParse(
-                        member, null, hasStorage, liveDisplay, memberLocation, WireNameChecks.Identifier, ids, diagnostics);
+                        member, null, hasStorage, liveDisplay, memberLocation, WireNameChecks.Identifier, false, ids,
+                        diagnostics);
                 }
 
                 continue;
@@ -306,8 +307,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
     {
         LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
         SerializedMember? parsed = SerializedMember.TryParse(
-            member, serialize, hasStorage: false, live.ToDisplayString(), location, WireNameChecks.Identifier, ids,
-            diagnostics);
+            member, serialize, hasStorage: false, live.ToDisplayString(), location, WireNameChecks.Identifier, false,
+            ids, diagnostics);
 
         if (parsed is null)
             return null;
@@ -460,7 +461,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
 
         SerializedMember? parsed = SerializedMember.TryParse(
             member, StateSymbols.FindSerialize(member), hasStorage, snapshot.ToDisplayString(), location,
-            WireNameChecks.NullIsMemberName, ids, diagnostics);
+            WireNameChecks.NullIsMemberName, false, ids, diagnostics);
 
         if (parsed is null)
             return null;
@@ -472,7 +473,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         }
 
         StateShape shape = StateShape.ForMember(type!, parsed.Codec);
-        var field = new StateFieldModel(parsed.Id, CodeWriter.Escape(member.Name), shape, member.Name, true, parsed.InitOnly);
+        var field = new StateFieldModel(
+            parsed.Id, CodeWriter.Escape(member.Name), shape, member.Name, true, parsed.InitOnly, parsed.WireName);
         return new StateFieldDeclaration(field, parsed.DisplayName, location);
     }
 
@@ -582,7 +584,11 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 continue;
 
             foreach (SnapshotMemberModel member in plan.Members)
-                fields.Add(new StateFieldModel(member.Id, member.Name, member.Shape, member.Name.TrimStart('@'), true, false));
+            {
+                // A generated member is named after its wire name.
+                string name = member.Name.TrimStart('@');
+                fields.Add(new StateFieldModel(member.Id, member.Name, member.Shape, name, true, false, name));
+            }
 
             var state = new StateTypeModel(
                 declaration.Type,

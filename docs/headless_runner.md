@@ -92,6 +92,9 @@ with NumosClient("/tmp/numos.sock") as client:
     print(client.call("getLog", minLevel="warn")["result"]["log"]["entries"])
 ```
 
+`client.solver_state(solver)` returns a dict from member name to value, and
+`client.set_solver_state(solver, member, value)` writes one member (see "Catalog solvers and solver state").
+
 The command line runs one operation or streams a script over the socket:
 
 ```bash
@@ -161,8 +164,12 @@ An unreadable script also produces one error response with code `scriptUnavailab
 | `gasNotFound` | A gas id is not in the registry. |
 | `fieldNotFound` | A field name is unknown. |
 | `invalidRegion` | A region has `max` below `min`. |
-| `invalidTickCount` | `tick` has both or neither of `count` and `seconds`, or the tick count is outside 1 to 1000000. |
-| `solverNotFound` | No solver stage has that name. |
+| `invalidTickCount` | `tick` has both or neither of `count` and `seconds`, or the tick count of `tick` or `verifyDeterminism` is outside 1 to 1000000. |
+| `solverNotFound` | No solver stage has that name, or no class solver for the state commands. For `addSolver` and `removeSolver`, the solver catalog has no solver with that name. |
+| `memberNotFound` | The class solver or simulation component has no state member with that name. |
+| `memberReadOnly` | Tools cannot write that state member. |
+| `invalidValue` | A state member value does not parse for the member's type. |
+| `componentNotFound` | The simulation holds no simulation component with that key. |
 | `branchNotFound` | No branch has that id. |
 | `ioError` | A file operation failed, such as saving over an existing replay. |
 | `operationRejected` | Numos rejected the operation or its arguments. |
@@ -403,7 +410,11 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 `globalTemperatureK`, `defaultTemperatureFallbackK`, `defaultMolarHeatCapacityAtConstantVolume`, `voxelVolumeM3`,
 `saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
 `vacuumThresholdPa`, `sleepDelay`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
-`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
+`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`,
+`randomSeed`.
+
+`randomSeed` is the seed of `AtmosWorldSolverContext.Random`. It takes any unsigned 64-bit integer. `getConfig` and
+the observation's `config` report it under the same name.
 
 The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerSecond`, `velocityFloorMps`,
 `sleepSpeedMps`, `settlePeriod`, `maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction`
@@ -437,17 +448,19 @@ The built-in stages, in default order, are `euler-flow`, `vacuum-cleanup`, `expl
 four. At 960 Hz `euler-flow` runs every 16 ticks by
 default. Send `setSolverInterval` with an `interval` of 1 to run it on every tick.
 
-`setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
-every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
-omits. A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
+`setSolverLayout` lists every stage, and no name repeats. Each name is a built-in stage, a solver in the catalog
+(`AtmosSolverCatalog`), or a stage the world holds. Numos creates a built-in or catalog stage that the world does not
+hold. It drops a built-in or catalog stage that the list omits. A stage registered with `Register` must still appear.
+A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
 records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `derived-refresh`, `advection`, and
 `boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
 `changed: false` when the layout already matches. An `interval` of zero or a missing `interval` keeps the current
 interval of a registered stage and gives a new built-in stage its default. Give `derived-refresh`, `advection`, and `boundary-flow` one
 interval, and give `thermodynamics` and `thermal-boundary` one interval. The stages hand data over within a tick.
 
-`resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
-case `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
+`resetSolvers` installs the default layout when the world holds only built-in stages. When it holds a catalog stage or
+a stage registered with `Register`, `resetSolvers` enables every stage, leaves the order alone, and returns
+`changed: false`. To drop a catalog stage, send `setSolverLayout` without it.
 
 `areaFraction` is the open area of each link as a fraction of one voxel face, from 0 to 1. Without it the link follows
 `defaultLinkAreaFraction` from the configuration, and `listLinkSets` omits the field.
@@ -455,6 +468,44 @@ case `resetSolvers` enables every stage, leaves the order alone, and returns `ch
 A portal endpoint is `{simulation, position, voxel}`. A dock endpoint is `{simulation, position, face}`, where `face`
 is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positiveZ`. `flags` is `all` (default), `gas`,
 `thermal`, or `none`. Topology changes apply at the next tick.
+
+### Catalog solvers and solver state
+
+A class solver marked `[AtmosSolver]` is in the solver catalog once its assembly loads. The runner loads no plugin
+assemblies, so the catalog holds only the solvers compiled into the process that hosts the session. A study can add
+such a solver by name and then read and edit its `[NumosSerialize]` members. The commands also cover the members of simulation
+components. Each edit goes through the session like any other host edit, so the world records it at the next tick and a
+replay reproduces it.
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `listSolverCatalog` | None | Lists the catalog solvers with `name`, `added`, and any declared `before`, `after`, `runsPerSecond`, or `interval`. |
+| `addSolver` | `name`, optional `before`, `after`, and `interval` | Creates the world's instance of a catalog solver and adds its stage. |
+| `removeSolver` | `name` | Removes a catalog solver's stage. |
+| `getSolverState` | `solver` | Lists the state members of the class solver that a stage holds. |
+| `setSolverState` | `solver`, `member`, `value` | Writes one state member. |
+| `getSimulationComponents` | optional `simulation` | Lists the simulation components of a simulation with their state members. |
+| `setSimulationComponentState` | `key`, `member`, `value`, optional `simulation` | Writes one state member of a simulation component. |
+
+`addSolver` and `removeSolver` return `changed` and the new stage list in `solvers`. Without `before` and `after`, the
+stage takes the placement its class declares. An `interval` of zero or a missing `interval` keeps the declared rate.
+`removeSolver` accepts only catalog solvers and reports `changed: false` when the pipeline does not hold the stage.
+
+Each state member has `name`, `wireName`, `type` (C# spelling, such as `float` or `List<int>`), `unit` (the quantity
+alias, such as `Kelvin`, when there is one), `canWrite`, `scalar`, and `value`. A scalar is a number, boolean, string,
+or enum, or a nullable one. Its `value` is the JSON value, and an enum value is its name. Any other member is read-only,
+and its `value` is summary text, such as `"3 items"` for a collection.
+
+`value` in a set request is a number, a boolean, a string, or `null`. Numbers parse with the invariant culture, and an
+enum takes one of its names, matched exactly. `null` works only on a nullable member. The result has `changed` and the
+member after the write in `member`. A member marked `[NumosSerialize(HostEditable = false)]` reports `canWrite: false`,
+because the recording boundary does not hash it. Change it through a solver command.
+
+```json
+{"protocolVersion":2,"id":"add","op":"addSolver","name":"my-mod/fire","before":"gas-reactions"}
+{"protocolVersion":2,"id":"rate","op":"setSolverState","solver":"my-mod/fire","member":"SpreadRate","value":0.5}
+{"protocolVersion":2,"id":"read","op":"getSolverState","solver":"my-mod/fire"}
+```
 
 ### Time and timeline
 
@@ -469,6 +520,7 @@ is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positive
 | `continueBranch` | None | Ends inspection so the branch can tick and take edits. |
 | `listBranches` | None | Lists branches. |
 | `timelineInfo` | None | Returns head, position, their times in seconds (`headTime`, `positionTime`), checkpoints, branches, and the state hash. |
+| `verifyDeterminism` | `ticks` (1 to 1000000) | Runs the same ticks twice from the current state and reports where the two end states differ. |
 
 `tick` takes exactly one of `count` and `seconds`. The runner converts `seconds` to `round(seconds × tickRate)` ticks at the
 current rate. The result must be from 1 to 1000000 ticks, which covers over 1000 s at 960 Hz. `tick` writes a progress
@@ -479,6 +531,17 @@ While the timeline inspects history, every operation that edits the world fails 
 `returnToHead` and `continueBranch` first.
 
 `timelineInfo` reports the FNV-1a state hash as 16 hex digits. Two runs that end in the same state have the same hash.
+
+`verifyDeterminism` checks that the world reaches the same state when it runs the same ticks twice. The first run is an
+ordinary recorded `tick`. The runner then restores the state from before that run and runs the ticks again without
+recording. The session stays on the first run, at the recorded head, so the next `tick` continues the same history. The
+command costs about twice as much as `tick`.
+
+The result has `deterministic`, `startTick`, `endTick`, `firstHash`, and `secondHash`. It also has `differences`, with
+at most 64 entries. Each entry has a `path`, such as `Simulations / 0 / Chunks / (1,0,0) / Temperatures[412]`, and a
+`detail` that gives the first run's value first. A mismatch still returns `"ok":true`, so a script reads
+`result.determinism.deterministic`. The usual cause is a custom solver that keeps state outside the checkpoint (see
+"Find where two states differ" in `docs/deterministic_replay.md`).
 
 ### Replay files
 
@@ -492,7 +555,8 @@ like the viewer. Call `returnToHead` to reach the saved final state. Its `timeli
 was current when you saved. Call `continueBranch` to keep ticking. With `"atHead":true`, `loadReplay` does both steps, so
 the next `tick` extends the branch.
 
-`saveReplay` fails with `ioError` when the file exists, unless `overwrite` is `true`.
+`saveReplay` fails with `ioError` when the file exists, unless `overwrite` is `true`. `loadReplay` fails with
+`operationRejected` when the replay needs custom solvers that the solver catalog lacks. The message lists them.
 
 ### Observation
 

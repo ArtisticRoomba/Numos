@@ -78,7 +78,17 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Vent gas into a voxel, adding its enthalpy.
     /// </summary>
-    VentGasToVoxel = 16
+    VentGasToVoxel = 16,
+
+    /// <summary>
+    ///     Write a run of elements into one chunk's storage for a rollback chunk field.
+    /// </summary>
+    WriteChunkField = 17,
+
+    /// <summary>
+    ///     Store one element in every voxel of a box for a per-voxel rollback chunk field.
+    /// </summary>
+    FillChunkFieldBox = 18
 }
 
 /// <summary>

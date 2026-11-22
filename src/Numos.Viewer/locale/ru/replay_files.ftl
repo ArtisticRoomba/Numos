@@ -29,3 +29,6 @@ replay-file-load-error = Не удалось загрузить повтор. { 
 replay-file-save-error = Не удалось сохранить повтор. { $message }
 
 replay-file-drop-single-file-error = Сбросьте только 1 .numos файл повтора.
+
+replay-file-missing-solvers-error = Повтору нужны решатели которые не загружены: { $solvers }. Загрузите сборки которые их объявляют через Файл > Загрузить решатели, потом откройте повтор снова.
+replay-file-missing-solvers-unavailable-error = Повтору нужны решатели которые не загружены: { $solvers }. Эта сборка не может загружать сборки решателей. Откройте повтор в JIT сборке просмотрщика.

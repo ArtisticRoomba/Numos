@@ -13,9 +13,25 @@ namespace Numos.API.Generators.Common;
 /// </remarks>
 internal sealed record LocationInfo(string FilePath, TextSpan TextSpan, LinePositionSpan LineSpan)
 {
+    /// <summary>
+    ///     Builds a path-based location, which has no <see cref="Location.SourceTree" />.
+    /// </summary>
     public Location ToLocation()
     {
         return Location.Create(FilePath, TextSpan, LineSpan);
+    }
+
+    /// <summary>
+    ///     Builds a location in <paramref name="tree" />, or a path-based one when there is no tree or the span no
+    ///     longer fits it.
+    /// </summary>
+    /// <param name="tree">The compilation's tree whose path is <see cref="FilePath" />.</param>
+    public Location ToLocation(SyntaxTree? tree)
+    {
+        if (tree is not null && TextSpan.End <= tree.Length)
+            return Location.Create(tree, TextSpan);
+
+        return ToLocation();
     }
 
     public static LocationInfo? From(Location? location)

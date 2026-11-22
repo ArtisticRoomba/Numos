@@ -399,15 +399,8 @@ public static class StateCodecs
                     $"State data references gas '{name}', so reading it needs a gas registry to resolve the name.");
             }
 
-            int index;
-            try
-            {
-                index = gases.GasIdToIndex(name);
-            }
-            catch (KeyNotFoundException)
-            {
+            if (!gases.TryGetGasIndex(name, out int index))
                 throw new InvalidDataException($"State data references gas '{name}', which the gas registry doesn't contain.");
-            }
 
             return gases[index];
         }
@@ -602,9 +595,13 @@ public static class StateCodecs
     }
 
     /// <summary>
-    ///     Codec for an ordered sequence (an array, <see cref="IReadOnlyList{T}" />, or <c>ImmutableArray&lt;T&gt;</c>),
-    ///     written as a count followed by the elements in order.
+    ///     Codec for an ordered sequence (an array, <see cref="IReadOnlyList{T}" />, <c>ImmutableArray&lt;T&gt;</c>, or
+    ///     <see cref="System.Collections.Generic.List{T}" />), written as a count followed by the elements in order.
     /// </summary>
+    /// <remarks>
+    ///     The declared type does not change the bytes. A <see cref="System.Collections.Generic.List{T}" /> writes what
+    ///     an array with the same elements writes.
+    /// </remarks>
     /// <typeparam name="TList">The declared collection type.</typeparam>
     /// <typeparam name="T">The element type.</typeparam>
     /// <typeparam name="TCodec">The element codec.</typeparam>
@@ -668,6 +665,10 @@ public static class StateCodecs
                 return Unsafe.As<ImmutableArray<T>, TList>(ref immutable);
             }
 
+            // A member of a type that is restored in place, which may grow the list later.
+            if (typeof(TList) == typeof(System.Collections.Generic.List<T>))
+                return (TList)(object)new System.Collections.Generic.List<T>(elements);
+
             // T[] and IReadOnlyList<T>, the other declared shapes the generator allows.
             return (TList)(object)elements;
         }
@@ -695,6 +696,11 @@ public static class StateCodecs
         {
             int count = value.Count;
             sink.WriteCount(count);
+
+            // A constant per instantiation, so every other sink drops it.
+            if (typeof(TSink) == typeof(StateTraceSink))
+                Unsafe.As<TSink, StateTraceSink>(ref sink).NextElementType = StateTraceSink.ElementTypeOf<T>();
+
             if (TryGetSpan(value, out ReadOnlySpan<T> span))
             {
                 sink.WriteElements(MemoryMarshal.AsBytes(span), Unsafe.SizeOf<T>());
@@ -752,6 +758,9 @@ public static class StateCodecs
                     return true;
                 case StateArray<T> owned:
                     span = owned.Span;
+                    return true;
+                case System.Collections.Generic.List<T> list:
+                    span = CollectionsMarshal.AsSpan(list);
                     return true;
                 default:
                     span = default;

@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -460,8 +461,8 @@ public sealed class AtmosWorldSchedulingTests
 
     private sealed class DeltaRecorder : IAtmosWorldSolver
     {
-        public List<float> Deltas { get; } = [];
-        public List<int> Intervals { get; } = [];
+        [NumosIgnore] public List<float> Deltas { get; } = [];
+        [NumosIgnore] public List<int> Intervals { get; } = [];
 
         public void Solve(AtmosWorldSolverContext context)
         {

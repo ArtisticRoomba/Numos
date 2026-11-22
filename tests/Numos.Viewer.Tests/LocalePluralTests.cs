@@ -23,4 +23,15 @@ public class LocalePluralTests
         Locale.SetCulture("en");
         Assert.That(Locale.GetString("error-count", ("count", count)), Is.EqualTo(expected));
     }
+
+    [TestCase("en", 1, "Runs every 1 tick.")]
+    [TestCase("en", 48, "Runs every 48 ticks.")]
+    [TestCase("ru", 1, "Запускается каждый 1 тик.")]
+    [TestCase("ru", 2, "Запускается каждые 2 тика.")]
+    [TestCase("ru", 48, "Запускается каждые 48 тиков.")]
+    public void CatalogSolverInterval_SelectsPluralForm(string culture, int interval, string expected)
+    {
+        Locale.SetCulture(culture);
+        Assert.That(Locale.GetString("catalog-solver-interval", ("interval", interval)), Is.EqualTo(expected));
+    }
 }

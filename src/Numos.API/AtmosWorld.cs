@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
@@ -151,6 +152,7 @@ public sealed partial class AtmosWorld : IDisposable
         GasMixtures.SetConfig(_config);
         Solvers = new AtmosWorldSolverPipeline(this, transportModel);
         Services = new AtmosWorldServices(this);
+        Events = new AtmosWorldEvents(this);
     }
 
     internal object Gate { get; } = new();
@@ -169,6 +171,12 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets whether a tick is running its solver pipeline. Safe to read from any thread.
     /// </summary>
     internal bool IsTickExecuting => _isTickExecuting;
+
+    /// <summary>
+    ///     Gets whether replay is running, without the recording lock. Only the thread that holds <see cref="Gate" />
+    ///     may read it, because replay changes it only under that lock.
+    /// </summary>
+    internal bool IsReplayingWorld => _isReplayingWorld;
 
     /// <summary>
     ///     Gets the epoch that solver dependency injection is current against.
@@ -192,11 +200,21 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets the host-owned services solvers can look up by type.
     /// </summary>
     /// <remarks>
-    ///     Services are not checkpointed and survive <see cref="RestoreCheckpoint" />. See
+    ///     Services are not checkpointed and survive <see cref="RestoreCheckpoint(AtmosWorldCheckpoint)" />. See
     ///     <see cref="AtmosWorldServices" /> for keying and threading rules.
     /// </remarks>
     [PublicAPI]
     public AtmosWorldServices Services { get; }
+
+    /// <summary>
+    ///     Gets the outbox that delivers stage events to host handlers after each tick.
+    /// </summary>
+    /// <remarks>
+    ///     Stages emit with <see cref="AtmosWorldSolverContext.Emit{T}" />. Events are not checkpointed, hashed, or
+    ///     recorded. See <see cref="AtmosWorldEvents" /> for delivery order, replay, and threading rules.
+    /// </remarks>
+    [PublicAPI]
+    public AtmosWorldEvents Events { get; }
 
     /// <summary>
     ///     Gets the immutable physics configuration shared by every registered simulation.
@@ -364,18 +382,26 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Disposes every registered simulation and releases topology storage.
+    ///     Disposes every registered simulation and every catalog solver the world owns, and releases topology storage.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Called while a world tick is executing.</exception>
+    /// <remarks>
+    ///     Numos disposes the instances that <see cref="AtmosWorldSolverPipeline.Add{T}" /> created, when they are
+    ///     <see cref="IDisposable" />, after the simulations. Instances passed to <c>Register</c> stay caller-owned.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     Called while a world tick is executing, from an event handler, or from a solver command.
+    /// </exception>
     public void Dispose()
     {
         AtmosSimulation[] simulations;
+        List<IAtmosWorldSolver>? ownedSolvers;
         lock (Gate)
         {
             if (_disposed)
                 return;
 
-            ThrowIfTickExecuting("dispose the world");
+            ThrowIfCannotDispose();
+            ownedSolvers = Solvers.CollectCatalogSolvers();
             lock (_mixtureGate)
             {
                 simulations = _orderedSimulations;
@@ -400,6 +426,23 @@ public sealed partial class AtmosWorld : IDisposable
         {
             GasMixtures.Dispose();
         }
+
+        AtmosWorldSolverPipeline.DisposeAll(ownedSolvers);
+    }
+
+    /// <summary>
+    ///     Runs the checks <see cref="Dispose" /> makes before it changes anything. The caller holds
+    ///     <see cref="Gate" />.
+    /// </summary>
+    /// <remarks>
+    ///     A simulation that owns its world calls this before it unregisters itself. Otherwise a rejected world
+    ///     disposal would leave the simulation disposed and the world alive.
+    /// </remarks>
+    internal void ThrowIfCannotDispose()
+    {
+        ThrowIfTickExecuting("dispose the world");
+        ThrowIfDeliveringEvents("dispose the world");
+        ThrowIfRunningSolverCommand("dispose the world");
     }
 
     /// <summary>
@@ -801,6 +844,10 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Captures a coherent detached continuation state for all simulations and explicit topology.
     /// </summary>
     /// <returns>A checkpoint that can restore this compatible world at an idle boundary.</returns>
+    /// <remarks>
+    ///     Called inside a solver command, the checkpoint holds the command's changes so far but carries the position
+    ///     from before the command. A replay from that checkpoint therefore applies the command twice.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     [PublicAPI]
@@ -811,19 +858,28 @@ public sealed partial class AtmosWorld : IDisposable
             ThrowIfDisposed();
             ThrowIfTickExecuting("capture a world checkpoint during a tick");
             RecordSolverStateEdits();
-            AtmosSimulation[] simulations = _orderedSimulations;
-            int enteredGates = EnterSimulationGates(simulations);
-            try
+            return CaptureCheckpointCore();
+        }
+    }
+
+    /// <summary>
+    ///     Captures a checkpoint without the solver-state recording boundary. The caller holds <see cref="Gate" />
+    ///     outside a tick.
+    /// </summary>
+    private AtmosWorldCheckpoint CaptureCheckpointCore()
+    {
+        AtmosSimulation[] simulations = _orderedSimulations;
+        int enteredGates = EnterSimulationGates(simulations);
+        try
+        {
+            lock (GasMixtures.StateGate)
             {
-                lock (GasMixtures.StateGate)
-                {
-                    return AtmosWorldCheckpoint.Capture(this);
-                }
+                return AtmosWorldCheckpoint.Capture(this);
             }
-            finally
-            {
-                ExitSimulationGates(simulations, enteredGates);
-            }
+        }
+        finally
+        {
+            ExitSimulationGates(simulations, enteredGates);
         }
     }
 
@@ -832,48 +888,131 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <param name="checkpoint">The detached world continuation state to restore.</param>
     /// <remarks>
-    ///     Matching registrations are restored in place, so host references and custom solver delegates stay attached.
-    ///     The world adopts the checkpoint's solver layout, so a legacy checkpoint restores into an Euler world.
-    ///     The checkpoint's custom stages must be exactly the world's custom stages, in any order.
-    ///     Registrations absent from the checkpoint are disposed. Missing registrations are recreated with their saved
-    ///     identifiers when they use only built-in solvers. Numos cannot recreate a custom solver, because the
-    ///     checkpoint does not store its host delegate. Restore resets the elapsed-time accumulator and rebuilds sparse
-    ///     indexes from authoritative link slots.
-    ///     <see cref="Services" /> are left untouched. A failure before the state is installed leaves the world as it
-    ///     was. That covers a rejected solver state setter, a neighbor selection that throws, and a failed allocation.
-    ///     Once the state is in place, every custom <see cref="IAtmosWorldSolver" /> gets
-    ///     <see cref="IAtmosWorldSolver.OnRestored" />. An exception from it propagates to this call with the restored
-    ///     state already installed.
+    ///     <para>
+    ///         Matching simulations and solver stages are restored in place, so host references and custom solver
+    ///         delegates stay attached. Simulations absent from the checkpoint are disposed. Missing simulations are
+    ///         recreated with their saved identifiers. Restore resets the elapsed-time accumulator and rebuilds sparse
+    ///         indexes from authoritative link slots. <see cref="Services" /> are left untouched.
+    ///     </para>
+    ///     <para>
+    ///         The world adopts the checkpoint's solver layout, so a legacy checkpoint restores into an Euler world.
+    ///         Numos creates each catalog stage (<see cref="AtmosSolverCatalog" />) that the checkpoint names and the
+    ///         world lacks, and restores its saved state into the new instance. It removes and disposes each catalog
+    ///         stage that the checkpoint lacks. The host-registered stages must match the checkpoint exactly, in any
+    ///         order, because Numos cannot recreate a host delegate or instance.
+    ///     </para>
+    ///     <para>
+    ///         A failure before the state is installed leaves the world as it was. That covers an unknown solver name, a
+    ///         rejected solver state setter, a neighbor selection that throws, and a failed allocation. The world then
+    ///         disposes the instances the restore created, and keeps the ones it would have removed. Once the state is
+    ///         in place, every custom <see cref="IAtmosWorldSolver" /> gets <see cref="IAtmosWorldSolver.OnRestored" />.
+    ///         An exception from it propagates to this call with the restored state already installed.
+    ///     </para>
+    ///     <para>
+    ///         A class solver or component saved with another state schema restores without a report. Call
+    ///         <see cref="RestoreCheckpoint(AtmosWorldCheckpoint, AtmosSchemaCheck)" /> to get the names or to fail.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The checkpoint is malformed or incompatible with this world.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">Called from a solver callback or while the world is recording.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Called from a solver callback or a solver command, or while the world is recording.
+    /// </exception>
     [PublicAPI]
     public void RestoreCheckpoint(AtmosWorldCheckpoint checkpoint)
     {
+        RestoreCheckpoint(checkpoint, AtmosSchemaCheck.Tolerant);
+    }
+
+    /// <summary>
+    ///     Restores a checkpoint like <see cref="RestoreCheckpoint(AtmosWorldCheckpoint)" />, and reports the class
+    ///     solvers and simulation components whose saved state has another schema than their registered type.
+    /// </summary>
+    /// <param name="checkpoint">The detached world continuation state to restore.</param>
+    /// <param name="schemaCheck">Whether a schema difference is reported or fails the restore.</param>
+    /// <returns>
+    ///     The solver names and component keys whose saved
+    ///     <see cref="AtmosWorldSolverStateCheckpoint.SchemaFingerprint" /> or
+    ///     <see cref="AtmosSimulationComponentCheckpoint.SchemaFingerprint" /> differs from the receiving type's
+    ///     <see cref="INumosStateSchema.SchemaFingerprint" />. Solver names come first, in pipeline order, then
+    ///     component keys in checkpoint order. Each name appears once. The list is empty when every schema matches.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         A difference means the type gained, lost, or renamed a wire field, or changed what a field writes, since
+    ///         the checkpoint was captured. With <see cref="AtmosSchemaCheck.Tolerant" /> the restore still applies the
+    ///         entry. The generated reader skips fields the type does not know and leaves missing members at their
+    ///         current value. Replay from such a checkpoint can diverge from the history that produced it.
+    ///     </para>
+    ///     <para>
+    ///         An entry with no recorded fingerprint, or a type that the generator did not write, is never reported.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The checkpoint is malformed or incompatible with this world.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="schemaCheck" /> is not a defined value.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Called from a solver callback or a solver command, or while the world is recording, or
+    ///     <paramref name="schemaCheck" /> is <see cref="AtmosSchemaCheck.Strict" /> and an entry's schema differs. The
+    ///     strict failure names the type and leaves the world as it was.
+    /// </exception>
+    [PublicAPI]
+    public IReadOnlyList<string> RestoreCheckpoint(AtmosWorldCheckpoint checkpoint, AtmosSchemaCheck schemaCheck)
+    {
         ArgumentNullException.ThrowIfNull(checkpoint);
+        if (!Enum.IsDefined(schemaCheck))
+            throw new ArgumentOutOfRangeException(nameof(schemaCheck), schemaCheck, "Unknown schema check.");
+
+        var schemas = new SchemaReport(schemaCheck);
         lock (Gate)
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("restore a world checkpoint during a tick");
+            ThrowIfRunningSolverCommand("restore a world checkpoint");
+
+            // Replay restores through this method too. It needs no exemption, because recording cannot start or resume
+            // during a replay.
             lock (_recordingGate)
             {
-                if (_isWorldRecording && !_isApplyingWorldOperation)
+                if (_isWorldRecording)
                     throw new InvalidOperationException("Stop world recording before restoring a checkpoint.");
             }
 
             ValidateCheckpoint(checkpoint);
 
-            // No mixture transaction may interleave with the restore.
-            lock (_mixtureGate)
+            // A catalog stage the restore removes stays undisposed until the restore commits, so a failure can put it
+            // back. The hooks run inside the deferral too, so one that removes a stage cannot dispose it under a later
+            // hook.
+            Solvers.BeginDeferredDisposal();
+            try
             {
-                RestoreCheckpointCore(checkpoint);
+                // No mixture transaction may interleave with the restore.
+                lock (_mixtureGate)
+                {
+                    RestoreCheckpointCore(checkpoint, schemas);
+                }
+
+                // Only a handler that restores during delivery can find events here. The rest of its tick is gone.
+                Events.ClearPending();
+
+                // Before the solver hooks, so OnRestored sees each component's scratch as a new instance holds it.
+                ResetComponentScratch();
+
+                // Last, so every hook sees the world's time, configuration, and topology already restored.
+                Solvers.NotifyRestored();
+            }
+            catch (Exception exception)
+            {
+                Solvers.EndDeferredDisposal(exception);
+                throw;
             }
 
-            // Last, so every hook sees the world's time, configuration, and topology already restored.
-            Solvers.NotifyRestored();
+            Solvers.EndDeferredDisposal();
         }
+
+        return schemas.ToList();
     }
 
     // The checkpoint reads world state under the gate CaptureCheckpoint already holds, so these skip the public
@@ -954,9 +1093,73 @@ public sealed partial class AtmosWorld : IDisposable
         var states = new AtmosWorldSolverStateCheckpoint[stateful.Length];
         var sink = new StateBinarySink();
         for (int index = 0; index < stateful.Length; index++)
-            states[index] = new AtmosWorldSolverStateCheckpoint(stateful[index].Name, stateful[index].CaptureState(ref sink));
+        {
+            WorldSolverRegistration registration = stateful[index];
+            states[index] = new AtmosWorldSolverStateCheckpoint(registration.Name, registration.CaptureState(ref sink))
+            {
+                SchemaFingerprint = SchemaReport.FingerprintOf(registration.State!),
+            };
+        }
 
         return states;
+    }
+
+    /// <summary>
+    ///     Collects the solver states and components of one restore whose saved schema fingerprint differs from the
+    ///     receiving type's, or throws on the first one when the check is strict.
+    /// </summary>
+    private sealed class SchemaReport(AtmosSchemaCheck check)
+    {
+        private List<string>? _solvers;
+        private List<string>? _components;
+
+        /// <summary>
+        ///     Gets the fingerprint the generator wrote into <paramref name="target" />'s type, or 0 for a type it did
+        ///     not write.
+        /// </summary>
+        public static ulong FingerprintOf(INumosStateTarget target)
+        {
+            return target is INumosStateSchema schema ? schema.SchemaFingerprint : 0;
+        }
+
+        /// <summary>
+        ///     Compares one entry before its payload is read into <paramref name="target" />.
+        /// </summary>
+        /// <param name="target">The instance the restore writes into.</param>
+        /// <param name="saved">The fingerprint the entry recorded, or 0.</param>
+        /// <param name="name">The solver name or component key to report.</param>
+        /// <param name="owner">The entry as the strict message names it.</param>
+        /// <param name="component">Whether the entry is a simulation component.</param>
+        /// <exception cref="InvalidOperationException">The check is strict and the fingerprints differ.</exception>
+        public void Check(INumosStateTarget target, ulong saved, string name, string owner, bool component)
+        {
+            ulong current = FingerprintOf(target);
+            if (saved == 0 || current == 0 || saved == current)
+                return;
+
+            if (check == AtmosSchemaCheck.Strict)
+            {
+                throw new InvalidOperationException(
+                    $"The saved state of {owner} has another shape than type '{target.GetType().FullName}' declares " +
+                    $"now (saved schema fingerprint 0x{saved:X16}, current 0x{current:X16}). Restore with " +
+                    "AtmosSchemaCheck.Tolerant to read it anyway.");
+            }
+
+            List<string> names = component ? _components ??= [] : _solvers ??= [];
+            if (!names.Contains(name))
+                names.Add(name);
+        }
+
+        /// <summary>
+        ///     Gets the solver names, then the component keys.
+        /// </summary>
+        public IReadOnlyList<string> ToList()
+        {
+            if (_solvers is null && _components is null)
+                return [];
+
+            return Array.AsReadOnly([.. _solvers ?? [], .. _components ?? []]);
+        }
     }
 
     /// <summary>
@@ -966,17 +1169,20 @@ public sealed partial class AtmosWorld : IDisposable
     ///     <para>
     ///         The first phase builds everything that can fail on an allocation or on host code. It materializes every
     ///         grid and the mixture pool, builds the simulations the checkpoint adds without registering them, and
-    ///         runs <see cref="RestoreSolvers" />. A failure releases what the phase built and rethrows.
+    ///         restores the simulation components (<see cref="PrepareComponents" />). It then runs
+    ///         <see cref="RestoreSolvers" />. A failure releases what the phase built, puts the component state back, and
+    ///         rethrows.
     ///     </para>
     ///     <para>
     ///         The second phase swaps the prepared objects in and updates bookkeeping. It runs no host code.
     ///     </para>
     /// </remarks>
-    private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
+    private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint, SchemaReport schemas)
     {
         var grids = new List<PreparedGrid>(checkpoint.Simulations.Count);
         var chunkDimensions = new Dictionary<AtmosSimulationId, Int3>(checkpoint.Simulations.Count);
         AtmosGasMixturePool.PreparedCheckpoint? pool = null;
+        PreparedComponents? components = null;
         CompiledTopology topology;
         LinkSetSlot[] linkSlots;
         try
@@ -997,10 +1203,16 @@ public sealed partial class AtmosWorld : IDisposable
 
             pool = AtmosGasMixturePool.PrepareCheckpoint(checkpoint.GasMixtures);
             linkSlots = ReadLinkSlots(checkpoint.LinkSlots);
-            topology = RestoreSolvers(checkpoint, linkSlots, chunkDimensions);
+
+            // Before the solvers, so the topology selectors that RestoreSolvers compiles see the restored components.
+            components = PrepareComponents(checkpoint, grids, schemas);
+            topology = RestoreSolvers(checkpoint, linkSlots, chunkDimensions, schemas);
         }
         catch
         {
+            if (components is not null)
+                RollBackComponents(components);
+
             pool?.Release();
             foreach (var grid in grids)
             {
@@ -1052,6 +1264,8 @@ public sealed partial class AtmosWorld : IDisposable
         }
 
         RebuildOrderedSimulations();
+        foreach ((AtmosSimulation simulation, var slots) in components!.Sets)
+            simulation.InstallComponents(slots);
 
         // After registration, so the new simulations take the restored configuration too, and before the kernels
         // install, because each one captures it for its next tick.
@@ -1077,16 +1291,24 @@ public sealed partial class AtmosWorld : IDisposable
     ///     its link slots describe. A failure puts the previous values back and rethrows.
     /// </summary>
     /// <remarks>
-    ///     This is the host-code part of a restore. A <c>[NumosSerialize]</c> setter, a codec, or a neighbor selection
-    ///     predicate can throw here. The setters write into the live solver objects, and the selectors must see the
-    ///     restored solver state, so neither can run on a copy. The selectors run before the checkpoint's grids are
-    ///     installed. The world's configuration is still the previous one, so the rollback reads the previous state
-    ///     with its gas registry.
+    ///     <para>
+    ///         This is the host-code part of a restore. A catalog solver's constructor, a <c>[NumosSerialize]</c>
+    ///         setter, a codec, or a neighbor selection predicate can throw here. The setters write into the live solver
+    ///         objects, and the selectors must see the restored solver state, so neither can run on a copy. The
+    ///         selectors run before the checkpoint's grids are installed. The world's configuration is still the
+    ///         previous one, so the rollback reads the previous state with its gas registry.
+    ///     </para>
+    ///     <para>
+    ///         The layout creates the catalog stages the checkpoint names and the world lacks, and removes the catalog
+    ///         stages the checkpoint lacks. The caller's disposal deferral keeps a removed instance alive, so the
+    ///         rollback can put it back. The rollback releases the created ones.
+    ///     </para>
     /// </remarks>
     private CompiledTopology RestoreSolvers(
         AtmosWorldCheckpoint checkpoint,
         LinkSetSlot[] linkSlots,
-        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions)
+        IReadOnlyDictionary<AtmosSimulationId, Int3> chunkDimensions,
+        SchemaReport schemas)
     {
         int previousTickRate = TickRate;
         var previousLayout = Solvers.CaptureLayoutSnapshot();
@@ -1100,8 +1322,20 @@ public sealed partial class AtmosWorld : IDisposable
                 .ToArray());
             Solvers.RestoreSchedules(checkpoint.Solvers);
 
+            // Validation checked the stages the world kept. The stages the layout just created from the catalog are
+            // only known now.
+            ValidateSolverStateTargets(checkpoint, true);
+
+            // Before any payload is read, so a strict failure has no solver state to put back.
+            foreach (var saved in checkpoint.SolverStates)
+            {
+                schemas.Check(
+                    Solvers.Find(saved.Name)!.State!, saved.SchemaFingerprint, saved.Name, $"world solver '{saved.Name}'",
+                    false);
+            }
+
             // Right after the layout, so nothing the rest of the restore runs (topology selectors) can see the
-            // solvers' pre-restore state. Validation already matched every entry to a stateful registration.
+            // solvers' pre-restore state.
             foreach (var saved in checkpoint.SolverStates)
                 Solvers.Find(saved.Name)!.RestoreState(saved.State.Span, checkpoint.Config.GasRegistry);
 
@@ -1137,13 +1371,19 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Elapsed time, in seconds, since the previous update. NaN and values of zero or less add no time.
     /// </param>
     /// <remarks>
-    ///     Numos keeps fractions of a step. One call keeps at most a quarter second of backlog and discards any older
-    ///     time, which is five steps at 20 Hz.
+    ///     <para>
+    ///         Numos keeps fractions of a step. One call keeps at most a quarter second of backlog and discards any older
+    ///         time, which is five steps at 20 Hz.
+    ///     </para>
+    ///     <para>
+    ///         Numos delivers the <see cref="Events" /> of each tick before the next tick starts. An exception from a
+    ///         handler ends the call after the tick that emitted the event. The unspent time stays for the next call.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     Called recursively from a solver callback, or a class solver's dependency is missing or ambiguous. A
-    ///     dependency failure leaves the world and its accumulated time unchanged.
+    ///     Called recursively from a solver callback, a solver command, or an event handler, or a class solver's
+    ///     dependency is missing or ambiguous. A dependency failure leaves the world and its accumulated time unchanged.
     /// </exception>
     [PublicAPI]
     public void Update(float elapsedSeconds)
@@ -1152,6 +1392,8 @@ public sealed partial class AtmosWorld : IDisposable
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("update the world recursively");
+            ThrowIfRunningSolverCommand("update the world");
+            ThrowIfDeliveringEvents("update the world");
             // NaN would stick in the accumulator and stop every later update, and negative time would become a debt.
             double elapsed = elapsedSeconds > 0f ? elapsedSeconds : 0d;
             double accumulator = Math.Min(_accumulator + elapsed, AtmosSolverConstants.MaximumUpdateBacklog);
@@ -1166,23 +1408,35 @@ public sealed partial class AtmosWorld : IDisposable
 
             _accumulator = accumulator;
 
-            // Nothing outside a tick can touch solver state while this loop holds the gate. The first tick records
-            // host edits, and one refresh after the last tick sets the baseline the per-tick refreshes would have.
-            bool first = true;
-            bool ticked = false;
+            // Only ticks and event handlers can touch solver state while this loop holds the gate. A tick records host
+            // edits only when the previous tick delivered events, because a handler is host code. One refresh after
+            // the last tick sets the baseline the per-tick refreshes would have.
+            bool recordEdits = true;
+            bool baselineStale = false;
             try
             {
                 while (HasWholeTick(_accumulator))
                 {
                     _accumulator = Math.Max(0d, _accumulator - 1d / TickRate);
-                    TickCore(first, false);
-                    first = false;
-                    ticked = true;
+                    TickCore(recordEdits, false);
+                    recordEdits = false;
+                    baselineStale = true;
+                    if (Events.HasPending)
+                    {
+                        // The baseline must hold the tick's solver work before handlers run. A handler's edit then
+                        // counts as a host edit at the next tick instead of as derived work.
+                        if (_isWorldRecording)
+                            RefreshSolverStateHashes();
+
+                        baselineStale = false;
+                        recordEdits = true;
+                        DeliverTickEvents();
+                    }
                 }
             }
             finally
             {
-                if (ticked && _isWorldRecording)
+                if (baselineStale && _isWorldRecording)
                     RefreshSolverStateHashes();
             }
         }
@@ -1198,11 +1452,15 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Advances every registered simulation exactly once through one fixed world tick.
     /// </summary>
-    /// <remarks>Pending topology and configuration changes are applied before solver execution begins.</remarks>
+    /// <remarks>
+    ///     Pending topology and configuration changes are applied before solver execution begins. After the tick,
+    ///     Numos delivers its <see cref="Events" />. An exception from a handler leaves this call with the tick
+    ///     complete.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     Called recursively from a solver callback, or a class solver's dependency is missing or ambiguous. A
-    ///     dependency failure is raised before the tick changes any state.
+    ///     Called recursively from a solver callback, a solver command, or an event handler, or a class solver's
+    ///     dependency is missing or ambiguous. A dependency failure is raised before the tick changes any state.
     /// </exception>
     [PublicAPI]
     public void Tick()
@@ -1211,7 +1469,10 @@ public sealed partial class AtmosWorld : IDisposable
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("tick the world recursively");
+            ThrowIfRunningSolverCommand("tick the world");
+            ThrowIfDeliveringEvents("tick the world");
             TickCore();
+            DeliverTickEvents();
         }
     }
 
@@ -1398,13 +1659,15 @@ public sealed partial class AtmosWorld : IDisposable
                 simulation.Kernel.RestoreCheckpoint(checkpoint, TickCount);
             }
 
+            Events.ClearPending();
             Solvers.NotifyRestored();
         }
     }
 
     /// <summary>
     ///     Rejects a grid-only restore while the world is recording or replaying. It also rejects the restore when
-    ///     other simulations or explicit links could point at chunks that no longer exist.
+    ///     other simulations or explicit links could point at chunks that no longer exist, and while the simulation
+    ///     holds a simulation component.
     /// </summary>
     private void EnsureSimulationRestoreAllowed(AtmosSimulation simulation)
     {
@@ -1420,16 +1683,19 @@ public sealed partial class AtmosWorld : IDisposable
                 hasGasMixtures = GasMixtures.AllocatedCount > 0;
             }
 
+            // A grid checkpoint has no component entries, so the restore would keep the components as they are.
+            bool hasComponents = simulation.HasComponents;
             lock (_recordingGate)
             {
                 if (_isWorldRecording ||
                     _isReplayingWorld ||
                     hasGasMixtures ||
+                    hasComponents ||
                     _orderedSimulations.Length != 1 ||
                     _linkSlots.Any(static slot => slot.State != LinkSetState.Free))
                 {
                     throw new InvalidOperationException(
-                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, live gas mixtures, or an active recording or replay.");
+                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, live gas mixtures, simulation components, or an active recording or replay.");
                 }
             }
         }
@@ -1447,6 +1713,44 @@ public sealed partial class AtmosWorld : IDisposable
     ///     after its last tick instead.
     /// </param>
     private void TickCore(bool recordEdits = true, bool refreshHashes = true)
+    {
+        // A stage removed during the tick may still be in the stage list the tick runs, so its disposal waits.
+        Solvers.BeginDeferredDisposal();
+        try
+        {
+            RunTick(recordEdits, refreshHashes);
+        }
+        catch (Exception exception)
+        {
+            // A failed tick delivers nothing, also for the events its stages emitted before the throw.
+            Events.ClearPending();
+            Solvers.EndDeferredDisposal(exception);
+            throw;
+        }
+
+        Solvers.EndDeferredDisposal();
+    }
+
+    /// <summary>
+    ///     Delivers the events of the tick that just completed.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The caller holds <see cref="Gate" /> and has released every lock the tick took. A handler runs on this
+    ///         thread, so its mutators re-enter <see cref="Gate" /> and take the simulation locks themselves. Another
+    ///         thread waits for the whole call, as it does for a tick.
+    ///     </para>
+    ///     <para>
+    ///         Delivery comes after the tick's trail hash and solver-state baseline. A handler's mutation then records
+    ///         at the position after the tick, where replay applies it.
+    ///     </para>
+    /// </remarks>
+    private void DeliverTickEvents()
+    {
+        Events.Deliver(TickCount, _isReplayingWorld);
+    }
+
+    private void RunTick(bool recordEdits, bool refreshHashes)
     {
         // Before anything in the tick can read solver state, so replay applies the edit at the same point.
         if (recordEdits)
@@ -1515,7 +1819,7 @@ public sealed partial class AtmosWorld : IDisposable
                 GasMixtures.BeginTick(tick);
                 poolBegun = true;
 
-                solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts, _config);
+                solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts, _config, tick);
                 Solvers.Execute(worldSteps, solverScope);
 
                 if (_pendingConfig != null)
@@ -1559,6 +1863,9 @@ public sealed partial class AtmosWorld : IDisposable
         // An idle tick ran no solver.
         if (refreshHashes && !idle && _isWorldRecording)
             RefreshSolverStateHashes();
+
+        if (_isWorldRecording)
+            RecordTrailHash();
     }
 
     /// <summary>
@@ -1674,7 +1981,6 @@ public sealed partial class AtmosWorld : IDisposable
         ValidateTickRate(checkpoint.TickRate, nameof(checkpoint));
         checkpoint.Config.ValidateGasRegistry();
         AtmosGasMixturePool.ValidateCheckpoint(checkpoint.GasMixtures);
-        ValidateSolverStates(checkpoint);
 
         // Checked first, because the custom-stage comparison below assumes unique names.
         var seenSolvers = new HashSet<string>(StringComparer.Ordinal);
@@ -1700,16 +2006,9 @@ public sealed partial class AtmosWorld : IDisposable
             }
         }
 
-        // Built-in stages are recreated by name, so only the custom stages have to match. Their order may differ.
-        IReadOnlyList<AtmosWorldSolverCheckpoint> currentWorldSolvers = SolverCheckpoints;
-        if (!HaveSameCustomSolvers(currentWorldSolvers, checkpoint.Solvers))
-        {
-            throw new ArgumentException(
-                "The world checkpoint requires the same custom world solver names and neighbor selections. " +
-                $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
-                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}].",
-                nameof(checkpoint));
-        }
+        // Before the solver states, so a checkpoint that needs unknown solvers reports all of them at once.
+        ValidateCustomSolvers(checkpoint);
+        ValidateSolverStates(checkpoint);
 
         var validCells = new Dictionary<AtmosSimulationId, Dictionary<Int3, int>>();
         AtmosSimulationId? previousSimulation = null;
@@ -1745,6 +2044,8 @@ public sealed partial class AtmosWorld : IDisposable
             if (checkpoint.SimulationGenerations[index] == 0)
                 throw new ArgumentException("The world checkpoint contains an invalid simulation generation.", nameof(checkpoint));
         }
+
+        ValidateSimulationComponents(checkpoint);
 
         var currentPhysicalEdges = new HashSet<ExplicitEdgeKey>();
         var nextPhysicalEdges = new HashSet<ExplicitEdgeKey>();
@@ -1798,37 +2099,100 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here. The payloads
-    ///     must be at least well-formed field records.
+    ///     Checks that the restore can give each custom stage of the checkpoint a solver, and that it can drop each
+    ///     custom stage the checkpoint lacks.
     /// </summary>
     /// <remarks>
-    ///     Strict in both directions. An entry nothing here can take would silently drop state. A stateful solver
-    ///     with no entry would keep whatever it held before the restore. In either case replay would diverge from the
-    ///     history of the checkpoint. The entries follow the checkpoint's own stage order, which
-    ///     <see cref="AtmosWorldCheckpoint" /> checks when it is decoded.
+    ///     <para>
+    ///         Built-in stages are recreated by name, so only the custom stages are checked. Their order may differ. A
+    ///         custom stage the world has must keep its neighbor selection key. A custom stage the world lacks must be
+    ///         in <see cref="AtmosSolverCatalog" /> with the same key, and the layout creates it. The key covers the
+    ///         topology view, which a checkpoint does not store.
+    ///     </para>
+    ///     <para>
+    ///         A catalog stage the checkpoint lacks is removed. A host-registered stage the checkpoint lacks fails the
+    ///         restore, because only <see cref="AtmosWorldSolverPipeline.Unregister" /> removes one.
+    ///     </para>
     /// </remarks>
+    private void ValidateCustomSolvers(AtmosWorldCheckpoint checkpoint)
+    {
+        List<string>? missing = null;
+        foreach (var saved in checkpoint.Solvers)
+        {
+            if (saved.Kind != AtmosWorldSolverKind.Custom)
+                continue;
+
+            var current = Solvers.Find(saved.Name);
+            if (current is not null)
+            {
+                if (current.Kind != AtmosWorldSolverKind.Custom || current.Selection?.Key != saved.NeighborSelectionKey)
+                    throw MismatchedCustomSolvers(checkpoint);
+
+                continue;
+            }
+
+            // The layout would resolve the name to the built-in stage, not to a custom one.
+            if (AtmosWorldSolverPipeline.BuiltInStageNames.Contains(saved.Name))
+                throw MismatchedCustomSolvers(checkpoint);
+
+            if (!AtmosSolverCatalog.TryGet(saved.Name, out AtmosSolverDescriptor? descriptor))
+            {
+                (missing ??= []).Add(saved.Name);
+                continue;
+            }
+
+            string? key = descriptor.Neighbors?.Key;
+            if (key != saved.NeighborSelectionKey)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint saved world solver '{saved.Name}' with neighbor selection " +
+                    $"{DescribeSelectionKey(saved.NeighborSelectionKey)}, but its solver catalog entry declares " +
+                    $"{DescribeSelectionKey(key)}.",
+                    nameof(checkpoint));
+            }
+        }
+
+        if (missing is not null)
+        {
+            throw new ArgumentException(
+                "The world checkpoint needs custom world solvers that aren't registered and aren't in the solver " +
+                $"catalog: {string.Join(", ", missing.Select(static name => $"'{name}'"))}. Register them, or load the " +
+                "assemblies that declare them with [AtmosSolver], before restoring.",
+                nameof(checkpoint));
+        }
+
+        foreach (var step in Solvers.CaptureCheckpoints())
+        {
+            if (step.Kind != AtmosWorldSolverKind.Custom || Solvers.Find(step.Name)!.Descriptor is not null)
+                continue;
+
+            if (!checkpoint.Solvers.Any(saved => saved.Name == step.Name))
+                throw MismatchedCustomSolvers(checkpoint);
+        }
+    }
+
+    private ArgumentException MismatchedCustomSolvers(AtmosWorldCheckpoint checkpoint)
+    {
+        return new ArgumentException(
+            "The world checkpoint requires the same custom world solver names and neighbor selections. " +
+            $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
+            $"world stages: [{string.Join(", ", Solvers.CaptureCheckpoints().Select(static solver => solver.Name))}].",
+            nameof(checkpoint));
+    }
+
+    private static string DescribeSelectionKey(string? key)
+    {
+        return key is null ? "none" : $"'{key}'";
+    }
+
+    /// <summary>
+    ///     Requires every state payload to be a well-formed field record, and checks the state of the stages the world
+    ///     keeps (see <see cref="ValidateSolverStateTargets" />).
+    /// </summary>
     private void ValidateSolverStates(AtmosWorldCheckpoint checkpoint)
     {
-        WorldSolverRegistration[] stateful = Solvers.StatefulSteps;
-        for (int index = 0; index < checkpoint.SolverStates.Count; index++)
+        foreach (var saved in checkpoint.SolverStates)
         {
-            var saved = checkpoint.SolverStates[index];
-            var registration = Solvers.Find(saved.Name);
-            if (registration is null)
-            {
-                throw new ArgumentException(
-                    $"The world checkpoint holds state for world solver '{saved.Name}', which isn't registered.",
-                    nameof(checkpoint));
-            }
-
-            if (registration.State is null)
-            {
-                throw new ArgumentException(
-                    $"The world checkpoint holds state for world solver '{saved.Name}', but the registered solver " +
-                    "has no [NumosSerialize] members to restore it into.",
-                    nameof(checkpoint));
-            }
-
             try
             {
                 SkimStatePayload(saved.State.Span);
@@ -1842,13 +2206,55 @@ public sealed partial class AtmosWorld : IDisposable
             }
         }
 
-        foreach (var registration in stateful)
-        {
-            bool found = false;
-            for (int index = 0; index < checkpoint.SolverStates.Count && !found; index++)
-                found = checkpoint.SolverStates[index].Name == registration.Name;
+        ValidateSolverStateTargets(checkpoint, false);
+    }
 
-            if (!found)
+    /// <summary>
+    ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here.
+    /// </summary>
+    /// <param name="checkpoint">The checkpoint being restored.</param>
+    /// <param name="afterLayout">
+    ///     <see langword="false" /> before the restore changes anything. Stages the layout will create or remove are
+    ///     skipped then. <see langword="true" /> once the checkpoint's layout is installed, when every stage is known.
+    /// </param>
+    /// <remarks>
+    ///     Strict in both directions. An entry nothing here can take would silently drop state. A stateful solver
+    ///     with no entry would keep whatever it held before the restore. In either case replay would diverge from the
+    ///     history of the checkpoint. The entries follow the checkpoint's own stage order, which
+    ///     <see cref="AtmosWorldCheckpoint" /> checks when it is decoded.
+    /// </remarks>
+    private void ValidateSolverStateTargets(AtmosWorldCheckpoint checkpoint, bool afterLayout)
+    {
+        foreach (var saved in checkpoint.SolverStates)
+        {
+            var registration = Solvers.Find(saved.Name);
+            if (registration is null)
+            {
+                // The layout creates it from the catalog. The second pass checks the new instance.
+                if (!afterLayout && AtmosSolverCatalog.TryGet(saved.Name, out _))
+                    continue;
+
+                throw new ArgumentException(
+                    $"The world checkpoint holds state for world solver '{saved.Name}', which isn't registered.",
+                    nameof(checkpoint));
+            }
+
+            if (registration.State is null)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint holds state for world solver '{saved.Name}', but the registered solver " +
+                    "has no [NumosSerialize] members to restore it into.",
+                    nameof(checkpoint));
+            }
+        }
+
+        foreach (var registration in Solvers.StatefulSteps)
+        {
+            // A catalog stage the checkpoint lacks is removed, so its state does not matter.
+            if (!afterLayout && !checkpoint.Solvers.Any(saved => saved.Name == registration.Name))
+                continue;
+
+            if (!checkpoint.SolverStates.Any(saved => saved.Name == registration.Name))
             {
                 throw new ArgumentException(
                     $"World solver '{registration.Name}' has [NumosSerialize] members, but the world checkpoint holds " +
@@ -1856,45 +2262,6 @@ public sealed partial class AtmosWorld : IDisposable
                     nameof(checkpoint));
             }
         }
-    }
-
-    /// <summary>
-    ///     Gets whether the custom stages in <paramref name="saved" /> are exactly those in <paramref name="current" />,
-    ///     each with the same neighbor selection key. Order is ignored.
-    /// </summary>
-    /// <remarks>Both lists must hold unique stage names.</remarks>
-    private static bool HaveSameCustomSolvers(
-        IReadOnlyList<AtmosWorldSolverCheckpoint> current,
-        IReadOnlyList<AtmosWorldSolverCheckpoint> saved)
-    {
-        int currentCount = 0;
-        for (int index = 0; index < current.Count; index++)
-        {
-            if (current[index].Kind == AtmosWorldSolverKind.Custom)
-                currentCount++;
-        }
-
-        int savedCount = 0;
-        for (int index = 0; index < saved.Count; index++)
-        {
-            var solver = saved[index];
-            if (solver.Kind != AtmosWorldSolverKind.Custom)
-                continue;
-
-            savedCount++;
-            bool found = false;
-            for (int other = 0; other < current.Count && !found; other++)
-            {
-                found = current[other].Kind == AtmosWorldSolverKind.Custom &&
-                        current[other].Name == solver.Name &&
-                        current[other].NeighborSelectionKey == solver.NeighborSelectionKey;
-            }
-
-            if (!found)
-                return false;
-        }
-
-        return savedCount == currentCount;
     }
 
     // Checks the field framing without knowing the field types, so a truncated or reordered payload is rejected
@@ -2356,7 +2723,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public bool TryGetSimulation(AtmosSimulationId id, out AtmosSimulation? simulation)
+    public bool TryGetSimulation(AtmosSimulationId id, [NotNullWhen(true)] out AtmosSimulation? simulation)
     {
         lock (Gate)
         {
@@ -2578,6 +2945,16 @@ public sealed partial class AtmosWorld : IDisposable
     {
         if (_isTickExecuting)
             throw new InvalidOperationException($"A solver callback cannot {operation}.");
+    }
+
+    /// <summary>
+    ///     Rejects a call that would tick or tear down the world from inside an event handler. Nested ticks would
+    ///     deliver their events before the rest of the outer tick's events.
+    /// </summary>
+    private void ThrowIfDeliveringEvents(string operation)
+    {
+        if (Events.IsDelivering)
+            throw new InvalidOperationException($"An event handler cannot {operation}.");
     }
 
     private void ThrowIfDisposed()

@@ -137,7 +137,9 @@ public sealed class SolverConfigurationTypes
         {
             throw new NotSupportedException(
                 $"The file contains solver configuration '{key}', but no type is registered for that key. " +
-                "Register it in NumosReplayReadOptions.SolverConfigurations before loading.");
+                "Register it in NumosReplayReadOptions.SolverConfigurations before loading. " +
+                "If the assembly that declares the key has not run yet or is not referenced, calling its generated " +
+                "<assembly name>.NumosModule.EnsureRegistered() before loading fixes the first case.");
         }
 
         if (entry.Conflict is { } conflict)

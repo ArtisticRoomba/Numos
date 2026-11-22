@@ -20,8 +20,14 @@ declares each alias (`Kelvin`, `Pascal`, `Mole`, and their 64-bit variants) and 
 `[UnitConversions]` on `Numos.CoreSim.UnitConversions` puts the generated conversions in that public class. Consumers
 can call them at their input boundaries, for example `UnitConversions.FromKilojoulePerMole(483.6f)`.
 
-To add a quantity, add a line to the catalog. Use the existing base dimensions where possible. A domain can add a new
-base dimension by name.
+The aliases are `global using` directives that the analyzer generates inside `Numos.CoreSim`. A project that references
+a Numos package does not get them, so `Kelvin` in mod code is a CS0246 error. To use the aliases in your own project,
+add the `Magnitudo` and `Magnitudo.Analyzers` packages and a `.magnitudo` catalog of your own as an `AdditionalFiles`
+item. The Numos generators read that catalog, so a `[NumosSerialize] Kelvin` member or a `Kelvin` command parameter
+then works like a `float`.
+
+To add a quantity to Numos, add a line to its catalog. Use the existing base dimensions where possible. A domain can
+add a new base dimension by name.
 
 ## Annotating code
 

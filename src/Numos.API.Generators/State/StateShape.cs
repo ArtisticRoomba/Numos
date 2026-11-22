@@ -67,6 +67,37 @@ internal enum StateShapeKind
 }
 
 /// <summary>
+///     How a restore in place reuses the collection a member already holds.
+/// </summary>
+internal enum StateRefill
+{
+    /// <summary>
+    ///     The restore assigns the decoded value.
+    /// </summary>
+    None,
+
+    /// <summary>
+    ///     A <c>List&lt;T&gt;</c>, cleared and refilled.
+    /// </summary>
+    List,
+
+    /// <summary>
+    ///     A <c>HashSet&lt;T&gt;</c>, cleared and refilled.
+    /// </summary>
+    Set,
+
+    /// <summary>
+    ///     A <c>Dictionary&lt;TKey, TValue&gt;</c>, cleared and refilled.
+    /// </summary>
+    Dictionary,
+
+    /// <summary>
+    ///     An array, copied into when the lengths match and assigned otherwise.
+    /// </summary>
+    Array,
+}
+
+/// <summary>
 ///     A state field's type, reduced to what picks its codec.
 /// </summary>
 internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArray<StateShape> Arguments, string Codec = "")
@@ -95,6 +126,14 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         "System.Collections.Frozen.FrozenDictionary`2",
     };
 
+    // Only a type that is restored in place takes these. A value built from data would hand them out mutable.
+    private const string MutableListType = "System.Collections.Generic.List`1";
+    private const string MutableSetType = "System.Collections.Generic.HashSet`1";
+
+    private const string ListName = "global::System.Collections.Generic.List";
+    private const string HashSetName = "global::System.Collections.Generic.HashSet";
+    private const string DictionaryName = "global::System.Collections.Generic.Dictionary";
+
     private static readonly HashSet<string> ParameterContainerTypes = new(StringComparer.Ordinal)
     {
         "System.Collections.Generic.IEnumerable`1",
@@ -116,7 +155,12 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     ///     Classifies a member type. Unknown types become <see cref="StateShapeKind.Unsupported" /> leaves rather than
     ///     failing, so one bad member doesn't hide the rest of the type's diagnostics.
     /// </summary>
-    public static StateShape From(ITypeSymbol type)
+    /// <param name="type">The member type.</param>
+    /// <param name="mutableCollections">
+    ///     Whether <c>List&lt;T&gt;</c> and <c>HashSet&lt;T&gt;</c> are supported, here and inside other collections.
+    ///     Only a type that is restored in place passes true.
+    /// </param>
+    public static StateShape From(ITypeSymbol type, bool mutableCollections = false)
     {
         // An alias is unbound here (see QuantityAliasCatalog). It is never annotated, because it is not known to be a
         // reference type.
@@ -124,7 +168,12 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return Leaf(StateShapeKind.Alias, type.Name);
 
         if (type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated)
-            return Of(StateShapeKind.NullableReference, "", From(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)));
+        {
+            return Of(
+                StateShapeKind.NullableReference,
+                "",
+                From(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated), mutableCollections));
+        }
 
         if (QuantityAliasCatalog.PrimitiveNames.TryGetValue(type.SpecialType, out string? primitive))
             return Leaf(StateShapeKind.Primitive, primitive);
@@ -133,13 +182,17 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return Leaf(StateShapeKind.String, "");
 
         if (type is IArrayTypeSymbol array)
-            return array.IsSZArray ? Of(StateShapeKind.Array, "", From(array.ElementType)) : Unsupported(type);
+        {
+            return array.IsSZArray
+                ? Of(StateShapeKind.Array, "", From(array.ElementType, mutableCollections))
+                : Unsupported(type);
+        }
 
         if (type is not INamedTypeSymbol named)
             return Unsupported(type);
 
         if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
-            return Of(StateShapeKind.NullableValue, "", From(named.TypeArguments[0]));
+            return Of(StateShapeKind.NullableValue, "", From(named.TypeArguments[0], mutableCollections));
 
         if (named.TypeKind == TypeKind.Enum)
         {
@@ -162,18 +215,28 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         if (metadataName == "System.ReadOnlyMemory`1" && named.TypeArguments[0].SpecialType == SpecialType.System_Byte)
             return Leaf(StateShapeKind.Bytes, "");
 
-        if (ListTypes.Contains(metadataName))
-            return Of(StateShapeKind.List, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0]));
+        if (ListTypes.Contains(metadataName) || (mutableCollections && metadataName == MutableListType))
+        {
+            return Of(
+                StateShapeKind.List, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0], mutableCollections));
+        }
 
-        if (SetTypes.Contains(metadataName))
-            return Of(StateShapeKind.Set, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0]));
+        if (SetTypes.Contains(metadataName) || (mutableCollections && metadataName == MutableSetType))
+        {
+            return Of(
+                StateShapeKind.Set, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0], mutableCollections));
+        }
 
         if (DictionaryTypes.Contains(metadataName))
         {
-            StateShape key = From(named.TypeArguments[0]);
+            StateShape key = From(named.TypeArguments[0], mutableCollections);
             return key.Kind is StateShapeKind.Primitive or StateShapeKind.String or StateShapeKind.Gas
                 or StateShapeKind.Enum or StateShapeKind.Int3 or StateShapeKind.Alias
-                ? Of(StateShapeKind.Dictionary, named.ToDisplayString(UnboundFormat), key, From(named.TypeArguments[1]))
+                ? Of(
+                    StateShapeKind.Dictionary,
+                    named.ToDisplayString(UnboundFormat),
+                    key,
+                    From(named.TypeArguments[1], mutableCollections))
                 : Unsupported(type);
         }
 
@@ -201,7 +264,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return new StateShape(
                 StateShapeKind.Container,
                 named.ToDisplayString(UnboundFormat),
-                named.TypeArguments.Select(From).ToEquatableArray());
+                named.TypeArguments.Select(static argument => From(argument)).ToEquatableArray());
         }
 
         return From(type);
@@ -225,11 +288,34 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     ///     Classifies a marked member: by its <c>Codec</c> when the attribute names one, whatever the member's type, and
     ///     by the type otherwise.
     /// </summary>
-    public static StateShape ForMember(ITypeSymbol memberType, ITypeSymbol? codec)
+    /// <param name="memberType">The member type.</param>
+    /// <param name="codec">The codec the attribute names, or null.</param>
+    /// <param name="mutableCollections">See <see cref="From" />.</param>
+    public static StateShape ForMember(ITypeSymbol memberType, ITypeSymbol? codec, bool mutableCollections = false)
     {
         return codec is not null
             ? new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec))
-            : From(memberType);
+            : From(memberType, mutableCollections);
+    }
+
+    /// <summary>
+    ///     Gets how a restore in place can reuse the instance a member already holds. The answer looks through a
+    ///     nullable reference.
+    /// </summary>
+    public StateRefill Refill
+    {
+        get
+        {
+            StateShape shape = Kind == StateShapeKind.NullableReference ? Arguments[0] : this;
+            return shape switch
+            {
+                { Kind: StateShapeKind.Array } => StateRefill.Array,
+                { Kind: StateShapeKind.List, Name: ListName } => StateRefill.List,
+                { Kind: StateShapeKind.Set, Name: HashSetName } => StateRefill.Set,
+                { Kind: StateShapeKind.Dictionary, Name: DictionaryName } => StateRefill.Dictionary,
+                _ => StateRefill.None,
+            };
+        }
     }
 
     /// <summary>
@@ -306,6 +392,45 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
 
         return null;
     }
+
+    /// <summary>
+    ///     Gets the alias name of an unresolved quantity alias, or of the value inside a nullable one, or null.
+    /// </summary>
+    /// <remarks>
+    ///     Read it before <see cref="Resolve" />, which replaces the alias with its storage primitive.
+    /// </remarks>
+    public string? AliasName => Kind switch
+    {
+        StateShapeKind.Alias => Name,
+        StateShapeKind.NullableValue when Arguments[0].Kind == StateShapeKind.Alias => Arguments[0].Name,
+        _ => null,
+    };
+
+    /// <summary>
+    ///     Gets whether a member descriptor can write this shape from a parsed tool value: a primitive, a string, an
+    ///     enum, or a nullable form of one.
+    /// </summary>
+    public bool IsToolScalar => Kind switch
+    {
+        StateShapeKind.Primitive or StateShapeKind.String or StateShapeKind.Enum => true,
+        StateShapeKind.NullableValue or StateShapeKind.NullableReference => Arguments[0].Kind is StateShapeKind.Primitive
+            or StateShapeKind.String or StateShapeKind.Enum,
+        _ => false,
+    };
+
+    /// <summary>
+    ///     Gets the type this shape stands for in a form <c>typeof</c> accepts: <see cref="TypeExpression" /> without
+    ///     nullable reference annotations.
+    /// </summary>
+    public string RuntimeTypeExpression => Kind switch
+    {
+        StateShapeKind.NullableReference => Arguments[0].RuntimeTypeExpression,
+        StateShapeKind.NullableValue => Arguments[0].RuntimeTypeExpression + "?",
+        StateShapeKind.Array => Arguments[0].RuntimeTypeExpression + "[]",
+        StateShapeKind.List or StateShapeKind.Set or StateShapeKind.Dictionary or StateShapeKind.Container =>
+            Name + "<" + string.Join(", ", Arguments.Select(static argument => argument.RuntimeTypeExpression)) + ">",
+        _ => TypeExpression,
+    };
 
     /// <summary>
     ///     Gets the C# type this shape stands for, with aliases spelled as their storage primitive.

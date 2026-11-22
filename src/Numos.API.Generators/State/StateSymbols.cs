@@ -11,6 +11,19 @@ internal static class StateSymbols
 {
     private const string SerializeMetadataName = "Numos.CoreSim.State.NumosSerializeAttribute";
     private const string IgnoreMetadataName = "Numos.CoreSim.State.NumosIgnoreAttribute";
+    private const string ScratchMetadataName = "Numos.CoreSim.State.NumosScratchAttribute";
+
+    private static readonly string[] MutableCollections =
+    [
+        "System.Collections.Generic.List`1",
+        "System.Collections.Generic.Dictionary`2",
+        "System.Collections.Generic.HashSet`1",
+        "System.Collections.Generic.Queue`1",
+        "System.Collections.Generic.Stack`1",
+        "System.Collections.Generic.SortedDictionary`2",
+        "System.Collections.Generic.SortedSet`1",
+        "System.Collections.Generic.LinkedList`1",
+    ];
 
     /// <summary>
     ///     Gets the <c>[NumosSerialize]</c> on <paramref name="symbol" />, or null.
@@ -21,6 +34,11 @@ internal static class StateSymbols
     ///     Whether <paramref name="symbol" /> has <c>[NumosIgnore]</c>.
     /// </summary>
     public static bool IsIgnored(ISymbol symbol) => FindAttribute(symbol, IgnoreMetadataName) is not null;
+
+    /// <summary>
+    ///     Whether <paramref name="symbol" /> has <c>[NumosScratch]</c>.
+    /// </summary>
+    public static bool IsScratch(ISymbol symbol) => FindAttribute(symbol, ScratchMetadataName) is not null;
 
     private static AttributeData? FindAttribute(ISymbol symbol, string metadataName)
     {
@@ -58,15 +76,16 @@ internal static class StateSymbols
     }
 
     /// <summary>
-    ///     Whether <paramref name="property" /> is an auto-property whose backing field carries <c>[NumosSerialize]</c>,
-    ///     which is what <c>[field: NumosSerialize]</c> produces.
+    ///     Whether <paramref name="property" /> is an auto-property whose backing field carries <c>[NumosSerialize]</c>
+    ///     or <c>[NumosScratch]</c>, which is what <c>[field: ...]</c> produces. Both draw their own error.
     /// </summary>
     public static bool HasMarkedBackingField(IPropertySymbol property) =>
         property.ContainingType is { } type && FindBackingField(type, property) is { } backing &&
-        FindSerialize(backing) is not null;
+        (FindSerialize(backing) is not null || IsScratch(backing));
 
     /// <summary>
-    ///     Reports a <c>[NumosSerialize]</c> that the generators can't honor, found on <paramref name="member" />.
+    ///     Reports a <c>[NumosSerialize]</c> or <c>[NumosScratch]</c> that the generators can't honor, found on
+    ///     <paramref name="member" />.
     /// </summary>
     /// <param name="member">Any member of the type being read.</param>
     /// <param name="ownerDisplayName">The type that declares the member, for diagnostics.</param>
@@ -78,7 +97,7 @@ internal static class StateSymbols
     ///         Two marks are never read. One is on an indexer, which holds no single value. The other is
     ///         <c>[field: NumosSerialize]</c> on a property, which lands on the backing field. Both used to disappear
     ///         without a word. The backing field is the member that reports, at its property's location, so each
-    ///         mark is reported once.
+    ///         mark is reported once. <c>[NumosScratch]</c> on either one is reported the same way.
     ///     </para>
     ///     <para>
     ///         Call this for every member before the caller's own filters, because those filters drop backing fields
@@ -104,6 +123,25 @@ internal static class StateSymbols
                 diagnostics.Add(
                     DiagnosticInfo.Create(
                         StateDiagnostics.BackingFieldTarget,
+                        LocationInfo.From(property.Locations.FirstOrDefault()) ?? fallback,
+                        ownerDisplayName + "." + property.Name));
+
+                return true;
+
+            case IPropertySymbol { IsIndexer: true } indexer when IsScratch(indexer):
+                string types = string.Join(", ", indexer.Parameters.Select(static parameter => parameter.Type.ToDisplayString()));
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        StateDiagnostics.ScratchOutsideSolver,
+                        LocationInfo.From(indexer.Locations.FirstOrDefault()) ?? fallback,
+                        ownerDisplayName + ".this[" + types + "]"));
+
+                return true;
+
+            case IFieldSymbol { AssociatedSymbol: IPropertySymbol property } backing when IsScratch(backing):
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        StateDiagnostics.ScratchOutsideSolver,
                         LocationInfo.From(property.Locations.FirstOrDefault()) ?? fallback,
                         ownerDisplayName + "." + property.Name));
 
@@ -188,7 +226,10 @@ internal static class StateSymbols
     public static ITypeSymbol? NamedType(AttributeData attribute, string name) =>
         TryGetNamed(attribute, name, out TypedConstant value) ? value.Value as ITypeSymbol : null;
 
-    private static bool TryGetNamed(AttributeData attribute, string name, out TypedConstant value)
+    /// <summary>
+    ///     Gets the named argument <paramref name="name" /> when the attribute passes it.
+    /// </summary>
+    public static bool TryGetNamed(AttributeData attribute, string name, out TypedConstant value)
     {
         foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
         {
@@ -220,6 +261,41 @@ internal static class StateSymbols
         }
 
         return false;
+    }
+
+    /// <summary>
+    ///     Whether <paramref name="type" /> has a field or property marked <c>[NumosScratch]</c>, backing fields included.
+    /// </summary>
+    public static bool HasScratchMembers(INamedTypeSymbol type)
+    {
+        foreach (ISymbol member in type.GetMembers())
+        {
+            if (member is IFieldSymbol or IPropertySymbol && IsScratch(member))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Whether <paramref name="member" /> is a readonly field or get-only property that holds an array or a mutable
+    ///     <c>System.Collections.Generic</c> collection.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="IsMutable" /> passes these, but a solver fills them as it runs, and a restore keeps what they hold.
+    /// </remarks>
+    public static bool HoldsMutableCollection(ISymbol member)
+    {
+        ITypeSymbol? type = member switch
+        {
+            IFieldSymbol { IsReadOnly: true } field => field.Type,
+            IPropertySymbol { SetMethod: null } property => property.Type,
+            _ => null,
+        };
+
+        return type is IArrayTypeSymbol ||
+               (type is INamedTypeSymbol named &&
+                Array.IndexOf(MutableCollections, PartialTypeModel.GetMetadataName(named.OriginalDefinition)) >= 0);
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 using System.Collections.ObjectModel;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.Solvers;
 
 namespace Numos.API;
 
@@ -12,7 +13,10 @@ namespace Numos.API;
 public sealed class AtmosWorldReplayArchive
 {
     // Scanning every chunk and operation is only needed when something asks, which is mostly saving and importing.
-    private IReadOnlyList<string>? _unsupportedFeatures;
+    // The catalogs only grow, so the solver and component parts of UnsupportedFeatures are checked again on every read.
+    private IReadOnlyList<string>? _hostStateFeatures;
+    private IReadOnlyList<string>? _requiredSolvers;
+    private IReadOnlyList<string>? _requiredSimulationComponents;
 
     /// <summary>
     ///     Creates a detached world replay archive independent of any storage format.
@@ -65,24 +69,76 @@ public sealed class AtmosWorldReplayArchive
     public AtmosWorldStateHash HeadStateHash { get; }
 
     /// <summary>
+    ///     Gets the name of every custom solver stage that replaying this archive needs, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    ///     The list covers the custom stages of <see cref="InitialCheckpoint" /> and every name in a recorded
+    ///     <see cref="SetAtmosWorldSolverLayoutOperation" /> that is not a built-in stage. A world that replays the
+    ///     archive must have each one registered, or find it in <see cref="AtmosSolverCatalog" />.
+    /// </remarks>
+    public IReadOnlyList<string> RequiredSolvers => _requiredSolvers ??= FindRequiredSolvers(InitialCheckpoint, Recording);
+
+    /// <summary>
+    ///     Gets the key of every simulation component that replaying this archive needs, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    ///     The list covers the keys in the <see cref="AtmosWorldCheckpoint.SimulationComponents" /> of
+    ///     <see cref="InitialCheckpoint" />. It also covers the key of every recorded
+    ///     <see cref="SetAtmosSimulationComponentStateOperation" /> and
+    ///     <see cref="RemoveAtmosSimulationComponentOperation" />. A world that replays the archive creates each
+    ///     missing component from <see cref="SimulationComponentCatalog" />, so every key must be registered there.
+    /// </remarks>
+    public IReadOnlyList<string> RequiredSimulationComponents =>
+        _requiredSimulationComponents ??= FindRequiredSimulationComponents(InitialCheckpoint, Recording);
+
+    /// <summary>
     ///     Gets human-readable descriptions of host-defined state that the standard replay file cannot reconstruct.
     ///     Empty when the archive is portable.
     /// </summary>
     /// <remarks>
-    ///     A custom solver is listed because a standalone host doesn't have its implementation, even though its name
-    ///     and any <see cref="NumosSerializeAttribute" /> state are saved. Such an archive can still be written to a
-    ///     file and loaded back with <see cref="AtmosWorldReplayTimeline.Restore" /> by a host that registers the same
-    ///     solvers.
+    ///     <para>
+    ///         A required solver (see <see cref="RequiredSolvers" />) is listed when <see cref="AtmosSolverCatalog" />
+    ///         lacks it, because a standalone host then has no way to create it. Its name and any
+    ///         <see cref="NumosSerializeAttribute" /> state are still saved. Such an archive can be written to a file
+    ///         and loaded back with <see cref="AtmosWorldReplayTimeline.Restore" /> by a host that registers the same
+    ///         solvers.
+    ///     </para>
+    ///     <para>
+    ///         A required simulation component (see <see cref="RequiredSimulationComponents" />) is listed when
+    ///         <see cref="SimulationComponentCatalog" /> lacks it, because replay then has no class to create it from.
+    ///     </para>
+    ///     <para>
+    ///         Each read checks both catalogs again, so a solver or component whose assembly loads later stops being
+    ///         listed.
+    ///     </para>
     /// </remarks>
-    public IReadOnlyList<string> UnsupportedFeatures =>
-        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording, true).ToArray());
+    public IReadOnlyList<string> UnsupportedFeatures
+    {
+        get
+        {
+            _hostStateFeatures ??= Array.AsReadOnly(FindUnsupportedHostState(InitialCheckpoint, Recording).ToArray());
+            var uncataloged = RequiredSolvers
+                .Where(static name => !AtmosSolverCatalog.TryGet(name, out _))
+                .Select(static name => $"custom world solver '{name}' (not in the solver catalog)")
+                .Concat(RequiredSimulationComponents
+                    .Where(static key => !SimulationComponentCatalog.Contains(key))
+                    .Select(static key => $"simulation component '{key}' (not in the component catalog)"))
+                .ToArray();
+
+            return uncataloged.Length == 0
+                ? _hostStateFeatures
+                : new ReadOnlyCollection<string>([..uncataloged, .._hostStateFeatures]);
+        }
+    }
 
     /// <summary>
     ///     Throws when this archive depends on host-defined solver state.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    ///     The archive contains custom solvers, solver configurations without <see cref="NumosSerializeAttribute" />
-    ///     members, or rollback chunk fields whose element type isn't a primitive or an enum.
+    ///     The archive needs custom solvers that <see cref="AtmosSolverCatalog" /> lacks, simulation components that
+    ///     <see cref="SimulationComponentCatalog" /> lacks, solver configurations without
+    ///     <see cref="NumosSerializeAttribute" /> members, or rollback chunk fields or recorded chunk-field writes
+    ///     whose element type isn't a primitive or an enum.
     /// </exception>
     public void EnsurePortable()
     {
@@ -96,13 +152,12 @@ public sealed class AtmosWorldReplayArchive
     /// </summary>
     /// <exception cref="NotSupportedException">
     ///     The archive contains solver configurations without <see cref="NumosSerializeAttribute" /> members, or rollback
-    ///     chunk fields whose element type isn't a primitive or an enum.
+    ///     chunk fields or recorded chunk-field writes whose element type isn't a primitive or an enum.
     /// </exception>
     internal void EnsureSerializable()
     {
-        ThrowIfAny(
-            FindUnsupportedFeatures(InitialCheckpoint, Recording, false).ToArray(),
-            "World replay files do not support the following host-defined state: ");
+        _hostStateFeatures ??= Array.AsReadOnly(FindUnsupportedHostState(InitialCheckpoint, Recording).ToArray());
+        ThrowIfAny(_hostStateFeatures, "World replay files do not support the following host-defined state: ");
     }
 
     private static void ThrowIfAny(IReadOnlyCollection<string> unsupported, string message)
@@ -111,17 +166,57 @@ public sealed class AtmosWorldReplayArchive
             throw new NotSupportedException(message + string.Join("; ", unsupported));
     }
 
-    private static IEnumerable<string> FindUnsupportedFeatures(
-        AtmosWorldCheckpoint checkpoint,
-        AtmosWorldRecording recording,
-        bool includeCustomSolvers)
+    private static ReadOnlyCollection<string> FindRequiredSolvers(AtmosWorldCheckpoint checkpoint, AtmosWorldRecording recording)
     {
-        if (includeCustomSolvers)
+        var names = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var solver in checkpoint.Solvers)
         {
-            foreach (var solver in checkpoint.Solvers.Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom))
-                yield return $"custom world solver '{solver.Name}'";
+            if (solver.Kind == AtmosWorldSolverKind.Custom)
+                names.Add(solver.Name);
         }
 
+        // A layout entry has no kind. A name that isn't a built-in stage can only be a custom one.
+        foreach (var recorded in recording.Operations)
+        {
+            if (recorded.Operation is not SetAtmosWorldSolverLayoutOperation layout)
+                continue;
+
+            foreach (var stage in layout.Stages)
+            {
+                if (!AtmosWorldSolverPipeline.BuiltInStageNames.Contains(stage.Name))
+                    names.Add(stage.Name);
+            }
+        }
+
+        return Array.AsReadOnly(names.ToArray());
+    }
+
+    private static ReadOnlyCollection<string> FindRequiredSimulationComponents(
+        AtmosWorldCheckpoint checkpoint,
+        AtmosWorldRecording recording)
+    {
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var component in checkpoint.SimulationComponents)
+            keys.Add(component.Key);
+
+        foreach (var recorded in recording.Operations)
+        {
+            string? key = recorded.Operation switch
+            {
+                SetAtmosSimulationComponentStateOperation set => set.Key,
+                RemoveAtmosSimulationComponentOperation remove => remove.Key,
+                _ => null
+            };
+
+            if (key != null)
+                keys.Add(key);
+        }
+
+        return Array.AsReadOnly(keys.ToArray());
+    }
+
+    private static IEnumerable<string> FindUnsupportedHostState(AtmosWorldCheckpoint checkpoint, AtmosWorldRecording recording)
+    {
         foreach (var simulation in checkpoint.Simulations)
         foreach (var chunk in simulation.Checkpoint.Chunks)
         foreach (var array in chunk.SolverArrays.Where(static array => !array.IsPortable))
@@ -134,13 +229,34 @@ public sealed class AtmosWorldReplayArchive
         foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => value is not INumosState))
             yield return $"world solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
+        HashSet<string>? reportedFields = null;
         foreach (var recorded in recording.Operations)
         {
-            if (recorded.Operation is not SetAtmosWorldConfigOperation config)
-                continue;
+            if (recorded.Operation is SetAtmosWorldConfigOperation config)
+            {
+                foreach (var configuration in config.Config.SolverConfigurations.Where(static value => value is not INumosState))
+                    yield return $"recorded solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
-            foreach (var configuration in config.Config.SolverConfigurations.Where(static value => value is not INumosState))
-                yield return $"recorded solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
+                continue;
+            }
+
+            // One entry per field, since a host can record thousands of writes to the same one.
+            string? key = recorded.Operation is AtmosWorldSimulationOperation simulation
+                ? simulation.Operation switch
+                {
+                    WriteChunkFieldOperation write => write.Key,
+                    FillChunkFieldBoxOperation fill => fill.Key,
+                    _ => null
+                }
+                : null;
+
+            if (key != null &&
+                ChunkFieldRegistry.TryGet(key, out var field) &&
+                !field.IsPortable &&
+                (reportedFields ??= new HashSet<string>(StringComparer.Ordinal)).Add(key))
+            {
+                yield return $"recorded write to chunk field '{key}' ({field.ElementType.FullName}, not a portable element type)";
+            }
         }
     }
 }

@@ -976,6 +976,23 @@ internal sealed class AtmosGasMixturePool : IDisposable
             throw new InvalidOperationException($"A solver callback cannot {operation}.");
     }
 
+    /// <summary>
+    ///     Brings a page that a custom stage wrote through a solver page editor back to a consistent state.
+    /// </summary>
+    /// <param name="pageIndex">The page index.</param>
+    /// <remarks>
+    ///     Free cells are solid, so gas written into one is cleared. Every allocated cell then gets the pressure, heat
+    ///     capacity, and vacuum flag that its gas, temperature, and volume imply, and the page revision advances. A page
+    ///     never sleeps. Call it on the tick thread, between stages.
+    /// </remarks>
+    internal void RepairSolverEdit(int pageIndex)
+    {
+        var page = _pages[pageIndex];
+        DerivedStateRefresh.ClearNonAirVoxels(page);
+        RefreshPageCaches(pageIndex);
+        page.MarkChanged();
+    }
+
     private void RefreshPageCaches(int pageIndex)
     {
         var page = _pages[pageIndex];

@@ -330,6 +330,16 @@ internal sealed partial class AtmosKernel
         EditVoxelBox(op);
     }
 
+    internal void Apply(WriteChunkFieldOperation op)
+    {
+        WriteChunkField(op);
+    }
+
+    internal void Apply(FillChunkFieldBoxOperation op)
+    {
+        FillChunkFieldBox(op);
+    }
+
     internal void Apply(SetVoxelMixtureOperation op)
     {
         var chunk = GetChunk(op.Position);

@@ -135,6 +135,75 @@ internal static partial class AtmosWorldReplayCodec
         return new SetAtmosWorldSolverStateOperation(name, payload);
     }
 
+    private static void WriteSetAtmosSimulationComponentStateOperation(
+        BinaryWriter writer,
+        SetAtmosSimulationComponentStateOperation operation)
+    {
+        WriteAtmosSimulationId(writer, operation.Simulation);
+        AtmosReplayCodec.WriteString(writer, operation.Key);
+        AtmosReplayCodec.WritePayload(writer, operation.State.Span);
+    }
+
+    private static SetAtmosSimulationComponentStateOperation ReadSetAtmosSimulationComponentStateOperation(
+        BinaryReader reader,
+        int maxStringBytes)
+    {
+        var simulation = ReadAtmosSimulationId(reader);
+        string key = ReadComponentKey(reader, maxStringBytes);
+        byte[] payload = AtmosReplayCodec.ReadPayload(
+            reader,
+            AtmosReplayCodec.ReadCount(reader, int.MaxValue, "simulation component state byte"));
+
+        return new SetAtmosSimulationComponentStateOperation(simulation, key, payload);
+    }
+
+    private static void WriteRemoveAtmosSimulationComponentOperation(
+        BinaryWriter writer,
+        RemoveAtmosSimulationComponentOperation operation)
+    {
+        WriteAtmosSimulationId(writer, operation.Simulation);
+        AtmosReplayCodec.WriteString(writer, operation.Key);
+    }
+
+    private static RemoveAtmosSimulationComponentOperation ReadRemoveAtmosSimulationComponentOperation(
+        BinaryReader reader,
+        int maxStringBytes)
+    {
+        var simulation = ReadAtmosSimulationId(reader);
+        return new RemoveAtmosSimulationComponentOperation(simulation, ReadComponentKey(reader, maxStringBytes));
+    }
+
+    // Loading needs the class behind every key, so an unknown one fails here instead of partway through a replay.
+    private static string ReadComponentKey(BinaryReader reader, int maxStringBytes)
+    {
+        string key = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        if (string.IsNullOrWhiteSpace(key))
+            throw new InvalidDataException("A simulation component operation names a blank key.");
+
+        if (!SimulationComponentCatalog.Contains(key))
+            throw new InvalidDataException(SimulationComponentCatalog.DescribeUnknown(key));
+
+        return key;
+    }
+
+    private static void WriteInvokeAtmosSolverCommandOperation(BinaryWriter writer, InvokeAtmosSolverCommandOperation operation)
+    {
+        AtmosReplayCodec.WriteString(writer, operation.Solver);
+        writer.Write(operation.Command);
+        AtmosReplayCodec.WritePayload(writer, operation.Payload.Span);
+    }
+
+    private static InvokeAtmosSolverCommandOperation ReadInvokeAtmosSolverCommandOperation(BinaryReader reader, int maxStringBytes)
+    {
+        string solver = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        if (string.IsNullOrWhiteSpace(solver))
+            throw new InvalidDataException("A solver command operation names a blank solver.");
+
+        int command = reader.ReadInt32();
+        byte[] payload = AtmosReplayCodec.ReadPayload(reader, AtmosReplayCodec.ReadCount(reader, int.MaxValue, "solver command byte"));
+        return new InvokeAtmosSolverCommandOperation(solver, command, payload);
+    }
+
     private static void WriteSetAtmosWorldConfigOperation(BinaryWriter writer, SetAtmosWorldConfigOperation operation)
     {
         AtmosReplayCodec.WriteConfig(writer, operation.Config);

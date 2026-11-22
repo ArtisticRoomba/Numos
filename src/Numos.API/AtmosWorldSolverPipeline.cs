@@ -1,6 +1,11 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using JetBrains.Annotations;
 using Numos.CoreSim;
+using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
@@ -10,67 +15,57 @@ namespace Numos.API;
 ///     Owns the ordered solver stages executed for every fixed world tick.
 /// </summary>
 /// <remarks>
-///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
-///     next tick. Solver delegates and <see cref="IAtmosWorldSolver" /> instances remain caller-owned.
-///     Numos can recreate a built-in stage from its name, so the order and enabled state of the built-in stages are
-///     recorded world state. <see cref="SetLayout" /> and <see cref="SetEnabled" /> work during recording, and a
-///     checkpoint restore adopts the checkpoint's layout. Numos cannot recreate a custom stage, because it has no
-///     access to the host delegate. Registering, removing, or resetting stages is therefore rejected while the world
-///     is recording or replaying, and a restore requires the same custom stages.
+///     <para>
+///         The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on
+///         the next tick.
+///     </para>
+///     <para>
+///         Numos can recreate a built-in stage from its name, and a catalog stage from its
+///         <see cref="AtmosSolverCatalog" /> entry. The order and enabled state of these stages are recorded world
+///         state. <see cref="SetLayout" />, <see cref="SetEnabled" />, <see cref="Add{T}" />, and removing a catalog
+///         stage work during recording. A checkpoint restore adopts the checkpoint's layout. It creates the catalog
+///         stages the checkpoint names and removes the ones it lacks. The world owns a catalog stage's instance.
+///     </para>
+///     <para>
+///         Delegates and instances passed to <c>Register</c> stay caller-owned. Numos cannot recreate them, because it
+///         has no access to the host object. Registering or removing such a stage, or resetting the pipeline, is
+///         therefore rejected while the world is recording or replaying. A restore requires the same host-registered
+///         stages.
+///     </para>
 /// </remarks>
 public sealed class AtmosWorldSolverPipeline
 {
+    // The world that each owned instance was last registered in. An owned instance has [NumosSerialize] state or
+    // solver commands. A stateful instance in two live worlds would mix the state of both into each world's
+    // checkpoints. A command finds its world here, so it can only have one. The gate is a leaf lock: holders read
+    // other worlds' published stage arrays and take no other lock.
+    private static readonly Lock OwnerGate = new();
+    private static readonly ConditionalWeakTable<IAtmosWorldSolver, WeakReference<AtmosWorld>> Owners = new();
+
     private readonly List<WorldSolverRegistration> _steps = [];
     private readonly AtmosWorld _world;
     private WorldSolverRegistration[] _enabledSteps = [];
     private WorldSolverRegistration[] _statefulSteps = [];
+    private WorldSolverRegistration[] _ownedSteps = [];
 
     // The world dependency epoch every registration in _enabledSteps was injected at, or -1. Republishing the steps
     // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
     private int _injectedEpoch = -1;
 
-    // The one source of truth for built-in stages. The order is the canonical order that BuiltInStageNames reports.
-    private static readonly (string Name, Action<AtmosSolverTickScope> Factory)[] BuiltInStages =
-    [
-        (AtmosBuiltInSolvers.DerivedRefresh, static scope => scope.World.SolveDerivedRefreshStage(scope)),
-        (AtmosBuiltInSolvers.EulerFlow, static scope => scope.World.SolveEulerFlowStage(scope)),
-        (AtmosBuiltInSolvers.Advection, static scope => scope.World.SolveAdvectionStage(scope)),
-        (AtmosBuiltInSolvers.VacuumCleanup, static scope => scope.World.SolveVacuumCleanupStage(scope)),
-        (AtmosBuiltInSolvers.ExplicitGasTransport, static scope => scope.World.SolveExplicitGasTransportStage(scope)),
-        (AtmosBuiltInSolvers.BoundaryFlow, static scope => scope.World.SolveBoundaryFlowStage(scope)),
-        (AtmosBuiltInSolvers.Thermodynamics, static scope => scope.World.SolveThermodynamicsStage(scope)),
-        (AtmosBuiltInSolvers.ExplicitThermalTransport, static scope => scope.World.SolveExplicitThermalTransportStage(scope)),
-        (AtmosBuiltInSolvers.ThermalBoundary, static scope => scope.World.SolveThermalBoundaryStage(scope)),
-        (AtmosBuiltInSolvers.GasReactions, static scope => scope.World.SolveGasReactionsStage(scope))
-    ];
+    // While a tick, restore, or replay runs, removed catalog instances wait here instead of being disposed. The tick may
+    // still call a removed stage, and a rollback may put it back. Guarded by the world's gate.
+    private int _disposalDeferrals;
+    private List<IAtmosWorldSolver>? _deferredDisposals;
 
-    private static readonly Dictionary<string, Action<AtmosSolverTickScope>> BuiltInFactories = CreateBuiltInFactories();
+    // BuiltInStageTable lists the built-in stages. These lookups add the world method that runs each one.
+    private static readonly Dictionary<string, BuiltInWorldStage> BuiltInStages = CreateBuiltInStages();
 
-    private static readonly ReadOnlyCollection<string> BuiltInNames = CreateBuiltInNames();
+    private static readonly ReadOnlyCollection<string> BuiltInNames =
+        Array.AsReadOnly(BuiltInStageTable.All.Select(static stage => stage.Name).ToArray());
 
-    private static readonly ReadOnlyCollection<string> EulerLayout = Array.AsReadOnly(
-    [
-        AtmosBuiltInSolvers.EulerFlow,
-        AtmosBuiltInSolvers.VacuumCleanup,
-        AtmosBuiltInSolvers.ExplicitGasTransport,
-        AtmosBuiltInSolvers.Thermodynamics,
-        AtmosBuiltInSolvers.ExplicitThermalTransport,
-        AtmosBuiltInSolvers.ThermalBoundary,
-        AtmosBuiltInSolvers.GasReactions
-    ]);
+    private static readonly ReadOnlyCollection<string> EulerLayout = CreateDefaultLayout(AtmosTransportModel.Euler);
 
-    private static readonly ReadOnlyCollection<string> LegacyLayout = Array.AsReadOnly(
-    [
-        AtmosBuiltInSolvers.DerivedRefresh,
-        AtmosBuiltInSolvers.Advection,
-        AtmosBuiltInSolvers.VacuumCleanup,
-        AtmosBuiltInSolvers.ExplicitGasTransport,
-        AtmosBuiltInSolvers.BoundaryFlow,
-        AtmosBuiltInSolvers.Thermodynamics,
-        AtmosBuiltInSolvers.ExplicitThermalTransport,
-        AtmosBuiltInSolvers.ThermalBoundary,
-        AtmosBuiltInSolvers.GasReactions
-    ]);
+    private static readonly ReadOnlyCollection<string> LegacyLayout = CreateDefaultLayout(AtmosTransportModel.Legacy);
 
     internal AtmosWorldSolverPipeline(AtmosWorld world, AtmosTransportModel model)
     {
@@ -297,6 +292,40 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
+    ///     Gets the name of the first stage that holds <paramref name="solver" />, or <see langword="null" /> when none
+    ///     does. The caller holds <see cref="AtmosWorld.Gate" />.
+    /// </summary>
+    /// <remarks>
+    ///     An instance registered under two names records its commands under the first one in pipeline order. Replay
+    ///     reaches the same instance through that name.
+    /// </remarks>
+    internal string? FindStageName(IAtmosWorldSolver solver)
+    {
+        foreach (var step in _steps)
+        {
+            if (ReferenceEquals(step.CustomSolver, solver))
+                return step.Name;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Gets the world that last registered an instance with solver commands, or <see langword="null" />.
+    /// </summary>
+    /// <remarks>
+    ///     The world may have removed the stage since, so the caller checks <see cref="FindStageName" /> under that
+    ///     world's gate.
+    /// </remarks>
+    internal static AtmosWorld? FindOwner(IAtmosWorldSolver solver)
+    {
+        return Owners.TryGetValue(solver, out WeakReference<AtmosWorld>? reference) &&
+               reference.TryGetTarget(out AtmosWorld? owner)
+            ? owner
+            : null;
+    }
+
+    /// <summary>
     ///     Registers a custom stage.
     /// </summary>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
@@ -333,7 +362,7 @@ public sealed class AtmosWorldSolverPipeline
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is less than one.</exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     The world is recording or replaying, because Numos cannot recreate a custom stage on replay.
+    ///     The world is recording or replaying, because Numos cannot recreate a host-registered stage on replay.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <example>
@@ -372,8 +401,17 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="after">The registered stage the new stage runs immediately after.</param>
     /// <param name="interval">How many ticks pass between runs of the stage. One runs it every tick.</param>
     /// <remarks>
-    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in placement, topology, and checkpoint metadata. The
-    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    ///     <para>
+    ///         Identical to the <see cref="AtmosWorldSolver" /> overload in placement, topology, and checkpoint metadata.
+    ///         The instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    ///     </para>
+    ///     <para>
+    ///         An instance with <c>[NumosSerialize]</c> members can be in one live world at a time, because each
+    ///         world's checkpoints would capture and overwrite the same fields. So can an instance with
+    ///         <see cref="SolverCommandAttribute" /> methods, because a command records into the world that holds it.
+    ///         Either can still be registered under two names in one world. Any other instance can be shared between
+    ///         worlds.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> or <paramref name="solver" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">
@@ -382,7 +420,10 @@ public sealed class AtmosWorldSolverPipeline
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is less than one.</exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
-    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The world is recording or replaying. Or <paramref name="solver" /> has <c>[NumosSerialize]</c> members or
+    ///     solver commands and is registered in another world that is not disposed.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void Register(
@@ -397,17 +438,264 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
-    ///     Removes a stage by name, including a built-in stage.
+    ///     Creates the world's instance of a catalog solver and adds it as a stage.
     /// </summary>
-    /// <param name="name">The registered stage name.</param>
-    /// <returns><see langword="true" /> when a stage was removed.</returns>
+    /// <typeparam name="T">A class marked <see cref="AtmosSolverAttribute" />.</typeparam>
+    /// <param name="before">
+    ///     The registered stage the new stage runs immediately before, or <see langword="null" /> for the declared
+    ///     placement.
+    /// </param>
+    /// <param name="after">
+    ///     The registered stage the new stage runs immediately after, or <see langword="null" /> for the declared
+    ///     placement.
+    /// </param>
+    /// <param name="interval">The interval in ticks, or zero for the declared rate.</param>
+    /// <returns>The new instance. The world owns it.</returns>
     /// <remarks>
-    ///     Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults()" />
-    ///     or <see cref="SetLayout" /> brings it back.
+    ///     <para>
+    ///         The stage takes its name and neighbor selection from <typeparamref name="T" />'s
+    ///         <see cref="AtmosSolverDescriptor" />. Passing <paramref name="before" /> or <paramref name="after" />
+    ///         replaces the declared placement. A stage with no placement is appended to the end of the pipeline. A
+    ///         declared <see cref="AtmosSolverDescriptor.RunsPerSecond" /> converts to ticks at the world's
+    ///         <see cref="AtmosWorld.TickRate" />. A declaration with no rate runs every tick.
+    ///     </para>
+    ///     <para>
+    ///         The call also adds the descriptor to <see cref="AtmosSolverCatalog" />, so replay and
+    ///         <see cref="SetLayout" /> can find it by name.
+    ///     </para>
+    ///     <para>
+    ///         This works during recording. Numos records one solver layout operation, and replay creates the stage
+    ///         from the catalog at the same position. A new instance starts from its constructor state on replay too.
+    ///         The call is rejected while a replay applies history.
+    ///     </para>
+    ///     <para>
+    ///         The world disposes the instance, when it is <see cref="IDisposable" />, once the stage is removed or the
+    ///         world is disposed. A stage removed during a tick, a checkpoint restore, or a replay is disposed when that
+    ///         call ends, so the running tick can still call it and a failed restore or replay can put it back.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     The stage name is a built-in stage name or already registered, or both <paramref name="before" /> and
+    ///     <paramref name="after" /> are given, or one of them is blank.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is negative.</exception>
+    /// <exception cref="KeyNotFoundException">The placement anchor is not registered.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The world is replaying history, or the catalog holds a different class under the same name.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     FireSolver fire = world.Solvers.Add&lt;FireSolver&gt;();
+    ///     world.Solvers.Add&lt;VentSolver&gt;(before: AtmosBuiltInSolvers.GasReactions, interval: 96);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public T Add<T>(string? before = null, string? after = null, int interval = 0)
+        where T : class, IAtmosWorldSolver, IAtmosSolverDefinition<T>
+    {
+        AtmosSolverDescriptor descriptor = T.Descriptor;
+        AtmosSolverCatalog.Register(descriptor);
+        return (T)AddCore(descriptor, before, after, interval);
+    }
+
+    /// <summary>
+    ///     Creates the world's instance of the catalog solver named <paramref name="name" /> and adds it as a stage.
+    /// </summary>
+    /// <param name="name">The stage name of an <see cref="AtmosSolverCatalog" /> entry.</param>
+    /// <param name="before">
+    ///     The registered stage the new stage runs immediately before, or <see langword="null" /> for the declared
+    ///     placement.
+    /// </param>
+    /// <param name="after">
+    ///     The registered stage the new stage runs immediately after, or <see langword="null" /> for the declared
+    ///     placement.
+    /// </param>
+    /// <param name="interval">The interval in ticks, or zero for the declared rate.</param>
+    /// <returns>The new instance. The world owns it.</returns>
+    /// <remarks>
+    ///     Behaves like <see cref="Add{T}" /> with the descriptor the catalog holds under <paramref name="name" />.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="name" /> is blank, a built-in stage name, or already registered. Or both
+    ///     <paramref name="before" /> and <paramref name="after" /> are given, or one of them is blank.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is negative.</exception>
+    /// <exception cref="KeyNotFoundException">
+    ///     The catalog has no solver named <paramref name="name" />, or the placement anchor is not registered.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The world is replaying history.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public IAtmosWorldSolver Add(string name, string? before = null, string? after = null, int interval = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!AtmosSolverCatalog.TryGet(name, out AtmosSolverDescriptor? descriptor))
+        {
+            throw new KeyNotFoundException(
+                $"The solver catalog has no solver named '{name}'. Mark a solver class with [AtmosSolver(\"{name}\")] " +
+                "so its assembly registers it when it loads, or call AtmosSolverCatalog.Register.");
+        }
+
+        return AddCore(descriptor, before, after, interval);
+    }
+
+    /// <summary>
+    ///     Gets the registered solver instance of exactly type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">The solver class. A derived class does not match.</typeparam>
+    /// <returns>The instance.</returns>
+    /// <remarks>
+    ///     One instance registered under two names counts once.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No stage holds an instance of <typeparamref name="T" />.</exception>
+    /// <exception cref="InvalidOperationException">Two or more instances of <typeparamref name="T" /> are registered.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public T Get<T>() where T : class, IAtmosWorldSolver
+    {
+        if (TryGet(out T? solver))
+            return solver;
+
+        throw new KeyNotFoundException($"No world solver of type {typeof(T).FullName} is registered.");
+    }
+
+    /// <summary>
+    ///     Finds the registered solver instance of exactly type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">The solver class. A derived class does not match.</typeparam>
+    /// <param name="solver">The instance, or <see langword="null" /> when none is registered.</param>
+    /// <returns><see langword="true" /> when a stage holds an instance of <typeparamref name="T" />.</returns>
+    /// <remarks>
+    ///     One instance registered under two names counts once.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Two or more instances of <typeparamref name="T" /> are registered.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public bool TryGet<T>([NotNullWhen(true)] out T? solver) where T : class, IAtmosWorldSolver
+    {
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            List<int> indices = IndicesOfType(typeof(T));
+            solver = indices.Count == 0 ? null : (T)_steps[indices[0]].CustomSolver!;
+            return solver is not null;
+        }
+    }
+
+    /// <summary>
+    ///     Finds the class solver a stage holds, with descriptors of its <c>[NumosSerialize]</c> members.
+    /// </summary>
+    /// <param name="name">The stage name.</param>
+    /// <param name="solver">The solver instance, or <see langword="null" /> when the method returns false.</param>
+    /// <param name="members">
+    ///     One descriptor per marked member, in declaration order. The list is empty for a solver that marks nothing,
+    ///     and when the method returns false.
+    /// </param>
+    /// <returns>
+    ///     <see langword="true" /> when the stage exists and holds a class solver. A built-in stage or a delegate stage
+    ///     returns <see langword="false" />.
+    /// </returns>
+    /// <remarks>
+    ///     Read and write the members from host code between ticks. Numos records a write at the next recording
+    ///     boundary, as it does for any other host edit to the solver.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
-    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     if (world.Solvers.TryGetState("my-mod/fire", out object? fire, out var members))
+    ///     {
+    ///         foreach (AtmosStateMember member in members)
+    ///             Console.WriteLine($"{member.Name} = {member.GetValue(fire)} {member.Unit}");
+    ///     }
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public bool TryGetState(
+        string name, [NotNullWhen(true)] out object? solver, out IReadOnlyList<AtmosStateMember> members)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            if (Find(name)?.CustomSolver is not { } custom || custom is DelegateWorldSolver)
+            {
+                solver = null;
+                members = [];
+                return false;
+            }
+
+            solver = custom;
+            members = (custom as INumosStateDescribed)?.StateMembers ?? [];
+            return true;
+        }
+    }
+
+    /// <summary>
+    ///     Removes the stage that holds the solver instance of exactly type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">The solver class. A derived class does not match.</typeparam>
+    /// <returns><see langword="true" /> when a stage was removed.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Every stage that holds the instance is removed. A catalog stage from <see cref="Add{T}" /> can be
+    ///         removed while recording, like <see cref="Unregister" />. The world then disposes its instance.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     Two or more instances of <typeparamref name="T" /> are registered. Or the world is replaying history. Or the
+    ///     stage is a host-registered stage and the world is recording.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public bool Remove<T>() where T : class, IAtmosWorldSolver
+    {
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            List<int> indices = IndicesOfType(typeof(T));
+            if (indices.Count == 0)
+                return false;
+
+            if (_steps[indices[0]].Descriptor is not null)
+                return RemoveCatalogStage(indices[0]);
+
+            _world.EnsureCanChangeWorldSolverDefinition();
+            for (int index = indices.Count - 1; index >= 0; index--)
+                _steps.RemoveAt(indices[index]);
+
+            _world.InvalidateSolverDependencies();
+            PublishSteps();
+            return true;
+        }
+    }
+
+    /// <summary>
+    ///     Removes a stage by name, including a built-in stage.
+    /// </summary>
+    /// <param name="name">The registered stage name.</param>
+    /// <returns>
+    ///     <see langword="true" /> when a stage was removed. <see langword="false" /> when no stage has the name,
+    ///     whether or not the world records or replays.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults()" />
+    ///         or <see cref="SetLayout" /> brings it back.
+    ///     </para>
+    ///     <para>
+    ///         Removing a catalog stage from <see cref="Add{T}" /> works during recording. Numos records one solver
+    ///         layout operation and disposes the instance. Every other removal is rejected while the world records.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The world is replaying history, or it is recording and the stage is not a catalog stage.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public bool Unregister(string name)
@@ -416,11 +704,14 @@ public sealed class AtmosWorldSolverPipeline
         lock (_world.Gate)
         {
             _world.ThrowIfDisposedForPipeline();
-            _world.EnsureCanChangeWorldSolverDefinition();
             int index = IndexOf(name);
             if (index < 0)
                 return false;
 
+            if (_steps[index].Descriptor is not null)
+                return RemoveCatalogStage(index);
+
+            _world.EnsureCanChangeWorldSolverDefinition();
             _steps.RemoveAt(index);
             _world.InvalidateSolverDependencies();
             PublishSteps();
@@ -528,15 +819,17 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="stages">
     ///     Every stage in the new execution order, with its enabled flag and interval. An interval of zero keeps the
-    ///     current interval of a registered stage and gives a new built-in stage its default.
+    ///     current interval of a registered stage and gives a new built-in or catalog stage its default.
     /// </param>
     /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
     /// <remarks>
     ///     <para>
-    ///         Each name is a built-in stage name (see <see cref="BuiltInStageNames" />) or a registered custom stage.
-    ///         Numos creates a built-in stage that is not registered and drops a built-in stage that is not listed.
-    ///         Every registered custom stage must appear, because <see cref="Unregister" /> removes custom stages.
-    ///         Custom stages keep their solver instance, topology, and injected dependencies.
+    ///         Numos resolves each name in this order: a registered stage, a built-in stage name (see
+    ///         <see cref="BuiltInStageNames" />), then an <see cref="AtmosSolverCatalog" /> entry. Numos creates a
+    ///         built-in or catalog stage that is not registered. It drops a built-in stage that is not listed, and it
+    ///         removes and disposes a catalog stage that is not listed. Every stage registered with <c>Register</c>
+    ///         must appear, because only <see cref="Unregister" /> removes it. Registered custom stages keep their
+    ///         solver instance, topology, and injected dependencies.
     ///     </para>
     ///     <para>
     ///         Unlike registration, this works during recording. A change records one operation, and a call that
@@ -550,8 +843,8 @@ public sealed class AtmosWorldSolverPipeline
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="stages" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">
-    ///     A name is blank or listed twice, a name is neither a built-in stage nor a registered custom stage, a
-    ///     registered custom stage is missing, or an interval is negative.
+    ///     A name is blank or listed twice, a name is neither a registered stage, a built-in stage, nor a catalog entry,
+    ///     a stage registered with <c>Register</c> is missing, or an interval is negative.
     /// </exception>
     /// <exception cref="InvalidOperationException">The world is replaying history.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -580,28 +873,54 @@ public sealed class AtmosWorldSolverPipeline
         {
             _world.ThrowIfDisposedForPipeline();
             _world.EnsureCanChangeSolverLayout();
-            if (!SetLayoutCore(copy))
-                return false;
-
-            _world.RecordWorldSolverLayout(ResolveLayout());
-            return true;
+            return ApplyAndRecordLayout(copy);
         }
     }
 
     /// <summary>
-    ///     Installs a layout without recording it or checking the recording state.
+    ///     Installs a layout without recording it or checking the recording state, then releases the catalog stages it
+    ///     removed (see <see cref="Release" />).
     /// </summary>
     /// <remarks>
-    ///     Replay and checkpoint restore call this. The caller holds <see cref="AtmosWorld.Gate" />. Validation
-    ///     finishes before any change, so a rejected layout leaves the pipeline as it was.
+    ///     Replay and checkpoint restore call this. The caller holds <see cref="AtmosWorld.Gate" />. Validation and the
+    ///     creation of catalog stages finish before any change, so a rejected layout leaves the pipeline as it was.
     /// </remarks>
     /// <returns><see langword="true" /> when the order or an enabled flag changed.</returns>
     internal bool SetLayoutCore(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
     {
+        bool changed = ApplyLayout(stages, out List<IAtmosWorldSolver>? removed);
+        Release(removed);
+        return changed;
+    }
+
+    /// <summary>
+    ///     Installs a layout, records it, then releases the catalog stages it removed (see <see cref="Release" />).
+    /// </summary>
+    /// <remarks>
+    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has checked that the layout can change. Disposal comes
+    ///     after the record, so a throwing <see cref="IDisposable.Dispose" /> cannot leave a change unrecorded.
+    /// </remarks>
+    private bool ApplyAndRecordLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        if (!ApplyLayout(stages, out List<IAtmosWorldSolver>? removed))
+            return false;
+
+        _world.RecordWorldSolverLayout(ResolveLayout());
+        Release(removed);
+        return true;
+    }
+
+    /// <summary>
+    ///     Installs a layout and returns the instances of the catalog stages it removed, which the caller disposes.
+    /// </summary>
+    private bool ApplyLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages, out List<IAtmosWorldSolver>? removed)
+    {
+        removed = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var next = new WorldSolverRegistration[stages.Count];
         var intervals = new int[stages.Count];
         var created = new bool[stages.Count];
+        AtmosSolverDescriptor?[]? catalog = null;
         for (int index = 0; index < stages.Count; index++)
         {
             string name = stages[index].Name;
@@ -620,25 +939,33 @@ public sealed class AtmosWorldSolverPipeline
                 next[index] = _steps[existing];
                 intervals[index] = stages[index].Interval == 0 ? next[index].Interval : stages[index].Interval;
             }
-            else if (BuiltInFactories.TryGetValue(name, out var factory))
+            else if (BuiltInStages.TryGetValue(name, out var builtIn))
             {
                 intervals[index] = stages[index].Interval == 0
                     ? BuiltInStageSchedule.GetInterval(name, _world.TickRate)
                     : stages[index].Interval;
-                next[index] = WorldSolverRegistration.CreateBuiltIn(name, factory, intervals[index]);
+                next[index] = WorldSolverRegistration.CreateBuiltIn(builtIn, intervals[index]);
+                created[index] = true;
+            }
+            else if (AtmosSolverCatalog.TryGet(name, out AtmosSolverDescriptor? descriptor))
+            {
+                // Created below, once the whole layout has passed validation.
+                (catalog ??= new AtmosSolverDescriptor?[stages.Count])[index] = descriptor;
+                intervals[index] = stages[index].Interval == 0 ? DefaultInterval(descriptor) : stages[index].Interval;
                 created[index] = true;
             }
             else
             {
                 throw new ArgumentException(
-                    $"The layout names '{name}', which is neither a built-in stage nor a registered custom stage.",
+                    $"The layout names '{name}', which is neither a registered stage, a built-in stage, nor a solver " +
+                    "catalog entry.",
                     nameof(stages));
             }
         }
 
         foreach (var step in _steps)
         {
-            if (step.Kind == AtmosWorldSolverKind.Custom && !seen.Contains(step.Name))
+            if (step.Kind == AtmosWorldSolverKind.Custom && step.Descriptor is null && !seen.Contains(step.Name))
             {
                 throw new ArgumentException(
                     $"The layout omits custom stage '{step.Name}'. Call Unregister to remove a custom stage.",
@@ -646,7 +973,7 @@ public sealed class AtmosWorldSolverPipeline
             }
         }
 
-        bool changed = next.Length != _steps.Count;
+        bool changed = catalog is not null || next.Length != _steps.Count;
         for (int index = 0; index < next.Length && !changed; index++)
         {
             changed = !ReferenceEquals(next[index], _steps[index]) ||
@@ -656,6 +983,9 @@ public sealed class AtmosWorldSolverPipeline
 
         if (!changed)
             return false;
+
+        if (catalog is not null)
+            CreateCatalogStages(catalog, intervals, next);
 
         for (int index = 0; index < next.Length; index++)
         {
@@ -671,11 +1001,307 @@ public sealed class AtmosWorldSolverPipeline
                 AlignSchedule(step);
         }
 
+        foreach (var step in _steps)
+        {
+            if (step.Descriptor is not null && !seen.Contains(step.Name))
+                (removed ??= []).Add(step.CustomSolver!);
+        }
+
         _steps.Clear();
         _steps.AddRange(next);
         _world.InvalidateSolverDependencies();
         PublishSteps();
         return true;
+    }
+
+    /// <summary>
+    ///     Creates the instance, registration, and topology of every catalog entry a layout names.
+    /// </summary>
+    /// <remarks>
+    ///     Runs host code (the constructor and the neighbor selector) before the layout changes anything. A failure
+    ///     disposes the instances already created and leaves <paramref name="next" /> unused.
+    /// </remarks>
+    private void CreateCatalogStages(AtmosSolverDescriptor?[] catalog, int[] intervals, WorldSolverRegistration[] next)
+    {
+        IReadOnlyList<ExplicitLinkDefinition>? links = null;
+        IReadOnlyDictionary<AtmosSimulationId, Int3>? chunkDimensions = null;
+        List<IAtmosWorldSolver>? instances = null;
+        try
+        {
+            for (int index = 0; index < catalog.Length; index++)
+            {
+                if (catalog[index] is not { } descriptor)
+                    continue;
+
+                IAtmosWorldSolver solver = descriptor.Create() ??
+                                           throw new InvalidOperationException(
+                                               $"The factory of solver '{descriptor.Name}' returned null.");
+
+                (instances ??= []).Add(solver);
+                var registration = WorldSolverRegistration.CreateCustom(
+                    descriptor.Name, solver, descriptor.Neighbors, intervals[index], descriptor);
+
+                links ??= _world.GetActiveLinksCore();
+                chunkDimensions ??= _world.GetChunkDimensionsCore();
+                registration.InstallTopology(registration.BuildTopology(_world, links, chunkDimensions));
+
+                // The baseline of the solver-state boundary. A stage created while recording starts from its
+                // constructor state on replay too, so that state is not a host edit.
+                if (registration.State is not null)
+                {
+                    registration.StateHash = registration.ComputeStateHash();
+                    StateEditBaseline.RefreshBulk(registration.State, ref registration.BulkHashes);
+                }
+
+                // A new instance, so no other world holds it. Its commands find this world through the table.
+                if (solver is IAtmosSolverCommands)
+                {
+                    lock (OwnerGate)
+                    {
+                        Owners.AddOrUpdate(solver, new WeakReference<AtmosWorld>(_world));
+                    }
+                }
+
+                next[index] = registration;
+            }
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                DisposeAll(instances);
+            }
+            catch (Exception disposeException)
+            {
+                throw new AggregateException(exception, disposeException);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     Gets the interval of a catalog stage whose layout entry or <c>Add</c> call gives none.
+    /// </summary>
+    private int DefaultInterval(AtmosSolverDescriptor descriptor)
+    {
+        if (descriptor.Interval > 0)
+            return descriptor.Interval;
+
+        return descriptor.RunsPerSecond > 0 ? BuiltInStageSchedule.IntervalFor(descriptor.RunsPerSecond, _world.TickRate) : 1;
+    }
+
+    /// <summary>
+    ///     Inserts a catalog stage through the layout path, records the layout, and returns the new instance.
+    /// </summary>
+    private IAtmosWorldSolver AddCore(AtmosSolverDescriptor descriptor, string? before, string? after, int interval)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(interval);
+        if (before != null && after != null)
+            throw new ArgumentException("A world solver can be placed before or after another stage, not both.", nameof(after));
+
+        if (before == null && after == null)
+        {
+            before = descriptor.Before;
+            after = descriptor.After;
+        }
+
+        string? anchor = before ?? after;
+        if (anchor != null)
+            ArgumentException.ThrowIfNullOrWhiteSpace(anchor, before != null ? nameof(before) : nameof(after));
+
+        string name = descriptor.Name;
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            _world.EnsureCanChangeSolverLayout();
+            if (BuiltInStages.ContainsKey(name))
+                throw new ArgumentException($"'{name}' is a built-in stage name.", nameof(descriptor));
+
+            if (IndexOf(name) >= 0)
+                throw new ArgumentException($"A world solver named '{name}' is already registered.", nameof(descriptor));
+
+            int insertionIndex = _steps.Count;
+            if (anchor != null)
+            {
+                int anchorIndex = IndexOf(anchor);
+                if (anchorIndex < 0)
+                    throw new KeyNotFoundException($"No world solver named '{anchor}' is registered.");
+
+                insertionIndex = before != null ? anchorIndex : anchorIndex + 1;
+            }
+
+            var layout = new List<AtmosWorldSolverLayoutEntry>(ResolveLayout());
+            layout.Insert(
+                insertionIndex,
+                new AtmosWorldSolverLayoutEntry(name, true, interval == 0 ? DefaultInterval(descriptor) : interval));
+            ApplyAndRecordLayout(layout);
+            return Find(name)!.CustomSolver!;
+        }
+    }
+
+    /// <summary>
+    ///     Removes a catalog stage through the layout path, records the layout, and disposes the instance.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    private bool RemoveCatalogStage(int index)
+    {
+        _world.EnsureCanChangeSolverLayout();
+        var layout = new List<AtmosWorldSolverLayoutEntry>(ResolveLayout());
+        layout.RemoveAt(index);
+        return ApplyAndRecordLayout(layout);
+    }
+
+    /// <summary>
+    ///     Lists the indices of the stages whose solver is exactly <paramref name="type" />.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    /// <exception cref="InvalidOperationException">The stages hold two or more distinct instances.</exception>
+    private List<int> IndicesOfType(Type type)
+    {
+        var indices = new List<int>();
+        IAtmosWorldSolver? found = null;
+        for (int index = 0; index < _steps.Count; index++)
+        {
+            IAtmosWorldSolver? solver = _steps[index].CustomSolver;
+            if (solver is null || solver.GetType() != type)
+                continue;
+
+            if (found is not null && !ReferenceEquals(found, solver))
+            {
+                throw new InvalidOperationException(
+                    $"More than one instance of {type.FullName} is registered, in stages '{_steps[indices[0]].Name}' " +
+                    $"and '{_steps[index].Name}'.");
+            }
+
+            found = solver;
+            indices.Add(index);
+        }
+
+        return indices;
+    }
+
+    /// <summary>
+    ///     Disposes each instance that is <see cref="IDisposable" />, then rethrows the first failure.
+    /// </summary>
+    /// <remarks>
+    ///     One failure does not stop the rest. Two or more failures become one <see cref="AggregateException" />.
+    /// </remarks>
+    internal static void DisposeAll(List<IAtmosWorldSolver>? solvers)
+    {
+        if (solvers is null)
+            return;
+
+        List<Exception>? errors = null;
+        foreach (var solver in solvers)
+        {
+            if (solver is not IDisposable disposable)
+                continue;
+
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception exception)
+            {
+                (errors ??= []).Add(exception);
+            }
+        }
+
+        if (errors is null)
+            return;
+
+        if (errors.Count == 1)
+            ExceptionDispatchInfo.Throw(errors[0]);
+
+        throw new AggregateException(errors);
+    }
+
+    /// <summary>
+    ///     Disposes removed catalog instances now, or hands them to the open deferral.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    private void Release(List<IAtmosWorldSolver>? removed)
+    {
+        if (removed is null)
+            return;
+
+        if (_disposalDeferrals == 0)
+        {
+            DisposeAll(removed);
+            return;
+        }
+
+        _deferredDisposals ??= [];
+        foreach (var solver in removed)
+        {
+            if (!_deferredDisposals.Contains(solver, ReferenceEqualityComparer.Instance))
+                _deferredDisposals.Add(solver);
+        }
+    }
+
+    /// <summary>
+    ///     Holds back the disposal of catalog instances that stages lose until the matching
+    ///     <see cref="EndDeferredDisposal" />.
+    /// </summary>
+    /// <remarks>
+    ///     A tick, a checkpoint restore, and a replay open one. Deferrals nest, and only the outermost one disposes. The
+    ///     caller holds <see cref="AtmosWorld.Gate" /> until the matching end.
+    /// </remarks>
+    internal void BeginDeferredDisposal()
+    {
+        _disposalDeferrals++;
+    }
+
+    /// <summary>
+    ///     Closes a deferral. The outermost one disposes every deferred instance that no stage holds any more.
+    /// </summary>
+    /// <param name="failure">
+    ///     The exception that ended the guarded work, or <see langword="null" /> when it completed. A disposal failure
+    ///     during a failure throws an <see cref="AggregateException" /> that holds both.
+    /// </param>
+    /// <remarks>
+    ///     An instance a rollback put back into the pipeline is held again, so it survives. The caller holds
+    ///     <see cref="AtmosWorld.Gate" />.
+    /// </remarks>
+    internal void EndDeferredDisposal(Exception? failure = null)
+    {
+        if (--_disposalDeferrals > 0 || _deferredDisposals is null)
+            return;
+
+        List<IAtmosWorldSolver> deferred = _deferredDisposals;
+        _deferredDisposals = null;
+        deferred.RemoveAll(solver => _steps.Exists(step => ReferenceEquals(step.CustomSolver, solver)));
+        if (failure is null)
+        {
+            DisposeAll(deferred);
+            return;
+        }
+
+        try
+        {
+            DisposeAll(deferred);
+        }
+        catch (Exception disposeException)
+        {
+            throw new AggregateException(failure, disposeException);
+        }
+    }
+
+    /// <summary>
+    ///     Lists the instances of every catalog stage, for the world to dispose.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    internal List<IAtmosWorldSolver>? CollectCatalogSolvers()
+    {
+        List<IAtmosWorldSolver>? owned = null;
+        foreach (var step in _steps)
+        {
+            if (step.Descriptor is not null)
+                (owned ??= []).Add(step.CustomSolver!);
+        }
+
+        return owned;
     }
 
     /// <summary>
@@ -824,10 +1450,12 @@ public sealed class AtmosWorldSolverPipeline
         {
             _world.ThrowIfDisposedForPipeline();
             _world.EnsureCanChangeWorldSolverDefinition();
+            List<IAtmosWorldSolver>? removed = CollectCatalogSolvers();
             _steps.Clear();
             AddDefaults(model);
             _world.InvalidateSolverDependencies();
             PublishSteps();
+            Release(removed);
         }
     }
 
@@ -932,6 +1560,11 @@ public sealed class AtmosWorldSolverPipeline
     ///         marks its own writes (<see cref="WorldSolverRegistration.MarksOwnChanges" />). Custom stages always
     ///         get the bump, because Numos cannot see which chunks they write.
     ///     </para>
+    ///     <para>
+    ///         After each stage, also one that throws, Numos repairs the chunks and mixture pages that the stage opened
+    ///         with <see cref="AtmosSolverChunk.Edit" /> or <see cref="AtmosSolverGasMixturePage.Edit" />. A stage that
+    ///         opened none pays one flag read.
+    ///     </para>
     /// </remarks>
     internal void Execute(WorldSolverRegistration[] steps, AtmosSolverTickScope scope)
     {
@@ -943,13 +1576,20 @@ public sealed class AtmosWorldSolverPipeline
                 continue;
 
             float deltaTime = BuiltInStageSchedule.GapTime(tick - step.LastRunTick, tickRate);
-            scope.BeginStage(step.Interval, deltaTime);
+            scope.BeginStage(step.Interval, deltaTime, step.NameHash);
             step.NextDueTick = tick + step.Interval;
             step.LastRunTick = tick;
             if (!step.MarksOwnChanges)
                 scope.MarkAwakeChunksChanged();
 
-            step.Execute(scope);
+            try
+            {
+                step.Execute(scope);
+            }
+            finally
+            {
+                scope.RepairSolverEdits();
+            }
         }
     }
 
@@ -1010,12 +1650,27 @@ public sealed class AtmosWorldSolverPipeline
     ///     Puts back the stage list and schedules that <see cref="CaptureLayoutSnapshot" /> took.
     /// </summary>
     /// <remarks>
-    ///     A layout change can enable or reschedule a stage that it keeps, and it drops the stages it does not list.
-    ///     This brings the same registration objects back with their old fields. The caller holds
-    ///     <see cref="AtmosWorld.Gate" />.
+    ///     <para>
+    ///         A layout change can enable or reschedule a stage that it keeps, and it drops the stages it does not list.
+    ///         This brings the same registration objects back with their old fields. A catalog stage created since the
+    ///         snapshot is released like a removed one.
+    ///     </para>
+    ///     <para>
+    ///         The caller holds <see cref="AtmosWorld.Gate" /> and a deferral (<see cref="BeginDeferredDisposal" />)
+    ///         that was open when the snapshot was taken. Without it, a stage removed in between would already be
+    ///         disposed, and this would bring the disposed instance back.
+    ///     </para>
     /// </remarks>
     internal void RestoreLayoutSnapshot(LayoutSnapshot snapshot)
     {
+        Debug.Assert(_disposalDeferrals > 0, "A layout snapshot is restored only inside a disposal deferral.");
+        List<IAtmosWorldSolver>? dropped = null;
+        foreach (var step in _steps)
+        {
+            if (step.Descriptor is not null && Array.IndexOf(snapshot.Steps, step) < 0)
+                (dropped ??= []).Add(step.CustomSolver!);
+        }
+
         for (int index = 0; index < snapshot.Steps.Length; index++)
         {
             var step = snapshot.Steps[index];
@@ -1030,6 +1685,7 @@ public sealed class AtmosWorldSolverPipeline
         _steps.AddRange(snapshot.Steps);
         _world.InvalidateSolverDependencies();
         PublishSteps();
+        Release(dropped);
     }
 
     /// <summary>
@@ -1109,32 +1765,107 @@ public sealed class AtmosWorldSolverPipeline
             AlignSchedule(registration);
             registration.InstallTopology(
                 registration.BuildTopology(_world, _world.GetActiveLinksCore(), _world.GetChunkDimensionsCore()));
-            _steps.Insert(insertionIndex, registration);
-            _world.InvalidateSolverDependencies();
-            PublishSteps();
+
+            if (!IsOwned(registration))
+            {
+                Insert(insertionIndex, registration);
+                return;
+            }
+
+            // Under the owner gate from the check through the publish, so two worlds cannot both take the instance.
+            lock (OwnerGate)
+            {
+                ThrowIfOwnedElsewhere(solver);
+                Insert(insertionIndex, registration);
+                Owners.AddOrUpdate(solver, new WeakReference<AtmosWorld>(_world));
+            }
         }
     }
 
-    private static Dictionary<string, Action<AtmosSolverTickScope>> CreateBuiltInFactories()
+    private void Insert(int index, WorldSolverRegistration registration)
     {
-        var factories = new Dictionary<string, Action<AtmosSolverTickScope>>(BuiltInStages.Length, StringComparer.Ordinal);
-        foreach (var (name, factory) in BuiltInStages)
-        {
-            factories[name] = factory;
-        }
-
-        return factories;
+        _steps.Insert(index, registration);
+        _world.InvalidateSolverDependencies();
+        PublishSteps();
     }
 
-    private static ReadOnlyCollection<string> CreateBuiltInNames()
+    /// <summary>
+    ///     Gets whether a stage's instance can be in only one live world: it has state or solver commands.
+    /// </summary>
+    private static bool IsOwned(WorldSolverRegistration step)
     {
-        var names = new string[BuiltInStages.Length];
-        for (int i = 0; i < names.Length; i++)
+        return step.State is not null || step.CustomSolver is IAtmosSolverCommands;
+    }
+
+    /// <summary>
+    ///     Rejects an owned instance that a live world other than this one holds. The caller holds
+    ///     <see cref="OwnerGate" />.
+    /// </summary>
+    private void ThrowIfOwnedElsewhere(IAtmosWorldSolver solver)
+    {
+        if (!Owners.TryGetValue(solver, out WeakReference<AtmosWorld>? reference) ||
+            !reference.TryGetTarget(out AtmosWorld? owner) ||
+            ReferenceEquals(owner, _world) ||
+            owner.IsDisposed ||
+            !owner.Solvers.HoldsOwnedInstance(solver))
         {
-            names[i] = BuiltInStages[i].Name;
+            return;
         }
 
-        return Array.AsReadOnly(names);
+        throw new InvalidOperationException(
+            $"This {solver.GetType().FullName} instance has [NumosSerialize] state or solver commands and is already " +
+            "registered in another world. Create one instance per world, or unregister it from the other world first.");
+    }
+
+    /// <summary>
+    ///     Reports whether a published stage holds <paramref name="solver" />, without taking the world's gate.
+    /// </summary>
+    private bool HoldsOwnedInstance(IAtmosWorldSolver solver)
+    {
+        foreach (var step in Volatile.Read(ref _ownedSteps))
+        {
+            if (ReferenceEquals(step.CustomSolver, solver))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static Dictionary<string, BuiltInWorldStage> CreateBuiltInStages()
+    {
+        var stages = new Dictionary<string, BuiltInWorldStage>(BuiltInStageTable.All.Length, StringComparer.Ordinal);
+        foreach (BuiltInStage stage in BuiltInStageTable.All)
+            stages[stage.Name] = new BuiltInWorldStage(stage, GetWorldSolver(stage.Name));
+
+        return stages;
+    }
+
+    /// <summary>
+    ///     Gets the world method that runs a built-in stage across every simulation.
+    /// </summary>
+    /// <exception cref="UnreachableException"><paramref name="name" /> is a table entry without a world method.</exception>
+    private static Action<AtmosSolverTickScope> GetWorldSolver(string name)
+    {
+        return name switch
+        {
+            AtmosBuiltInSolvers.DerivedRefresh => static scope => scope.World.SolveDerivedRefreshStage(scope),
+            AtmosBuiltInSolvers.EulerFlow => static scope => scope.World.SolveEulerFlowStage(scope),
+            AtmosBuiltInSolvers.Advection => static scope => scope.World.SolveAdvectionStage(scope),
+            AtmosBuiltInSolvers.VacuumCleanup => static scope => scope.World.SolveVacuumCleanupStage(scope),
+            AtmosBuiltInSolvers.ExplicitGasTransport => static scope => scope.World.SolveExplicitGasTransportStage(scope),
+            AtmosBuiltInSolvers.BoundaryFlow => static scope => scope.World.SolveBoundaryFlowStage(scope),
+            AtmosBuiltInSolvers.Thermodynamics => static scope => scope.World.SolveThermodynamicsStage(scope),
+            AtmosBuiltInSolvers.ExplicitThermalTransport =>
+                static scope => scope.World.SolveExplicitThermalTransportStage(scope),
+            AtmosBuiltInSolvers.ThermalBoundary => static scope => scope.World.SolveThermalBoundaryStage(scope),
+            AtmosBuiltInSolvers.GasReactions => static scope => scope.World.SolveGasReactionsStage(scope),
+            _ => throw new UnreachableException($"Built-in stage '{name}' has no world method.")
+        };
+    }
+
+    private static ReadOnlyCollection<string> CreateDefaultLayout(AtmosTransportModel model)
+    {
+        return Array.AsReadOnly(BuiltInStageTable.GetLayout(model).Select(static stage => stage.Name).ToArray());
     }
 
     private int IndexOf(string name)
@@ -1147,8 +1878,7 @@ public sealed class AtmosWorldSolverPipeline
         foreach (string name in GetDefaultLayout(model))
         {
             var step = WorldSolverRegistration.CreateBuiltIn(
-                name,
-                BuiltInFactories[name],
+                BuiltInStages[name],
                 BuiltInStageSchedule.GetInterval(name, _world.TickRate));
             AlignSchedule(step);
             _steps.Add(step);
@@ -1158,10 +1888,21 @@ public sealed class AtmosWorldSolverPipeline
     private void PublishSteps()
     {
         _enabledSteps = _steps.Where(static step => step.IsEnabled).ToArray();
+
         _statefulSteps = _steps.Where(static step => step.State is not null).ToArray();
+
+        // Another world's registration reads this without the gate (HoldsOwnedInstance).
+        Volatile.Write(ref _ownedSteps, _steps.Where(IsOwned).ToArray());
         _injectedEpoch = -1;
     }
 }
+
+/// <summary>
+///     A <see cref="BuiltInStageTable" /> entry with the world method that runs it.
+/// </summary>
+/// <param name="Stage">The table entry.</param>
+/// <param name="Solve">Runs the stage on every simulation of the world.</param>
+internal sealed record BuiltInWorldStage(BuiltInStage Stage, Action<AtmosSolverTickScope> Solve);
 
 internal sealed class WorldSolverRegistration
 {
@@ -1174,13 +1915,16 @@ internal sealed class WorldSolverRegistration
         Action<AtmosSolverTickScope>? builtInSolver,
         IAtmosWorldSolver? customSolver,
         AtmosNeighborSelection? selection,
-        int interval)
+        int interval,
+        AtmosSolverDescriptor? descriptor,
+        bool marksOwnChanges)
     {
         Interval = interval;
         Name = name;
+        NameHash = AtmosRandom.HashStageName(name);
         Kind = kind;
-        MarksOwnChanges = kind == AtmosWorldSolverKind.BuiltIn &&
-                          name is AtmosBuiltInSolvers.EulerFlow or AtmosBuiltInSolvers.VacuumCleanup;
+        Descriptor = descriptor;
+        MarksOwnChanges = marksOwnChanges;
         _builtInSolver = builtInSolver;
         CustomSolver = customSolver;
         Selection = selection;
@@ -1188,16 +1932,33 @@ internal sealed class WorldSolverRegistration
     }
 
     internal string Name { get; }
+
+    /// <summary>
+    ///     Gets <see cref="AtmosRandom.HashStageName" /> of <see cref="Name" />, computed once so that
+    ///     <see cref="AtmosWorldSolverContext.Random" /> does not hash the name on every call.
+    /// </summary>
+    internal ulong NameHash { get; }
+
     internal AtmosWorldSolverKind Kind { get; }
     internal AtmosNeighborSelection? Selection { get; }
     internal bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    ///     Gets the catalog descriptor the stage was created from, or <see langword="null" /> for a built-in stage or a
+    ///     host registration.
+    /// </summary>
+    /// <remarks>
+    ///     A stage with a descriptor is a catalog stage. The world owns its instance, and replay can recreate it by name.
+    /// </remarks>
+    internal AtmosSolverDescriptor? Descriptor { get; }
 
     /// <summary>
     ///     Gets whether the stage advances the revision of every chunk it writes, so the pipeline can skip the
     ///     revision bump of every awake chunk before it runs.
     /// </summary>
     /// <remarks>
-    ///     Only the built-in <c>euler-flow</c> and <c>vacuum-cleanup</c> stages set it. A chunk that
+    ///     <see cref="BuiltInStage.MarksOwnChanges" /> sets it, so only <c>euler-flow</c> and <c>vacuum-cleanup</c>
+    ///     have it. Custom stages never do. A chunk that
     ///     <c>euler-flow</c> skips as static keeps its revision, so a renderer does not copy it again. That stage
     ///     also reuses its static test of a chunk while the revision holds, so a blanket bump would force a rescan of
     ///     every awake chunk on every call. <c>vacuum-cleanup</c> advances the revision of each chunk it empties
@@ -1243,13 +2004,18 @@ internal sealed class WorldSolverRegistration
     internal ulong StateHash { get; set; }
 
     /// <summary>
-    ///     Hashes <see cref="State" /> without buffering it. Only valid for a stateful registration.
+    ///     The Debug-only baseline of the members marked <c>[NumosSerialize(HostEditable = false)]</c>, or
+    ///     <see langword="null" />.
+    /// </summary>
+    internal ulong[]? BulkHashes;
+
+    /// <summary>
+    ///     Hashes the host-editable members of <see cref="State" /> without buffering them. Only valid for a stateful
+    ///     registration.
     /// </summary>
     internal ulong ComputeStateHash()
     {
-        var sink = new StateHashSink();
-        State!.WriteState(ref sink);
-        return sink.Value;
+        return StateEditBaseline.HashHostEditable(State!);
     }
 
     /// <summary>
@@ -1257,9 +2023,7 @@ internal sealed class WorldSolverRegistration
     /// </summary>
     internal byte[] CaptureState(ref StateBinarySink sink)
     {
-        sink.Reset();
-        State!.WriteState(ref sink);
-        return sink.WrittenSpan.ToArray();
+        return StateEditBaseline.Capture(State!, ref sink);
     }
 
     /// <summary>
@@ -1267,27 +2031,25 @@ internal sealed class WorldSolverRegistration
     /// </summary>
     internal void RestoreState(ReadOnlySpan<byte> payload, IGasRegistry gases)
     {
-        var reader = new StateReader(payload);
-        State!.ReadStateInto(ref reader, gases);
-        if (!reader.IsAtEnd)
-            throw new InvalidDataException($"The state for world solver '{Name}' has trailing data.");
+        StateEditBaseline.Restore(State!, payload, gases, $"world solver '{Name}'");
     }
 
-    internal static WorldSolverRegistration CreateBuiltIn(
-        string name,
-        Action<AtmosSolverTickScope> solver,
-        int interval)
+    internal static WorldSolverRegistration CreateBuiltIn(BuiltInWorldStage stage, int interval)
     {
-        return new WorldSolverRegistration(name, AtmosWorldSolverKind.BuiltIn, solver, null, null, interval);
+        return new WorldSolverRegistration(
+            stage.Stage.Name, AtmosWorldSolverKind.BuiltIn, stage.Solve, null, null, interval, null,
+            stage.Stage.MarksOwnChanges);
     }
 
     internal static WorldSolverRegistration CreateCustom(
         string name,
         IAtmosWorldSolver solver,
         AtmosNeighborSelection? selection,
-        int interval)
+        int interval,
+        AtmosSolverDescriptor? descriptor = null)
     {
-        return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection, interval);
+        return new WorldSolverRegistration(
+            name, AtmosWorldSolverKind.Custom, null, solver, selection, interval, descriptor, false);
     }
 
     internal void Execute(AtmosSolverTickScope scope)
@@ -1304,8 +2066,14 @@ internal sealed class WorldSolverRegistration
     internal void NotifyRestored()
     {
         // Delegates have nowhere to keep state of their own, so the default no-op is skipped without a virtual call.
-        if (CustomSolver is not null and not DelegateWorldSolver)
-            CustomSolver.OnRestored();
+        if (CustomSolver is null or DelegateWorldSolver)
+            return;
+
+        // Scratch resets first, so OnRestored sees each scratch member as a new instance holds it.
+        if (CustomSolver is INumosScratchTarget scratch)
+            scratch.ResetScratch();
+
+        CustomSolver.OnRestored();
     }
 
     internal AtmosWorldNeighborTopology BuildTopology(

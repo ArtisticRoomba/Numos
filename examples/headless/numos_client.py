@@ -95,6 +95,23 @@ class NumosClient:
             raise NumosError(error.get("code", "unknown"), error.get("message", ""), response)
         return response
 
+    def solver_state(self, solver: str) -> dict[str, Any]:
+        """Return the state members of a class solver as a dict from member name to value.
+
+        A collection or nested member maps to its summary text, such as "3 items". Use
+        `call("getSolverState", solver=...)` for types, units, and which members are writable.
+        """
+        members = self.call("getSolverState", solver=solver)["result"]["members"]
+        return {member["name"]: member["value"] for member in members}
+
+    def set_solver_state(self, solver: str, member: str, value: Any) -> dict[str, Any]:
+        """Write one state member of a class solver and return the member as the server reports it after the write.
+
+        The value is a number, bool, string (an enum takes its name), or None. The world records the edit at the
+        next tick.
+        """
+        return self.call("setSolverState", solver=solver, member=member, value=value)["result"]["member"]
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Talk to a Numos.Headless socket server.")

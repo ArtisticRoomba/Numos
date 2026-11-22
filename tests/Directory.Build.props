@@ -11,6 +11,12 @@
         <NUnit3TestAdapterVersion>4.6.0</NUnit3TestAdapterVersion>
         <CoverletCollectorVersion>6.0.4</CoverletCollectorVersion>
         <MicrosoftCodeAnalysisCSharpVersion>5.0.0</MicrosoftCodeAnalysisCSharpVersion>
+
+        <!--
+            Tests observe ticks through variables their solver lambdas capture, and seed or inspect chunk storage
+            through Dangerous() from host code.
+        -->
+        <NoWarn>$(NoWarn);NUMOSSOLVER001;NUMOSSOLVER005</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

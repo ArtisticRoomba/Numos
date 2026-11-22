@@ -106,6 +106,7 @@ jobs:
           dotnet package add Numos.CoreSim --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
           dotnet package add Numos.API.Dangerous --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
           dotnet package add Numos.Serialization.FileSystem --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
+          dotnet package add Numos.Testing --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
           dotnet package add Numos.Viewer --version "$(python3 eng/version.py get viewer)" --no-restore --project "$consumer"
           cat > "$consumer/Program.cs" <<'EOF'
           using Numos.API;
@@ -113,11 +114,13 @@ jobs:
           using Numos.Collections;
           using Numos.Serialization;
           using Numos.Serialization.FileSystem;
+          using Numos.Testing;
 
           using var simulation = new AtmosSimulation();
           _ = simulation.Dangerous();
           _ = typeof(NumosWorldReplaySerializer);
           _ = typeof(NumosReplayFile);
+          _ = typeof(AtmosReplayCheck);
 
           // The ChunkData generator ships inside Numos.API, which this project only references transitively.
           simulation.World.Solvers.Register("consumer/fire", context =>

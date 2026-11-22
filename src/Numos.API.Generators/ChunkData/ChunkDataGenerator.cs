@@ -17,6 +17,11 @@ namespace Numos.API.Generators.ChunkData;
 ///         module initializer per assembly that registers every field when the assembly loads.
 ///     </para>
 ///     <para>
+///         The same generator lowers <c>[ChunkComponent]</c> structs to one chunk field per struct field, with a view
+///         type and extension members per struct. Both live here because a component field and a <c>[ChunkData]</c>
+///         property can share a key or an accessor name, and only one pass sees both.
+///     </para>
+///     <para>
 ///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every property in the
 ///         compilation, so they run after <c>Collect</c>. That step reruns whenever any <c>[ChunkData]</c> property changes,
 ///         but not on unrelated edits. It hands on one location-free model per type, so a file is only rewritten when that
@@ -24,9 +29,11 @@ namespace Numos.API.Generators.ChunkData;
 ///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
-public sealed class ChunkDataGenerator : IIncrementalGenerator
+public sealed partial class ChunkDataGenerator : IIncrementalGenerator
 {
     internal const string PropertiesStepName = "ChunkDataProperties";
+    internal const string ComponentDeclarationsStepName = "ChunkComponentDeclarations";
+    internal const string ComponentsStepName = "ChunkComponents";
     internal const string LanguageVersionStepName = "ChunkDataLanguageVersion";
     internal const string ViewInfoStepName = "ChunkDataViewInfo";
     internal const string TypesStepName = "ChunkDataTypes";
@@ -35,6 +42,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
     private const string AttributeMetadataName = "Numos.API.ChunkDataAttribute";
     private const string ChunkFieldMetadataName = "Numos.API.ChunkField`1";
     private const string SolverChunkMetadataName = "Numos.API.AtmosSolverChunk";
+    private const string SolverGasMixturePageMetadataName = "Numos.API.AtmosSolverGasMixturePage";
+    private const string SolverChunksMetadataName = "Numos.API.AtmosSolverChunks";
 
     // Members a generated accessor would be hidden behind or ambiguous with. Instance members always win over
     // extension members, so an accessor with one of these names compiles but can never be called. The view type's
@@ -53,50 +62,81 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             .Select(static (model, _) => model!)
             .WithTrackingName(PropertiesStepName);
 
+        IncrementalValuesProvider<ChunkComponentDeclaration> components = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ComponentAttributeMetadataName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (attributeContext, cancellationToken) => CreateComponentModel(attributeContext, cancellationToken))
+            .Where(static model => model is not null)
+            .Select(static (model, _) => model!)
+            .WithTrackingName(ComponentDeclarationsStepName);
+
         IncrementalValueProvider<LanguageVersion> languageVersion = context.ParseOptionsProvider
             .Select(static (options, _) => ((CSharpParseOptions)options).LanguageVersion)
             .WithTrackingName(LanguageVersionStepName);
 
         // Runs on every compilation change, but only the small equatable result flows on, so nothing downstream
         // reruns unless a view type actually gains or loses a member.
-        IncrementalValueProvider<EquatableArray<string>> viewInfo = context.CompilationProvider
+        IncrementalValueProvider<ReservedNames> viewInfo = context.CompilationProvider
             .Select(static (compilation, _) => GetReservedNames(compilation))
             .WithTrackingName(ViewInfoStepName);
 
-        IncrementalValueProvider<GeneratorOutput<ChunkDataTypeModel>> output = properties
+        IncrementalValueProvider<Analysis> analysis = properties
             .Collect()
+            .Combine(components.Collect())
             .Combine(languageVersion)
             .Combine(viewInfo)
-            .Select(static (input, _) => Analyze(input.Left.Left, input.Left.Right, input.Right));
+            .Select(static (input, _) =>
+                Analyze(input.Left.Left.Left, input.Left.Left.Right, input.Left.Right, input.Right));
 
         GeneratorOutput.Register(
             context,
-            output,
+            analysis.Select(static (result, _) => result.Data),
             TypesStepName,
             static type =>
                 (type.Members[0].Property.Type.HintName + ".ChunkData.g.cs", ChunkDataEmitter.Emit(type)));
 
-        IncrementalValueProvider<EquatableArray<string>> declaringTypes = output
-            .Select(static (result, _) => result.Types
-                .Select(static type => type.Members[0].Property.TypeDisplay)
+        GeneratorOutput.Register(
+            context,
+            analysis.Select(static (result, _) => result.Components),
+            ComponentsStepName,
+            static component =>
+                (component.Type.HintName + ".ChunkComponent.g.cs", ChunkComponentEmitter.Emit(component)));
+
+        // Each entry is a holder class whose static initializer registers the fields.
+        IncrementalValueProvider<EquatableArray<string>> holders = analysis
+            .Select(static (result, _) => result.Data.Types
+                .Select(static type => type.Members[0].Property.TypeDisplay + "." + ChunkDataEmitter.HolderName)
+                .Concat(result.Components.Types.Select(static component =>
+                    component.TypeDisplay + "." + ChunkComponentEmitter.HolderName))
+                .OrderBy(static holder => holder, StringComparer.Ordinal)
                 .ToEquatableArray())
             .WithTrackingName(ModuleInitializerStepName);
 
         GeneratorOutput.RegisterModuleInitializer(
             context,
-            declaringTypes,
+            holders,
             ChunkDataEmitter.ModuleInitializerHintName,
             ChunkDataEmitter.EmitModuleInitializer);
     }
 
-    private static EquatableArray<string> GetReservedNames(Compilation compilation)
+    private static ReservedNames GetReservedNames(Compilation compilation)
     {
         // Dangerous() is the extension bridge to the Dangerous view, so it's taken even when that isn't referenced.
-        var names = new SortedSet<string>(ObjectMemberNames, StringComparer.Ordinal) { "Dangerous" };
-        INamedTypeSymbol? solverChunk = compilation.GetTypeByMetadataName(SolverChunkMetadataName);
-        if (solverChunk is not null)
+        return new ReservedNames(
+            PublicMembers(compilation, SolverChunkMetadataName, "Dangerous"),
+            PublicMembers(compilation, SolverGasMixturePageMetadataName),
+            PublicMembers(compilation, SolverChunksMetadataName));
+    }
+
+    private static EquatableArray<string> PublicMembers(Compilation compilation, string metadataName, params string[] extra)
+    {
+        var names = new SortedSet<string>(ObjectMemberNames, StringComparer.Ordinal);
+        names.UnionWith(extra);
+        INamedTypeSymbol? type = compilation.GetTypeByMetadataName(metadataName);
+        if (type is not null)
         {
-            foreach (ISymbol member in solverChunk.GetMembers())
+            foreach (ISymbol member in type.GetMembers())
             {
                 if (member.DeclaredAccessibility == Accessibility.Public && member.CanBeReferencedByName)
                     names.Add(member.Name);
@@ -242,6 +282,20 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                     elementType.ToDisplayString()));
         }
 
+        // An error type is left alone. It may be a quantity alias over a primitive that this generator can't resolve.
+        if (!transient &&
+            elementType is { IsUnmanagedType: true } &&
+            elementType.TypeKind != TypeKind.Error &&
+            !IsPortableElementType(elementType))
+        {
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    ChunkDataDiagnostics.SavedWithUnportableType,
+                    attributeLocation,
+                    displayName,
+                    elementType.ToDisplayString()));
+        }
+
         if (length is { } negativeLength && negativeLength < 0)
         {
             diagnostics.Add(
@@ -285,12 +339,45 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         return new ChunkDataDeclaration(model, location, diagnostics.ToEquatableArray());
     }
 
-    private static GeneratorOutput<ChunkDataTypeModel> Analyze(
-        ImmutableArray<ChunkDataDeclaration> declarations,
-        LanguageVersion languageVersion, EquatableArray<string> reservedNames)
+    // Mirrors ChunkFieldDescriptor.IsPortableElementType in Numos.CoreSim, which decides what a .numos file can hold.
+    private static bool IsPortableElementType(ITypeSymbol type)
     {
-        if (declarations.IsDefaultOrEmpty)
-            return GeneratorOutput<ChunkDataTypeModel>.Empty;
+        if (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying })
+            type = underlying;
+
+        switch (type.SpecialType)
+        {
+            case SpecialType.System_Boolean:
+            case SpecialType.System_Byte:
+            case SpecialType.System_SByte:
+            case SpecialType.System_Int16:
+            case SpecialType.System_UInt16:
+            case SpecialType.System_Int32:
+            case SpecialType.System_UInt32:
+            case SpecialType.System_Int64:
+            case SpecialType.System_UInt64:
+            case SpecialType.System_Single:
+            case SpecialType.System_Double:
+                return true;
+        }
+
+        // Half has no SpecialType.
+        return type is
+        {
+            Name: "Half",
+            TypeKind: TypeKind.Struct,
+            ContainingType: null,
+            ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true },
+        };
+    }
+
+    private static Analysis Analyze(
+        ImmutableArray<ChunkDataDeclaration> declarations,
+        ImmutableArray<ChunkComponentDeclaration> componentDeclarations,
+        LanguageVersion languageVersion, ReservedNames reservedNames)
+    {
+        if (declarations.IsDefaultOrEmpty && componentDeclarations.IsDefaultOrEmpty)
+            return Analysis.Empty;
 
         ChunkDataDeclaration[] ordered = declarations
             .OrderBySource(static declaration => declaration.Location)
@@ -298,8 +385,13 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             .ThenBy(static declaration => declaration.Property.PropertyName, StringComparer.Ordinal)
             .ToArray();
 
+        ChunkComponentDeclaration[] components = componentDeclarations
+            .OrderBySource(static declaration => declaration.Location)
+            .ThenBy(static declaration => declaration.Component.Type.MetadataName, StringComparer.Ordinal)
+            .ToArray();
+
         var diagnostics = new List<DiagnosticInfo>();
-        var invalid = new HashSet<ChunkDataDeclaration>(ReferenceEqualityComparer.Instance);
+        var invalid = new HashSet<object>(ReferenceEqualityComparer.Instance);
         foreach (ChunkDataDeclaration declaration in ordered)
         {
             diagnostics.AddRange(declaration.Diagnostics);
@@ -307,12 +399,19 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 invalid.Add(declaration);
         }
 
-        CheckKeys(diagnostics, ordered, invalid);
+        foreach (ChunkComponentDeclaration component in components)
+        {
+            diagnostics.AddRange(component.Diagnostics);
+            if (component.HasErrors)
+                invalid.Add(component);
+        }
 
-        var accessors = new HashSet<ChunkDataDeclaration>(ReferenceEqualityComparer.Instance);
+        CheckKeys(diagnostics, KeyEntries(ordered, components, invalid), invalid);
+
+        var accessors = new HashSet<object>(ReferenceEqualityComparer.Instance);
         if (languageVersion >= LanguageVersion.CSharp14)
         {
-            CheckAccessorNames(diagnostics, ordered, invalid, reservedNames, accessors);
+            CheckAccessorNames(diagnostics, ordered, components, invalid, reservedNames, accessors);
         }
         else if (ordered.FirstOrDefault(declaration => !invalid.Contains(declaration)) is { } first)
         {
@@ -320,6 +419,15 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 DiagnosticInfo.Create(
                     ChunkDataDiagnostics.RequiresCSharp14,
                     first.Location,
+                    languageVersion.ToDisplayString()));
+        }
+        else if (components.FirstOrDefault(component => !invalid.Contains(component)) is { } firstComponent)
+        {
+            // One error is enough for one project setting, so this only shows when no [ChunkData] reported it.
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    ChunkComponentDiagnostics.RequiresCSharp14,
+                    firstComponent.Location,
                     languageVersion.ToDisplayString()));
         }
 
@@ -336,17 +444,27 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             types.Add(new ChunkDataTypeModel(members.ToEquatableArray()));
         }
 
-        return new GeneratorOutput<ChunkDataTypeModel>(diagnostics.ToEquatableArray(), types.ToEquatableArray());
+        ChunkComponentModel[] valid = components
+            .Where(component => !invalid.Contains(component))
+            .Select(component => component.Component with { HasAccessors = accessors.Contains(component) })
+            .OrderBy(static component => component.Type.MetadataName, StringComparer.Ordinal)
+            .ToArray();
+
+        return new Analysis(
+            new GeneratorOutput<ChunkDataTypeModel>(diagnostics.ToEquatableArray(), types.ToEquatableArray()),
+            new GeneratorOutput<ChunkComponentModel>(EquatableArray<DiagnosticInfo>.Empty, valid.ToEquatableArray()));
     }
 
     private static void CheckAccessorNames(
         List<DiagnosticInfo> diagnostics, ChunkDataDeclaration[] ordered,
-        HashSet<ChunkDataDeclaration> invalid, EquatableArray<string> reservedNames,
-        HashSet<ChunkDataDeclaration> accessors)
+        ChunkComponentDeclaration[] components, HashSet<object> invalid,
+        ReservedNames reservedNames, HashSet<object> accessors)
     {
-        var reserved = new HashSet<string>(reservedNames, StringComparer.Ordinal);
+        var reserved = new HashSet<string>(reservedNames.Chunk, StringComparer.Ordinal);
         var namesByClass = new HashSet<(string Namespace, string Class, string Member)>();
-        var ownerByNamespaceName = new Dictionary<(string Namespace, string Member), ChunkDataPropertyModel>();
+
+        // Extension members on one receiver type in one namespace are ambiguous when their names match.
+        var ownerByName = new Dictionary<(string Namespace, string Receiver, string Member), string>();
 
         foreach (ChunkDataDeclaration declaration in ordered)
         {
@@ -379,43 +497,164 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (ownerByNamespaceName.TryGetValue((@namespace, memberName), out ChunkDataPropertyModel? owner))
+            if (ownerByName.TryGetValue((@namespace, SolverChunkMetadataName, memberName), out string? owner))
             {
                 diagnostics.Add(
                     Collision(
                         declaration,
                         memberName,
-                        $"the accessor generated for '{owner.DisplayName}' in the same namespace"));
+                        $"the accessor generated for '{owner}' in the same namespace"));
             }
             else
             {
-                ownerByNamespaceName.Add((@namespace, memberName), model);
+                ownerByName.Add((@namespace, SolverChunkMetadataName, memberName), model.DisplayName);
             }
+
+            accessors.Add(declaration);
+        }
+
+        var receivers = new (string MetadataName, HashSet<string> Reserved)[]
+        {
+            (SolverChunkMetadataName, reserved),
+            (SolverGasMixturePageMetadataName, new HashSet<string>(reservedNames.Page, StringComparer.Ordinal)),
+        };
+
+        var chunksReserved = new HashSet<string>(reservedNames.Chunks, StringComparer.Ordinal);
+        var entryReserved = new HashSet<string>(ObjectMemberNames, StringComparer.Ordinal) { "Chunk", "Deconstruct" };
+
+        foreach (ChunkComponentDeclaration declaration in components)
+        {
+            if (invalid.Contains(declaration))
+                continue;
+
+            ChunkComponentModel model = declaration.Component;
+            string @namespace = model.Type.Namespace;
+            string name = model.AccessorName;
+            var names = new List<(string Receiver, string Member)>();
+            string? collision = null;
+            string? collidingName = null;
+
+            if (entryReserved.Contains(name))
+            {
+                collidingName = name;
+                collision = $"the member '{name}' of the item that With{name}() yields";
+            }
+
+            foreach ((string receiver, HashSet<string> receiverReserved) in receivers)
+            {
+                foreach (string member in new[] { "Get" + name, "TryGet" + name, "Has" + name })
+                {
+                    if (collision is null && receiverReserved.Contains(member))
+                    {
+                        collidingName = member;
+                        collision = $"the {receiver} member '{member}'";
+                    }
+
+                    names.Add((receiver, member));
+                }
+            }
+
+            if (collision is null && chunksReserved.Contains("With" + name))
+            {
+                collidingName = "With" + name;
+                collision = $"the {SolverChunksMetadataName} member 'With{name}'";
+            }
+
+            names.Add((SolverChunksMetadataName, "With" + name));
+
+            if (collision is null)
+            {
+                foreach ((string receiver, string member) in names)
+                {
+                    if (ownerByName.TryGetValue((@namespace, receiver, member), out string? owner))
+                    {
+                        collidingName = member;
+                        collision = $"the accessor generated for '{owner}' in the same namespace";
+                        break;
+                    }
+                }
+            }
+
+            if (collision is not null)
+            {
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        ChunkComponentDiagnostics.AccessorNameCollision,
+                        declaration.Location,
+                        collidingName!,
+                        model.DisplayName,
+                        collision));
+
+                continue;
+            }
+
+            foreach ((string receiver, string member) in names)
+                ownerByName.Add((@namespace, receiver, member), model.DisplayName);
 
             accessors.Add(declaration);
         }
     }
 
-    private static void CheckKeys(
-        List<DiagnosticInfo> diagnostics, ChunkDataDeclaration[] ordered,
-        HashSet<ChunkDataDeclaration> invalid)
+    /// <summary>
+    ///     Lists every key a declaration registers, in source order, for <see cref="CheckKeys" />.
+    /// </summary>
+    /// <remarks>
+    ///     A <c>[ChunkData]</c> property takes part even when another check rejected it, so a conflict is never hidden
+    ///     behind an unrelated error. A component takes part only when it passed its own checks, because its keys
+    ///     depend on them.
+    /// </remarks>
+    private static IEnumerable<KeyEntry> KeyEntries(
+        ChunkDataDeclaration[] ordered, ChunkComponentDeclaration[] components,
+        HashSet<object> invalid)
     {
-        foreach (IGrouping<string, ChunkDataDeclaration> group in ordered
-                     .Where(static declaration =>
-                         declaration.Property.Key is not null && declaration.Property.ElementTypeIdentity is not null)
-                     .GroupBy(static declaration => declaration.Property.Key!, StringComparer.Ordinal))
+        IEnumerable<KeyEntry> properties = ordered
+            .Where(static declaration =>
+                declaration.Property.Key is not null && declaration.Property.ElementTypeIdentity is not null)
+            .Select(static declaration => new KeyEntry(
+                declaration.Property.Key!,
+                declaration.Property.ElementTypeIdentity!,
+                declaration.Property.Transient,
+                declaration.Property.Length,
+                declaration.Property.ClearOnSleep,
+                declaration.Property.ClearOnVacuum,
+                declaration.Property.DisplayName,
+                declaration.Location,
+                declaration));
+
+        IEnumerable<KeyEntry> fields = components
+            .Where(component => !invalid.Contains(component))
+            .SelectMany(static component => component.Fields.Select(field => new KeyEntry(
+                field.Field.Key,
+                field.ElementTypeIdentity,
+                field.Field.Scratch,
+                field.Field.Length,
+                component.Component.ClearOnSleep,
+                component.Component.ClearOnVacuum,
+                component.Component.DisplayName + "." + field.Field.Name,
+                field.Location,
+                component)));
+
+        // The sort is stable, so properties keep their order among themselves.
+        return properties.Concat(fields).OrderBySource(static entry => entry.Location);
+    }
+
+    private static void CheckKeys(
+        List<DiagnosticInfo> diagnostics, IEnumerable<KeyEntry> entries,
+        HashSet<object> invalid)
+    {
+        foreach (IGrouping<string, KeyEntry> group in entries.GroupBy(static entry => entry.Key, StringComparer.Ordinal))
         {
-            ChunkDataDeclaration[] declarations = group.ToArray();
+            KeyEntry[] declarations = group.ToArray();
             if (declarations.Length < 2)
                 continue;
 
-            ChunkDataPropertyModel first = declarations[0].Property;
+            KeyEntry first = declarations[0];
             bool identical = declarations.All(declaration =>
-                declaration.Property.ElementTypeIdentity == first.ElementTypeIdentity &&
-                declaration.Property.Transient == first.Transient &&
-                declaration.Property.Length == first.Length &&
-                declaration.Property.ClearOnSleep == first.ClearOnSleep &&
-                declaration.Property.ClearOnVacuum == first.ClearOnVacuum);
+                declaration.ElementTypeIdentity == first.ElementTypeIdentity &&
+                declaration.Transient == first.Transient &&
+                declaration.Length == first.Length &&
+                declaration.ClearOnSleep == first.ClearOnSleep &&
+                declaration.ClearOnVacuum == first.ClearOnVacuum);
 
             if (identical)
             {
@@ -426,30 +665,30 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                             ChunkDataDiagnostics.DuplicateKey,
                             declarations[i].Location,
                             group.Key,
-                            declarations[i].Property.DisplayName,
+                            declarations[i].DisplayName,
                             first.DisplayName));
                 }
 
                 continue;
             }
 
-            foreach (ChunkDataDeclaration declaration in declarations)
+            foreach (KeyEntry declaration in declarations)
             {
                 string others = string.Join(
                     ", ",
                     declarations
                         .Where(other => !ReferenceEquals(other, declaration))
-                        .Select(static other => "'" + other.Property.DisplayName + "'"));
+                        .Select(static other => "'" + other.DisplayName + "'"));
 
                 diagnostics.Add(
                     DiagnosticInfo.Create(
                         ChunkDataDiagnostics.ConflictingKey,
                         declaration.Location,
                         group.Key,
-                        declaration.Property.DisplayName,
+                        declaration.DisplayName,
                         others));
 
-                invalid.Add(declaration);
+                invalid.Add(declaration.Owner);
             }
         }
     }
@@ -462,5 +701,39 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             memberName,
             declaration.Property.DisplayName,
             collidesWith);
+    }
+
+    /// <summary>
+    ///     The public member names of the three view types that generated extension members must not reuse.
+    /// </summary>
+    private sealed record ReservedNames(
+        EquatableArray<string> Chunk,
+        EquatableArray<string> Page,
+        EquatableArray<string> Chunks);
+
+    /// <summary>
+    ///     One key that a <c>[ChunkData]</c> property or a component field registers. <c>Owner</c> is the declaration
+    ///     to drop when the key conflicts.
+    /// </summary>
+    private sealed record KeyEntry(
+        string Key,
+        string ElementTypeIdentity,
+        bool Transient,
+        int? Length,
+        bool ClearOnSleep,
+        bool ClearOnVacuum,
+        string DisplayName,
+        LocationInfo? Location,
+        object Owner);
+
+    /// <summary>
+    ///     The result of the cross-declaration pass. Every diagnostic travels with <see cref="Data" />.
+    /// </summary>
+    private sealed record Analysis(
+        GeneratorOutput<ChunkDataTypeModel> Data,
+        GeneratorOutput<ChunkComponentModel> Components)
+    {
+        public static Analysis Empty { get; } =
+            new(GeneratorOutput<ChunkDataTypeModel>.Empty, GeneratorOutput<ChunkComponentModel>.Empty);
     }
 }

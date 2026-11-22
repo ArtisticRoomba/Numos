@@ -555,7 +555,7 @@ public sealed class StateGeneratorTests
 
                               public sealed partial class FireSolver : IAtmosWorldSolver
                               {
-                                  private readonly System.Collections.Generic.List<int> _scratch = [];
+                                  [NumosScratch] private readonly System.Collections.Generic.List<int> _scratch = [];
 
                                   public FireSolver(int seed) => _ticks = seed;
 
@@ -591,5 +591,242 @@ public sealed class StateGeneratorTests
         int lastRead = generated.LastIndexOf("reader.EndObject();", StringComparison.Ordinal);
         int firstAssignment = generated.IndexOf("this._ticks = ", StringComparison.Ordinal);
         Assert.That(firstAssignment, Is.GreaterThan(lastRead));
+    }
+
+    [Test]
+    public void WorldSolver_MutableCollections_AreRefilledInPlace()
+    {
+        const string source = """
+                              using System.Collections.Generic;
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public readonly partial record struct Spark([property: NumosSerialize] int Cell, [property: NumosSerialize] float Heat);
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] private readonly List<int> _log = [];
+                                  [NumosSerialize] public HashSet<string> Seen { get; } = [];
+                                  [NumosSerialize] public Dictionary<string, List<float>> History { get; init; } = new();
+                                  [NumosSerialize] public List<Spark> Sparks = [];
+                                  [NumosSerialize] public HashSet<int>? Maybe;
+                                  [NumosSerialize] public float[] Weights = new float[4];
+
+                                  public void Solve(AtmosWorldSolverContext context) => _log.Add(Sparks.Count);
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosState.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "StateCodecs.UnmanagedList<global::System.Collections.Generic.List<int>, int, " +
+                    "global::Numos.CoreSim.State.Advanced.StateCodecs.Int32>.Write(ref sink, this._log);"));
+
+            Assert.That(generated, Does.Contain("StateCodecs.Set<global::System.Collections.Generic.HashSet<string>"));
+
+            // Readonly, get-only, and init-only members have nothing to assign, so a null one fails before any write.
+            Assert.That(generated, Does.Contain("if (" + HasLocal("_log") + " && this._log is null)"));
+            Assert.That(generated, Does.Contain("if (" + HasLocal("History") + " && this.History is null)"));
+            Assert.That(generated, Does.Not.Contain("this._log = ").And.Not.Contain("this.Seen = ").And.Not.Contain("this.History = "));
+
+            Assert.That(generated, Does.Contain("this._log.Clear();"));
+            Assert.That(generated, Does.Contain("this._log.AddRange(" + FieldLocal("_log") + ");"));
+            Assert.That(generated, Does.Contain("this.Seen.UnionWith(" + FieldLocal("Seen") + ");"));
+            Assert.That(generated, Does.Contain("this.History[entry.Key] = entry.Value;"));
+
+            // An assignable member takes the decoded instance only when it holds none, or the data holds null.
+            Assert.That(generated, Does.Contain("if (this.Sparks is null)"));
+            Assert.That(generated, Does.Contain("if (" + FieldLocal("Maybe") + " is null || this.Maybe is null)"));
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "if (this.Weights is not null && this.Weights.Length == " + FieldLocal("Weights") + ".Length)"));
+
+            Assert.That(
+                generated,
+                Does.Contain("global::System.Array.Copy(" + FieldLocal("Weights") + ", this.Weights, " + FieldLocal("Weights") + ".Length);"));
+        });
+
+        int lastRead = generated.LastIndexOf("reader.EndObject();", StringComparison.Ordinal);
+        int lastCheck = generated.LastIndexOf("throw new global::System.InvalidOperationException", StringComparison.Ordinal);
+        int firstWrite = generated.IndexOf(".Clear();", StringComparison.Ordinal);
+        Assert.That(lastRead, Is.LessThan(lastCheck));
+        Assert.That(lastCheck, Is.LessThan(firstWrite));
+    }
+
+    [Test]
+    public void MutableCollection_ThatIsNotRestoredInPlace_IsUnsupported()
+    {
+        const string source = """
+                              using System.Collections.Generic;
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class Settings : IAtmosSolverConfiguration
+                              {
+                                  public string Key => "my-mod/settings";
+                                  [NumosSerialize] public List<int> Cells { get; set; } = [];
+                                  [NumosSerialize] public HashSet<int> Seen { get; set; } = [];
+                              }
+
+                              public sealed partial class Entry
+                              {
+                                  [NumosSerialize] public Dictionary<int, List<int>> Nested { get; set; } = new();
+                              }
+                              """;
+
+        GeneratorHarness.RunState(out _, out var diagnostics, null, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE007", "NUMOSSTATE007", "NUMOSSTATE007" }));
+    }
+
+    [Test]
+    public void ScratchOnlySolver_GetsAResetAndNoStateInterface()
+    {
+        const string source = """
+                              using System.Collections.Generic;
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosScratch] private readonly List<int> _hot = new();
+                                  [NumosScratch] private List<int> _queue = new List<int>(4);
+                                  [NumosScratch] private int _cursor;
+                                  [NumosScratch] public float Heat { get; set; } = 2f;
+                                  [NumosScratch] public HashSet<int> Seen { get; } = [];
+                                  [NumosScratch] private int @event;
+                                  [NumosScratch] private readonly ICollection<int> _bag = new List<int>();
+
+                                  public void Solve(AtmosWorldSolverContext context)
+                                  {
+                                      _hot.Add(_queue.Count + _cursor + @event + _bag.Count);
+                                  }
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(
+            result.GeneratedSources.Select(static generated => generated.HintName),
+            Is.EqualTo(new[] { "MyMod.FireSolver.NumosScratch.g.cs" }));
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosScratch.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(generated, Does.Contain("partial class FireSolver : global::Numos.CoreSim.State.Advanced.INumosScratchTarget"));
+            Assert.That(generated, Does.Contain("void global::Numos.CoreSim.State.Advanced.INumosScratchTarget.ResetScratch()"));
+            Assert.That(generated, Does.Contain("using System.Collections.Generic;"));
+            Assert.That(generated, Does.Contain("this._hot.Clear();"));
+            Assert.That(generated, Does.Contain("this._queue = new List<int>(4);"));
+            Assert.That(generated, Does.Contain("this._cursor = default!;"));
+            Assert.That(generated, Does.Contain("this.Heat = 2f;"));
+            Assert.That(generated, Does.Contain("this.Seen.Clear();"));
+            Assert.That(generated, Does.Contain("this.@event = default!;"));
+            Assert.That(generated, Does.Contain("this._bag.Clear();"));
+            Assert.That(generated, Does.Not.Contain("INumosStateTarget"));
+        });
+    }
+
+    [Test]
+    public void SolverWithStateAndScratch_GetsBothFiles()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] private int _ticks;
+                                  [NumosScratch] private int _cursor = 3;
+
+                                  public void Solve(AtmosWorldSolverContext context) => _ticks += _cursor;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(
+            result.GeneratedSources.Select(static generated => generated.HintName),
+            Is.EquivalentTo(new[] { "MyMod.FireSolver.NumosState.g.cs", "MyMod.FireSolver.NumosScratch.g.cs" }));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosState.g.cs"),
+                Does.Not.Contain("_cursor"));
+
+            Assert.That(
+                GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosScratch.g.cs"),
+                Does.Contain("this._cursor = 3;"));
+        });
+    }
+
+    [Test]
+    public void ScratchInitializer_BindsThroughTheUsingsOfItsOwnFile()
+    {
+        const string first = """
+                             using Numos.API;
+                             using Numos.CoreSim.State;
+
+                             namespace MyMod
+                             {
+                                 using System.Text;
+                                 using Buffers = System.Collections.Generic;
+
+                                 public sealed partial class FireSolver : IAtmosWorldSolver
+                                 {
+                                     [NumosScratch] private StringBuilder _log = new StringBuilder("start");
+                                     [NumosScratch] private Buffers.List<int> _hot = new Buffers.List<int>();
+
+                                     public void Solve(AtmosWorldSolverContext context) => _log.Append(_hot.Count);
+                                 }
+                             }
+                             """;
+
+        const string second = """
+                              using static System.Math;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver
+                              {
+                                  [NumosScratch] private int _limit = Max(2, 3);
+                                  [NumosScratch] private int _parsed = int.TryParse("4", out int value) ? value : 0;
+                                  [NumosScratch] private int _again = int.TryParse("5", out int value) ? value : 0;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, first, second);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosScratch.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(generated, Does.Contain("using static System.Math;"));
+            Assert.That(generated, Does.Contain("    using Buffers = System.Collections.Generic;"));
+            Assert.That(generated, Does.Contain("this._log = new StringBuilder(\"start\");"));
+            Assert.That(generated, Does.Contain("this._limit = Max(2, 3);"));
+            Assert.That(generated, Does.Match(@"\{\s+this\._parsed = "));
+        });
     }
 }

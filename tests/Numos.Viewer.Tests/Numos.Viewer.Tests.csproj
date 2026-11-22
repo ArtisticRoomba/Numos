@@ -13,4 +13,6 @@
         <ProjectReference Include="..\..\src\Numos.Viewer\Numos.Viewer.csproj"/>
     </ItemGroup>
 
+    <Import Project="..\Numos.Tests.SolverAssembly\NumosSolverAssembly.targets"/>
+
 </Project>

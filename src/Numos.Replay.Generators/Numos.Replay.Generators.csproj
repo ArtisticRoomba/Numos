@@ -28,6 +28,7 @@
     <ItemGroup>
         <Compile Include="..\Numos.API.Generators\Common\CodeWriter.cs" Link="Common\CodeWriter.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\DiagnosticInfo.cs" Link="Common\DiagnosticInfo.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\DiagnosticReporter.cs" Link="Common\DiagnosticReporter.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\EquatableArray.cs" Link="Common\EquatableArray.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\GeneratorOutput.cs" Link="Common\GeneratorOutput.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\IsExternalInit.cs" Link="Common\IsExternalInit.cs"/>

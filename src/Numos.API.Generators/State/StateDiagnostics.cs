@@ -9,7 +9,8 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor TypeNotPartial = new(
         "NUMOSSTATE001",
         "Serializable type must be partial",
-        "Type '{0}' must be partial because '{1}' has [NumosSerialize] members and code is generated into it",
+        "Type '{0}' must be partial because '{1}' has [NumosSerialize] or [NumosScratch] members and code is " +
+        "generated into it",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -17,7 +18,7 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor Generic = new(
         "NUMOSSTATE002",
         "Serializable type must not be generic",
-        "'{0}' has [NumosSerialize] members, so it must not be generic or nested in a generic type",
+        "'{0}' has [NumosSerialize] or [NumosScratch] members, so it must not be generic or nested in a generic type",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -42,7 +43,7 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor HandWritten = new(
         "NUMOSSTATE008",
         "Serializable type declares a member the generator owns",
-        "'{0}' declares '{1}', but the generator writes it from the type's [NumosSerialize] members; delete the " +
+        "'{0}' declares '{1}', but the generator writes it from the type's marked members; delete the " +
         "hand-written '{1}'",
         Category,
         DiagnosticSeverity.Error,
@@ -75,12 +76,32 @@ internal static class StateDiagnostics
 
     public static readonly DiagnosticDescriptor DerivedClass = new(
         "NUMOSSTATE013",
-        "Serializable class must not derive from another class",
-        "'{0}' derives from '{1}', whose members the generator can't see; derive from object, or move the base's " +
-        "settings into a nested serializable member",
+        "Serializable class derives from a class the generator can't extend",
+        "'{0}' derives from '{1}', which {2}",
         Category,
         DiagnosticSeverity.Error,
         true);
+
+    /// <summary>
+    ///     The reason <see cref="DerivedClass" /> gives for a type that is built from data.
+    /// </summary>
+    public const string DerivedDataTypeReason =
+        "is not object; only a class solver or a [SimulationComponent] class can derive from a class, so derive " +
+        "from object or move the base's settings into a nested serializable member";
+
+    /// <summary>
+    ///     The reason <see cref="DerivedClass" /> gives for a base class in another assembly without generated state.
+    /// </summary>
+    public const string ForeignBaseReason =
+        "is in another assembly and implements neither INumosStateTarget nor INumosScratchTarget from the Numos " +
+        "generator, so the generator can't see whether it holds state";
+
+    /// <summary>
+    ///     The reason <see cref="DerivedClass" /> gives for a base class in another assembly without the hooks.
+    /// </summary>
+    public const string OldBaseReason =
+        "is in another assembly and has no generated state hooks for a derived class to override; rebuild it " +
+        "with the current Numos.API";
 
     public static readonly DiagnosticDescriptor NoConstructor = new(
         "NUMOSSTATE014",
@@ -103,8 +124,7 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor Unmarked = new(
         "NUMOSSTATE016",
         "Mutable member is neither serialized nor ignored",
-        "'{0}' can change but isn't saved with '{1}'; mark it [NumosSerialize] if it affects behavior, or " +
-        "[NumosIgnore] if it's derived, scratch, or saved through another member",
+        "'{0}' can change but isn't saved with '{1}'; {2}",
         Category,
         DiagnosticSeverity.Warning,
         true);
@@ -129,8 +149,9 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor NotAssignable = new(
         "NUMOSSTATE020",
         "Solver state member can't be restored in place",
-        "'{0}' is readonly, get-only, or init-only, but solver state is restored by assigning to the registered " +
-        "instance; make it writable",
+        "'{0}' is readonly, get-only, or init-only, but solver and component state is restored by assigning to the " +
+        "existing instance; make it writable, or make it a non-nullable List<T>, HashSet<T>, or " +
+        "Dictionary<TKey, TValue>, which a restore clears and refills",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -265,5 +286,67 @@ internal static class StateDiagnostics
         "'{0}' is an indexer; [NumosSerialize] only applies to fields and properties that hold one value",
         Category,
         DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor ScratchWithOtherMark = new(
+        "NUMOSSTATE035",
+        "Member is marked scratch and serialized or ignored",
+        "'{0}' has both [NumosScratch] and [{1}]; keep one",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor ScratchOutsideSolver = new(
+        "NUMOSSTATE036",
+        "[NumosScratch] is outside a class solver",
+        "'{0}' has [NumosScratch], which only applies to instance fields and properties declared in a class that " +
+        "implements IAtmosWorldSolver or has [SimulationComponent], or in a base class of one; use [NumosIgnore] instead",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor ScratchNotResettable = new(
+        "NUMOSSTATE037",
+        "Scratch member can't be reset",
+        "'{0}' is readonly or get-only, and its type '{1}' is not a class or interface with a parameterless " +
+        "Clear(), so the generated reset can't reach it; make it assignable, or reset it in OnRestored and mark it " +
+        "[NumosIgnore]",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor ScratchInitializer = new(
+        "NUMOSSTATE038",
+        "Scratch initializer can't be repeated",
+        "The initializer of '{0}' {1}, so the generated reset can't repeat it; reset the member in OnRestored and " +
+        "mark it [NumosIgnore]",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor ComponentShape = new(
+        "NUMOSSTATE039",
+        "Simulation component has the wrong shape",
+        "Simulation component '{0}' {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor BlankComponentKey = new(
+        "NUMOSSTATE040",
+        "Simulation component key is blank",
+        "Simulation component '{0}' passes a blank key to [SimulationComponent]; use a namespaced name such as " +
+        "\"my-mod/pipes\"",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor HostEditableIgnored = new(
+        "NUMOSSTATE041",
+        "HostEditable has no effect here",
+        "'{0}' sets HostEditable = false, which only applies to members of a class solver or a " +
+        "[SimulationComponent] class; remove it",
+        Category,
+        DiagnosticSeverity.Warning,
         true);
 }

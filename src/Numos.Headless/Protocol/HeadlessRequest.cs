@@ -93,7 +93,7 @@ internal sealed class HeadlessRequest
     public double? Seconds { get; init; }
 
     /// <summary>
-    ///     Ticks between runs of the stage that `setSolverInterval` names.
+    ///     Ticks between runs of the stage that `setSolverInterval` names, or of the stage `addSolver` adds.
     /// </summary>
     public int? Interval { get; init; }
     public int? ProgressInterval { get; init; }
@@ -101,11 +101,46 @@ internal sealed class HeadlessRequest
     public bool? Enabled { get; init; }
 
     /// <summary>
+    ///     The stage that the stage `addSolver` adds runs directly before.
+    /// </summary>
+    public string? Before { get; init; }
+
+    /// <summary>
+    ///     The stage that the stage `addSolver` adds runs directly after.
+    /// </summary>
+    public string? After { get; init; }
+
+    /// <summary>
+    ///     The simulation component key for `setSimulationComponentState`.
+    /// </summary>
+    public string? Key { get; init; }
+
+    /// <summary>
+    ///     The state member that `setSolverState` and `setSimulationComponentState` write.
+    /// </summary>
+    public string? Member { get; init; }
+
+    /// <summary>
+    ///     The value that `setSolverState` and `setSimulationComponentState` write: a number, a boolean, a string, or
+    ///     null.
+    /// </summary>
+    /// <remarks>
+    ///     Not nullable, so an explicit JSON null arrives as a <see cref="JsonValueKind.Null" /> element and a missing
+    ///     property as <see cref="JsonValueKind.Undefined" />.
+    /// </remarks>
+    public JsonElement Value { get; init; }
+
+    /// <summary>
     ///     The ordered stage list for setSolverLayout.
     /// </summary>
     public SolverLayoutEntryRequest[]? Stages { get; init; }
     public long? Tick { get; init; }
     public int? BranchId { get; init; }
+
+    /// <summary>
+    ///     Ticks per run for `verifyDeterminism`.
+    /// </summary>
+    public int? Ticks { get; init; }
 
     // Data extraction. Boxes, slices, and probe points are global voxels.
     public BoxRequest? Region { get; init; }
@@ -310,6 +345,7 @@ internal sealed class ConfigurationPatch
     public float? MinimumFlameSpeed { get; init; }
     public bool? IgnitionTransferEnabled { get; init; }
     public float? TransferSeedFraction { get; init; }
+    public ulong? RandomSeed { get; init; }
     /// <summary>
     ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
     /// </summary>
@@ -419,6 +455,9 @@ internal sealed class ConfigurationPatch
 
         if (TransferSeedFraction.HasValue)
             config.TransferSeedFraction = TransferSeedFraction.Value;
+
+        if (RandomSeed.HasValue)
+            config.RandomSeed = RandomSeed.Value;
 
         EulerFlow?.ApplyTo(config);
     }

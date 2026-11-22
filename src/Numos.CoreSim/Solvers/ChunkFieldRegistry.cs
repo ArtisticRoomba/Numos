@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 
@@ -95,6 +96,15 @@ internal abstract class ChunkFieldDescriptor
     /// <exception cref="InvalidDataException">The data holds fewer elements.</exception>
     internal abstract SolverArrayStorage Read(ref StateReader reader, int length);
 
+    /// <summary>
+    ///     Gets a chunk's storage for this field as bytes in native layout, creating the storage on first use.
+    /// </summary>
+    /// <remarks>
+    ///     Recorded writes copy into this span without knowing the element type. Only valid for rollback fields, whose
+    ///     elements hold no managed references.
+    /// </remarks>
+    internal abstract Span<byte> GetOrCreateBytes(AtmosChunk chunk);
+
     internal int GetLength(int voxelCount)
     {
         return FixedLength ?? voxelCount;
@@ -154,6 +164,30 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
     }
 
     internal override int ElementSize => Unsafe.SizeOf<T>();
+
+    internal override Span<byte> GetOrCreateBytes(AtmosChunk chunk)
+    {
+        return SolverArrayStorage<T>.AsBytes(chunk.GetOrCreateField(this));
+    }
+
+    /// <summary>
+    ///     Copies <paramref name="values" /> into a new array in the encoding of the checkpoint's chunk-field arrays,
+    ///     each element little-endian.
+    /// </summary>
+    /// <remarks>
+    ///     Only valid for rollback fields, whose elements hold no managed references. A struct element is reversed as a
+    ///     whole on a big-endian host, as the state hash does. That is wrong for a file but harmless in memory, because
+    ///     replay reverses it back.
+    /// </remarks>
+    internal byte[] Encode(ReadOnlySpan<T> values)
+    {
+        byte[] bytes = MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.As<T, byte>(ref MemoryMarshal.GetReference(values)),
+            checked(values.Length * Unsafe.SizeOf<T>())).ToArray();
+
+        StateBinarySink.ReverseElements(bytes, Unsafe.SizeOf<T>());
+        return bytes;
+    }
 
     internal bool Matches(bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {

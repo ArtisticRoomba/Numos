@@ -8,7 +8,7 @@ version adds backwards-compatible capabilities. A patch version contains backwar
 There are two release families. Each has its own version and Git tag.
 
 - CoreSim releases version `Numos.Maths`, `Numos.Collections`, `Numos.CoreSim`, `Numos.API`, `Numos.API.Dangerous`,
-  `Numos.Serialization`, and `Numos.Serialization.FileSystem` together.
+  `Numos.Serialization`, `Numos.Serialization.FileSystem`, and `Numos.Testing` together.
 - Viewer releases version `Numos.SimDrawer`, `Numos.Workbench`, and `Numos.Viewer` together.
 
 The `[ChunkData]` source generator (`src/Numos.API.Generators`) is not a package. It ships inside `Numos.API` under
@@ -133,6 +133,7 @@ produces them.
 3. Enter that exact tag, for example `viewer/v0.1.0`.
 
 The workflow validates the tag and builds and tests the solution on Linux, Windows, and macOS. It then builds
-self-contained NativeAOT application archives for `linux-x64`, `win-x64`, and `osx-arm64`. It attaches the archives to
-a draft GitHub Release for the tag and creates the draft if it does not exist. It refuses to touch a release that is
-already published.
+self-contained application archives for `linux-x64`, `win-x64`, and `osx-arm64`. Each archive is an untrimmed JIT
+build with ReadyToRun code for faster startup. A Viewer from an archive can therefore load solver assemblies. A
+NativeAOT or trimmed build turns loading off. The workflow attaches the archives to a draft GitHub Release for the tag
+and creates the draft if it does not exist. It refuses to touch a release that is already published.

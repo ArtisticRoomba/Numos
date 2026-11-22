@@ -19,6 +19,11 @@ predict by hand, or when bit-exact determinism is the thing under test. A baseli
 sanity checks first (no NaNs, every parallel run agrees with the others), because a local run on an architecture with
 no baseline has nothing else to fail on.
 
+A test that only needs replay determinism does not need a baseline. `AtmosReplayCheck.Run` in `Numos.Testing` records
+a scripted run and compares it with a replay, a restored rerun, a saved and reloaded file, and a second world. It fails
+with the first differing tick and the differing fields. The tests in `tests/Numos.Testing.Tests` show a passing solver
+and each kind of failure. [Test a custom solver](using.md#test-a-custom-solver) describes the checks.
+
 ## Writing a baseline test
 
 Baselines live next to the test project in `Baselines/<Fixture>/<Test>.json`. Opt the project in with
@@ -64,6 +69,16 @@ compares.
 A test can guard its baseline with `Baseline.Verify(values, guard: "wire-format")`. A guarded baseline only
 regenerates when the variable names the guard (`NUMOS_UPDATE_BASELINES=wire-format`). A blanket `=1` leaves it alone.
 Use a guard where an accidental move would hide a real break, such as a change to the replay wire format.
+
+Two wire-format pins live in source instead of a baseline file, so `NUMOS_UPDATE_BASELINES` never rewrites them:
+
+- `ReplayWireFormatGoldenTests` pins the bytes of replay files as base64 constants. Its `[Explicit]`
+  `PrintGoldenBytes` test prints new ones.
+- `SchemaFingerprintTests.BuiltInSchemas_MatchThePinnedFingerprint` pins
+  `AtmosWorldCheckpoint.BuiltInSchemaFingerprint`, one value over the shape of every built-in state type. The
+  generator computes it at build time, so it has no per-architecture value. The failure message gives the new value.
+  [Checkpoints store continuation state](deterministic_replay.md#checkpoints-store-continuation-state) says what to
+  decide before you update it.
 
 ## Reviewing a baseline diff
 

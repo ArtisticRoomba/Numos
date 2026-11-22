@@ -28,6 +28,10 @@ namespace Numos.API;
 ///         <see langword="default" />(<see cref="AtmosSolverGasMixturePage" />). Field writes are not recorded. They
 ///         are replay-safe because replay re-runs the solver, so they must be deterministic.
 ///     </para>
+///     <para>
+///         Reads of gas, temperature, and the pressure and heat capacity caches are always allowed during a stage.
+///         Writes to them go through <see cref="Edit" />, and Numos repairs the page after the stage returns.
+///     </para>
 /// </remarks>
 /// <example>
 ///     <code>
@@ -180,6 +184,11 @@ public readonly struct AtmosSolverGasMixturePage
     ///         what the previous mixture in its slot left behind. Initialize the element yourself when you first see
     ///         a new mixture.
     ///     </para>
+    ///     <para>
+    ///         Creating the storage of a rollback field adds an array to the next checkpoint and changes the state
+    ///         hash. A solver that only looks at the field should call <see cref="TryGet{T}" />, which never creates
+    ///         storage.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
     /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
@@ -187,6 +196,135 @@ public readonly struct AtmosSolverGasMixturePage
     {
         ArgumentNullException.ThrowIfNull(field);
         return field.View(Chunk);
+    }
+
+    /// <summary>
+    ///     Gets this page's storage for a field if the page already has it. Never creates storage.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="field">The field to read.</param>
+    /// <param name="values">
+    ///     A live view of the page's array, shaped as <see cref="Get{T}" /> shapes it, or <see langword="default" />
+    ///     when the page has no storage for the field.
+    /// </param>
+    /// <returns><see langword="true" /> when the page has storage for <paramref name="field" />.</returns>
+    /// <remarks>
+    ///     The view is over the same array that <see cref="Get{T}" /> returns. It takes no lock, and the checkpoint
+    ///     and the state hash stay as they were.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public bool TryGet<T>(ChunkField<T> field, out FlatArray<T> values)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return field.TryView(Chunk, out values);
+    }
+
+    /// <summary>
+    ///     Tells whether this page already has storage for a field. Never creates storage.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="field">The field to look for.</param>
+    /// <returns>The same answer that <see cref="TryGet{T}" /> gives.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public bool Has<T>(ChunkField<T> field)
+    {
+        return TryGet(field, out _);
+    }
+
+    /// <summary>
+    ///     Gets the temperature of each cell, in kelvins.
+    /// </summary>
+    /// <remarks>
+    ///     The span is live, one entry per cell. A free cell reads zero unless a solver wrote it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public ReadOnlySpan<float> Temperature => Chunk.Temperature.AsSpan();
+
+    /// <summary>
+    ///     Gets the cached pressure of each cell, in pascals.
+    /// </summary>
+    /// <remarks>
+    ///     The pool keeps each allocated cell's value equal to what its gas, temperature, and volume imply. A write
+    ///     through <see cref="Edit" /> leaves it stale until the stage returns and Numos repairs the page.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public ReadOnlySpan<float> Pressure => Chunk.TotalPressure.AsSpan();
+
+    /// <summary>
+    ///     Gets the cached total heat capacity of each cell, in joules per kelvin.
+    /// </summary>
+    /// <remarks>
+    ///     It goes stale after a write through <see cref="Edit" /> in the same way as <see cref="Pressure" />.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public ReadOnlySpan<float> HeatCapacity => Chunk.TotalHeatCapacity.AsSpan();
+
+    /// <summary>
+    ///     Gets the moles of one gas in each cell.
+    /// </summary>
+    /// <param name="gasId">The registered gas ID.</param>
+    /// <returns>
+    ///     A live span with one entry per cell, or an empty span when the page has no channel for the gas.
+    /// </returns>
+    /// <remarks>
+    ///     The lookup scans the page's channels, as <see cref="AtmosSolverChunk.Moles" /> does. Call it outside the
+    ///     cell loop.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public ReadOnlySpan<float> Moles(int gasId)
+    {
+        return SolverGasChannels.Read(Chunk, gasId);
+    }
+
+    /// <summary>
+    ///     Tells whether the page has a channel for a gas.
+    /// </summary>
+    /// <param name="gasId">The registered gas ID.</param>
+    /// <returns><see langword="true" /> when <see cref="Moles" /> returns a non-empty span for the gas.</returns>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    public bool HasGas(int gasId)
+    {
+        return Chunk.FindGasChannel(gasId) >= 0;
+    }
+
+    /// <summary>
+    ///     Opens the page's gas and temperature for writing and marks the page for repair.
+    /// </summary>
+    /// <returns>An editor with writable spans over the same storage this view reads.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         After the stage returns, Numos repairs every page the stage opened, in index order, on the tick thread.
+    ///         Gas written into a free cell is cleared. Every allocated cell gets the pressure, heat capacity, and
+    ///         vacuum flag that its gas, temperature, and volume imply. A cell left without gas becomes vacuum. The
+    ///         page revision advances. A page never sleeps, so nothing wakes.
+    ///     </para>
+    ///     <para>
+    ///         The threading and replay rules of <see cref="AtmosSolverChunk.Edit" /> apply. Each worker edits its
+    ///         own pages.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
+    /// <example>
+    ///     <code>
+    ///     foreach (AtmosSolverGasMixturePage page in context.GasMixtures)
+    ///     {
+    ///         Span&lt;float&gt; temperature = page.Edit().Temperature;
+    ///         for (ushort cell = 0; cell &lt; page.CellCount; cell++)
+    ///         {
+    ///             if (page.IsAllocated(cell))
+    ///                 temperature[cell] = MathF.Min(temperature[cell], 1000f);
+    ///         }
+    ///     }
+    ///     </code>
+    /// </example>
+    public AtmosSolverGasMixturePageEditor Edit()
+    {
+        var scope = OpenScope;
+        var page = scope.World.GasMixtures.GetPage(_index);
+        scope.MarkEdited(page, AtmosSolverTickScope.PageEdits);
+        return new AtmosSolverGasMixturePageEditor(page, scope.World.GasMixtures.CurrentTickConfig.GasPropertyCount);
     }
 
     /// <summary>

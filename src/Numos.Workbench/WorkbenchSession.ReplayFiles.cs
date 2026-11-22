@@ -31,6 +31,41 @@ public sealed record LoadedReplay(
 }
 
 /// <summary>
+///     Thrown when a replay file needs custom solvers that <see cref="AtmosSolverCatalog" /> lacks.
+/// </summary>
+/// <remarks>
+///     The session checks <see cref="AtmosWorldReplayArchive.RequiredSolvers" /> before it rebuilds the world, so the
+///     load fails with the full list instead of the first stage the restore cannot create. The session never loads an
+///     assembly to find a solver. The host loads the assembly that declares each one first.
+/// </remarks>
+public sealed class MissingSolversException : InvalidOperationException
+{
+    /// <summary>
+    ///     Creates the exception.
+    /// </summary>
+    /// <param name="path">The replay file.</param>
+    /// <param name="missingSolvers">The stage names that the catalog lacks, in ordinal order.</param>
+    public MissingSolversException(string path, IReadOnlyList<string> missingSolvers)
+        : base(
+            $"The replay '{System.IO.Path.GetFileName(path)}' needs solvers that are not loaded: " +
+            $"{string.Join(", ", missingSolvers)}. Load the assemblies that declare them first.")
+    {
+        Path = path;
+        MissingSolvers = missingSolvers;
+    }
+
+    /// <summary>
+    ///     Gets the full path of the replay file.
+    /// </summary>
+    public string Path { get; }
+
+    /// <summary>
+    ///     Gets the required solver names that <see cref="AtmosSolverCatalog" /> lacks, in ordinal order.
+    /// </summary>
+    public IReadOnlyList<string> MissingSolvers { get; }
+}
+
+/// <summary>
 ///     A replay captured and ready to write. The capture is already done, so <see cref="Execute" /> can run on a
 ///     worker thread.
 /// </summary>
@@ -73,6 +108,9 @@ public sealed partial class WorkbenchSession
     /// <remarks>
     ///     This method reads no session state, so it can run on a worker thread while the session ticks.
     /// </remarks>
+    /// <exception cref="MissingSolversException">
+    ///     The replay needs custom solvers that <see cref="AtmosSolverCatalog" /> lacks.
+    /// </exception>
     public LoadedReplay LoadReplay(
         string path,
         IProgress<AtmosWorldReplayIndexProgress>? progress = null,
@@ -86,6 +124,10 @@ public sealed partial class WorkbenchSession
         {
             var document = NumosReplayFile.Load(fullPath);
             var replay = document.Replay;
+            string[] missing = replay.RequiredSolvers.Where(static name => !AtmosSolverCatalog.TryGet(name, out _)).ToArray();
+            if (missing.Length > 0)
+                throw new MissingSolversException(fullPath, missing);
+
             var config = new AtmosConfig(replay.InitialCheckpoint.Config);
             // Restore adopts the checkpoint's solver layout, so the world needs no matching transport model.
             world = new AtmosWorld(config);

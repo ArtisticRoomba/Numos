@@ -14,7 +14,7 @@ namespace Numos.CoreSim.Replay;
 ///         The payload is a count, then one entry per array in ordinal key order. Each entry holds the key and the full
 ///         name of the element type. It also holds the element size and count as <c>int32</c>, and then the elements as
 ///         one little-endian block. The state hash sees the same calls. A struct-typed array therefore hashes its native bytes even
-///         though it cannot be saved. Writing one to any other sink throws.
+///         though it cannot be saved. Writing one to any sink other than the hash or a <see cref="StateTraceSink" /> throws.
 ///     </para>
 ///     <para>
 ///         Reading maps each key back to its registered field. Here the length is checked only against the data. The
@@ -31,7 +31,7 @@ internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolv
         for (int index = 0; index < value.Count; index++)
         {
             var array = value[index];
-            if (typeof(TSink) != typeof(StateHashSink) && !array.IsPortable)
+            if (typeof(TSink) != typeof(StateHashSink) && typeof(TSink) != typeof(StateTraceSink) && !array.IsPortable)
             {
                 throw new NotSupportedException(
                     $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +
@@ -87,7 +87,9 @@ internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolv
             {
                 throw new NotSupportedException(
                     $"The file contains chunk field '{key}', but no field is registered under that key. [ChunkData] " +
-                    "fields register once their assembly has run; call ChunkField<T>.Register for other fields before loading.");
+                    "fields register once their assembly has run; call ChunkField<T>.Register for other fields before loading. " +
+                    "If the assembly that declares the key has not run yet or is not referenced, calling its generated " +
+                    "<assembly name>.NumosModule.EnsureRegistered() before loading fixes the first case.");
             }
 
             if (!field.CaptureForRollback)

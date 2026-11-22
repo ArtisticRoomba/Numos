@@ -16,8 +16,9 @@ namespace Numos.API;
 ///     <para>
 ///         A field is a typed key, not storage. Each chunk allocates its own array the first time a solver reads the
 ///         field through <see cref="AtmosSolverChunk.Get{T}" />. The array starts filled with default values.
-///         Allocation is lazy, so a field nobody touches adds nothing to checkpoints or state hashes. Host code reads
-///         a field without allocating through <see cref="AtmosSimulation.TryGetChunkField{T}" />.
+///         Allocation is lazy, so a field nobody touches adds nothing to checkpoints or state hashes. A solver reads
+///         a field without allocating through <see cref="AtmosSolverChunk.TryGet{T}" />. Host code uses
+///         <see cref="AtmosSimulation.TryGetChunkField{T}" />.
 ///     </para>
 ///     <para>
 ///         Fields are process-wide. Every simulation, world, and assembly in the process shares one registry, so a
@@ -167,6 +168,22 @@ public sealed class ChunkField<T>
     internal FlatArray<T> View(AtmosChunk chunk)
     {
         return CreateView(chunk.GetOrCreateField(Descriptor), chunk.Dimensions);
+    }
+
+    /// <summary>
+    ///     Gets a view of this field's array in <paramref name="chunk" /> if the chunk already has it. Never allocates.
+    /// </summary>
+    /// <remarks>Takes no lock. The caller must ensure the chunk is safe to touch.</remarks>
+    internal bool TryView(AtmosChunk chunk, out FlatArray<T> values)
+    {
+        if (!chunk.TryGetField(Descriptor, out T[]? array))
+        {
+            values = default;
+            return false;
+        }
+
+        values = CreateView(array, chunk.Dimensions);
+        return true;
     }
 
     private static ChunkField<T> Wrap(ChunkFieldDescriptor<T> descriptor)

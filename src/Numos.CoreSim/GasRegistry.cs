@@ -28,6 +28,18 @@ public interface IGasRegistry : IEnumerable<GasProperties>
     int GasIdToIndex(string gasId);
 
     /// <summary>
+    ///     Resolves a gas name to its index without throwing.
+    /// </summary>
+    /// <param name="gasName">The gas's <see cref="GasProperties.Name" />, compared ordinally.</param>
+    /// <param name="gasIndex">The gas ID, or -1 when no gas has the name.</param>
+    /// <returns><see langword="true" /> when a gas with the name is registered.</returns>
+    /// <remarks>
+    ///     Use it where a missing gas is an expected case, such as a solver setting that names a gas the host may not
+    ///     register. <see cref="GasIdToIndex" /> gives the same index for every name this method finds.
+    /// </remarks>
+    bool TryGetGasIndex(string gasName, out int gasIndex);
+
+    /// <summary>
     ///     Checks the registry for duplicate gas names.
     /// </summary>
     /// <exception cref="InvalidOperationException">Two or more gases share a name.</exception>
@@ -56,6 +68,18 @@ public sealed class GasRegistry : IGasRegistry
             return index;
 
         throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="gasName" /> is <see langword="null" />.</exception>
+    public bool TryGetGasIndex(string gasName, out int gasIndex)
+    {
+        ArgumentNullException.ThrowIfNull(gasName);
+        if (_idMap.TryGetValue(gasName, out gasIndex))
+            return true;
+
+        gasIndex = -1;
+        return false;
     }
 
     /// <inheritdoc />
@@ -183,6 +207,18 @@ public sealed class GasRegistrySnapshot : IGasRegistry
             return index;
 
         throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="gasName" /> is <see langword="null" />.</exception>
+    public bool TryGetGasIndex(string gasName, out int gasIndex)
+    {
+        ArgumentNullException.ThrowIfNull(gasName);
+        if (_idMap.TryGetValue(gasName, out gasIndex))
+            return true;
+
+        gasIndex = -1;
+        return false;
     }
 
     /// <inheritdoc />

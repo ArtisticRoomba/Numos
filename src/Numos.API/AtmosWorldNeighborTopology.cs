@@ -141,7 +141,7 @@ public sealed class AtmosWorldNeighborTopology
     public int GetNeighborCount(AtmosCellRef cell)
     {
         var world = GetWorld();
-        if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
+        if (!world.TryGetSimulation(cell.Simulation, out var simulation))
             throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));
 
         return GetChunk(simulation, cell.Chunk).GetNeighborCount(cell.LocalVoxelIndex);
@@ -161,7 +161,7 @@ public sealed class AtmosWorldNeighborTopology
     public AtmosNeighborEnumerable GetNeighbors(AtmosCellRef cell)
     {
         var world = GetWorld();
-        if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
+        if (!world.TryGetSimulation(cell.Simulation, out var simulation))
             throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));
 
         return GetChunk(simulation, cell.Chunk).GetNeighbors(cell.LocalVoxelIndex);

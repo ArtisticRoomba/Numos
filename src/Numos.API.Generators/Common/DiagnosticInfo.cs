@@ -18,11 +18,19 @@ internal sealed record DiagnosticInfo(
         return new DiagnosticInfo(descriptor, location, new EquatableArray<string>(arguments));
     }
 
-    public Diagnostic ToDiagnostic()
+    /// <summary>
+    ///     Builds the diagnostic, at a location in <paramref name="tree" /> when there is one.
+    /// </summary>
+    /// <param name="tree">The compilation's tree for <see cref="LocationInfo.FilePath" />, if it has one.</param>
+    /// <remarks>
+    ///     Use <see cref="DiagnosticReporter" /> to report, because only a tree location honors
+    ///     <c>#pragma warning disable</c>.
+    /// </remarks>
+    public Diagnostic ToDiagnostic(SyntaxTree? tree)
     {
         return Diagnostic.Create(
             Descriptor,
-            Location?.ToLocation() ?? Microsoft.CodeAnalysis.Location.None,
+            Location?.ToLocation(tree) ?? Microsoft.CodeAnalysis.Location.None,
             Arguments.Cast<object?>().ToArray());
     }
 }

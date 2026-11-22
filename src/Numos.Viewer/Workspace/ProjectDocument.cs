@@ -86,6 +86,11 @@ internal sealed class ProjectDocument : IDisposable
     public readonly SolverAddDraft SolverAdd = new();
 
     /// <summary>
+    ///     The "Solver state" section of the selected stage.
+    /// </summary>
+    public readonly SolverStateDraft SolverState = new();
+
+    /// <summary>
     ///     The simulation tree, refreshed from each frame.
     /// </summary>
     public readonly SimulationTree Tree = new();

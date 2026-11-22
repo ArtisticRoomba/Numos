@@ -228,6 +228,7 @@ public static class SimulationStateAnalyzer
             config.MinimumFlameSpeed,
             config.IgnitionTransferEnabled,
             config.TransferSeedFraction,
+            config.RandomSeed,
             gases,
             CreateEulerFlowReport(config));
     }

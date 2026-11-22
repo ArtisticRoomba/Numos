@@ -102,12 +102,15 @@ Validated mutations keep pressure and heat-capacity caches, active-voxel indices
 revisions coherent. Use the dangerous package only when a solver must traverse or mutate backing storage directly.
 Such a solver must also maintain those coupled invariants itself.
 
+Every custom solver is registered through `simulation.World.Solvers` and receives an `AtmosWorldSolverContext`. Its
+`AtmosSolverChunk` views from `context.Chunks(simulation)` are part of the supported API. They read live gas,
+temperature, momentum, classification, and the pressure and heat capacity caches. Writes go through `chunk.Edit()`, and
+Numos repairs each edited chunk after the stage (§12.3). Most solvers need nothing more.
+
 Reference the dangerous package separately and import `Numos.API.Dangerous`. Access begins with
-`simulation.Dangerous()`. Every custom solver is registered through `simulation.World.Solvers` and receives an
-`AtmosWorldSolverContext`. Most solvers use the detached snapshots and validated mutations of its simulations. A
-measured hot path can instead call `simulation.Dangerous().GetChunk(handle)` from that callback. That call returns
-stack-scoped live chunk and gas-channel spans. A hot path can also call `chunk.Dangerous()` on an `AtmosSolverChunk`
-view from `context.Chunks(simulation)` (examples in §12.4).
+`simulation.Dangerous()` or `chunk.Dangerous()`. A measured hot path can call `simulation.Dangerous().GetChunk(handle)`
+from a callback. That call returns stack-scoped live chunk and gas-channel spans. Writes through them get no repair
+(examples in §12.4).
 
 The dangerous views are `ref struct` values. They never expose the internal `AtmosChunk` or `GasChannel` CLR types.
 Use them inside a solver callback, because there the simulation already prevents concurrent tick and chunk-lifecycle
@@ -273,6 +276,7 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 | `AccumulatorWakeThreshold`                 | 15      | Pressure activity (Pa) intended to wake a sleeping chunk. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                           |
 | `AccumulatorMaxAliveTicks`                 | 20      | Lifetime in ticks of an accumulated activity value. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                                 |
 | `ReferenceMolarMass`                       | 0.02897 | Molar mass (kg/mol) assumed for gases whose `MolarMass` is unset. Defaults to dry air. Non-finite or nonpositive values normalize to it.                                                                                                                 |
+| `RandomSeed`                               | 0       | Seed of `AtmosWorldSolverContext.Random`, an unsigned 64-bit integer. Every value is valid. The built-in solvers draw no random numbers, so only custom stages see it.                                                                                   |
 
 **Euler transport settings.** The `euler-flow` stage keeps its settings in an `EulerFlowConfig` entry (key
 `euler-flow`) of `SolverConfigurations` and runs with `EulerFlowConfig.Default` when there is none. The per-tick
@@ -459,18 +463,24 @@ was captured with. `new AtmosWorld(config, AtmosTransportModel.Legacy)` or
 Gas reactions are documented at the configuration level on `GasReactionConfig`. The rest of this document covers the
 other stages.
 
+One internal table holds each built-in stage's name, default rate, and place in each default layout. The pipeline, the
+schedule, and the standalone kernel tick read it, so they cannot disagree. Tools read the same table through
+`AtmosWorldSolverPipeline.BuiltInStageNames` (every built-in stage, in canonical order) and
+`AtmosWorldSolverPipeline.GetDefaultLayout(model)` (one model's stages, in execution order).
+
 That order is what the default pipeline ships with, not a numerical requirement. Because `explicit-gas-transport` and
 `explicit-thermal-transport` are ordinary stages rather than a side effect of the transport and thermodynamics
 stages, a host can disable Numos' own portal/dock physics without touching Cartesian flow, and register a
 replacement in its place. See [Extending portal and dock transport](#extending-portal-and-dock-transport).
 
-A host can enable, disable, remove, or restore stages with `ResetToDefaults`. It can append custom delegates or insert
-them before or after any registered stage:
+A host can enable, disable, remove, or restore stages with `ResetToDefaults`. It adds a custom stage before or after
+any registered stage. The usual form is a class that declares its name, placement, and rate:
 
 ```csharp
-simulation.World.Solvers.Register(
-    "game-reactions",
-    context =>
+[AtmosSolver("game/reactions", After = AtmosBuiltInSolvers.EulerFlow, RunsPerSecond = 20)]
+public sealed partial class GameReactionSolver : IAtmosWorldSolver
+{
+    public void Solve(AtmosWorldSolverContext context)
     {
         AtmosSimulation simulation = context.Simulations[0];
         foreach (AtmosChunkHandle chunk in simulation.GetChunkHandles())
@@ -478,10 +488,17 @@ simulation.World.Solvers.Register(
             AtmosChunkSnapshot snapshot = simulation.GetChunkSnapshot(chunk);
             // Inspect the detached snapshot and apply results through validated simulation methods.
         }
-    },
-    after: AtmosBuiltInSolvers.EulerFlow);
+    }
+}
 
+simulation.World.Solvers.Add<GameReactionSolver>();
 simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+```
+
+`Register` is the manual form. It takes a delegate or a host-owned instance with the same placement options:
+
+```csharp
+simulation.World.Solvers.Register("game/decay", context => Decay(context), after: AtmosBuiltInSolvers.EulerFlow);
 ```
 
 §12 covers the rest of the extension surface.
@@ -517,8 +534,9 @@ follow fast gas inside each run. A run on every tick picks up a new disturbance 
 a fixed cost to gather and write back its chunks. At 960 Hz a run on every tick costs up to twice as much for the same
 gas time. `SetInterval(AtmosBuiltInSolvers.EulerFlow, 1)` restores it for a host that wants the shorter reaction time.
 
-A custom stage defaults to interval 1. `SetInterval` changes one stage. The
-schedule is checkpointed, so a restored world runs the same stages on the same ticks.
+A custom stage takes its interval from the `RunsPerSecond` or `Interval` of its `[AtmosSolver]` declaration. A stage
+registered with `Register` defaults to interval 1. `SetInterval` changes one stage. The schedule is checkpointed, so a
+restored world runs the same stages on the same ticks.
 
 A producer and its consumer must share an interval, because the consumer drains what the producer published in the
 same tick. The pairs are `derived-refresh` with `advection`, `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. The world does
@@ -1613,16 +1631,30 @@ remains a sparse batch of cell links.
 
 ## 12. Extending the pipeline
 
-Host stages are registered and run exactly like the built-in ones; §4.2 shows the basic register and disable calls.
+Host stages run exactly like the built-in ones. §4.2 shows the basic add, register, and disable calls.
+
+A class marked `[AtmosSolver]` is a catalog solver. The generator registers its `AtmosSolverDescriptor` in the
+process-wide `AtmosSolverCatalog` when the assembly loads, so Numos can create the stage from its name alone. That is
+what replay and restore need. `world.Solvers.Add<T>()` and `Remove<T>()` work while recording, because Numos records
+them as a solver layout operation and replay creates or removes the stage the same way. A restore creates each
+catalog stage the checkpoint names and the world lacks, and removes each one the checkpoint lacks. A portable archive
+can use catalog solvers, and `AtmosWorldReplayTimeline.Import` creates them in the receiving world. The world owns a
+catalog stage's instance, one per world.
+
+A stage registered with `Register` stays host-owned. Numos cannot create it from a name, so registering or removing
+one is rejected while recording or replaying, and a restore needs it registered already. Use it for delegates and
+for instances that need constructor arguments.
 
 ### 12.1 Sharing data between stages
 
-Custom stages have three ways to reach data outside their own chunk fields:
+Custom stages have four ways to reach data outside their own chunk fields:
 
 - A `SolverDataKey<T>` names a transient per-simulation value, read with `simulation.GetSolverData(key)`. The key
   instance is the identity and carries the factory. Values survive ticks and pipeline edits. Numos rebuilds them
   after a configuration change or a restore. Per-chunk state that must roll back belongs in a `ChunkField<T>`
   instead (§12.3).
+- A `[SimulationComponent]` class is per-simulation state that rolls back, read with `context.Get<T>(simulation)`.
+  The section below describes it.
 - `AtmosWorld.Services` holds host objects keyed by exact type. Lookups are lock-free, and services are never
   checkpointed or disposed by the world.
 - A class solver (`IAtmosWorldSolver`) can declare services and other class solvers as `[SolverDependency]`
@@ -1631,6 +1663,40 @@ Custom stages have three ways to reach data outside their own chunk fields:
 None of these schedule stages, so producers and consumers still need explicit pipeline ordering.
 [Using Numos](using.md#sharing-data-between-solvers) explains when to depend on a producer solver and when to share a
 key. It also gives the ownership and threading rules for each.
+
+#### Per-simulation state with `[SimulationComponent]`
+
+A solver's own `[NumosSerialize]` fields are world state, and a `ChunkField<T>` is per-voxel state. State that belongs
+to one grid, such as a pipe network or a list of fires, goes in a simulation component:
+
+```csharp
+[SimulationComponent("my-mod/pipes")]
+public sealed partial class PipeNetwork
+{
+    [NumosSerialize] public int NextId;
+    [NumosSerialize(HostEditable = false)] public readonly List<PipeNode> Nodes = [];
+}
+```
+
+The state generator treats the class like a class solver. It writes `INumosStateTarget`, so a restore writes the marked
+members into the existing instance and refills a `List<T>`, `HashSet<T>`, or `Dictionary<TKey, TValue>` in place. It
+writes `ISimulationComponentDefinition<TSelf>`, whose static `ComponentKey` and `CreateComponent` let the generic
+accessors work without reflection. `[NumosScratch]` members get a `ResetScratch`, which a world restore calls. A module
+initializer adds every component class to the process-wide `SimulationComponentCatalog`. A key held by two classes
+throws from the second module initializer, the same rule `AtmosSolverCatalog` has. The assembly gets `NumosModule`.
+
+A simulation holds at most one instance per key. A stage reads it with `context.Get<T>(simulation)`, which creates it
+on first use, or `context.TryGet`. Host code between ticks uses `simulation.GetComponent<T>()`, `TryGetComponent`, and
+`RemoveComponent<T>()`. Destroying the simulation drops its components. The world checkpoint lists every component as a
+`(Simulation, Key, State, SchemaFingerprint)` entry, by simulation and then ordinal key, and the world state hash
+covers the entries. Restore creates a missing component from the catalog and drops one the checkpoint lacks. It also
+reports a key whose class now has another schema fingerprint (`deterministic_replay.md`, "Schema fingerprints flag
+state saved with another shape"). Recording finds host edits at the same boundaries as solver state
+(`deterministic_replay.md`, "Recording at the boundary").
+
+`HostEditable = false` keeps a member out of the boundary hash, so a list that grows every tick costs nothing there. The
+checkpoint and the world state hash still cover it. The host changes such a member only through a solver command. A
+Debug build of Numos checks this at each boundary and throws `InvalidOperationException` naming the member.
 
 #### Declaring solver dependencies with `[SolverDependency]`
 
@@ -1659,12 +1725,15 @@ that derives from one emits `protected override` and calls `base.InjectSolverDep
 the same project or a referenced assembly. Base and derived dependencies are then both assigned. Generic and nested
 classes work as long as every containing type is `partial`.
 
-Injection is lazy. Every `Register`, `Unregister`, and `ResetToDefaults` bumps a pipeline epoch, and every service
-change bumps the services version. Each registration remembers the pair it was last injected against. At the start of
+Injection is lazy. Every stage change (`Add`, `Remove`, `Register`, `Unregister`, `SetLayout`, or `ResetToDefaults`)
+bumps a pipeline epoch, and every service change bumps the services version. Each registration remembers the pair it was last injected against. At the start of
 a tick, before pending configuration is applied or any stage runs, Numos injects the enabled registrations that are
 stale. A missing dependency therefore throws with the world untouched. Numos stamps a registration only after its
 injection returns, so the next tick retries a failure. [Using Numos](using.md#declaring-dependencies-with-solverdependency)
 gives the resolution order and what it means for solver code.
+
+The generator reports the diagnostics below. As with a compiler warning, `#pragma warning disable` or `.editorconfig`
+can turn off any warning in this section.
 
 | ID            | Severity | Raised when                                                                                                                                      |
 |---------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1678,6 +1747,62 @@ gives the resolution order and what it means for solver code.
 | `NUMOSDEP008` | Error    | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
 | `NUMOSDEP009` | Error    | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself.                        |
 | `NUMOSDEP010` | Error    | The class, or a type it's nested in, is `file`-local, so the generator can't reopen it from another file.                                        |
+
+#### Authoring diagnostics
+
+The analyzer that ships with `Numos.API` warns about solver mistakes that compile but break replay or a tick. A solver
+lambda is a lambda or anonymous method passed directly as the `solver` argument of `Register`. Solver code is a solver
+lambda, the lambdas nested in it, and every member of a type that implements `IAtmosWorldSolver`. The analyzer does not
+follow calls into other types, so a helper that reads the clock is not reported.
+
+| ID               | Severity | Raised when                                                                                                                                                                                                                                                                                                                                                |
+|------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NUMOSSOLVER001` | Warning  | A solver lambda assigns, increments, or passes by `ref` or `out` a local or parameter it captures. Replay can't see or restore that variable. Reads and calls on captured objects aren't reported.                                                                                                                                                         |
+| `NUMOSSOLVER002` | Warning  | A solver lambda reads `context.Topology`, but its `Register` call passes no `neighbors` (or `null`), so the view is empty. A member of an `[AtmosSolver]` class that sets no `Neighbors` and has no `[SolverNeighborSelector]` method gets the same warning.                                                                                               |
+| `NUMOSSOLVER003` | Warning  | Solver code uses `new Random(...)`, `Random.Shared`, `Guid.NewGuid()`, `DateTime.Now`, `UtcNow`, or `Today`, `DateTimeOffset.Now` or `UtcNow`, `Environment.TickCount` or `TickCount64`, a `HashCode` member, or `string.GetHashCode()`. Each one differs between a run and its replay, or keeps state outside the checkpoint. Draw random numbers from `context.Random(stream)` instead. `Stopwatch` isn't reported. |
+| `NUMOSSOLVER004` | Warning  | A field or auto-property has type `AtmosWorldSolverContext`, `AtmosSolverChunk`, `AtmosSolverChunks`, `AtmosSolverGasMixtures`, or `AtmosSolverGasMixturePage`. These views are valid only during the tick that handed them out. A field of a `ref struct` isn't reported.                                                                                 |
+| `NUMOSSOLVER005` | Warning  | Host code calls `GetChunk` or `GetChunkField` on `simulation.Dangerous()`. Writes through the view bypass recording, so a replay reaches a different state. Write with `SetChunkData` or `WriteChunkData`, or send a solver command. Solver code and the `Apply{Name}` method of a `[SolverCommand]` aren't reported.                                      |
+
+#### Solver declaration diagnostics
+
+The `[AtmosSolver]` generator implements `IAtmosSolverDefinition<TSelf>` on each marked class and registers its descriptor
+in `AtmosSolverCatalog` from the assembly's module initializer. It reports these diagnostics.
+
+| ID               | Severity | Raised when                                                                                                                                                                                                                                      |
+|------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NUMOSSOLVER010` | Error    | The class, or a type it's nested in, isn't `partial`.                                                                                                                                                                                            |
+| `NUMOSSOLVER011` | Error    | The class is abstract, static, generic, nested in a generic type, or `file`-local. A nested class that is `private` or `protected`, or sits inside such a type, is reported too, because the module initializer can't name it.                   |
+| `NUMOSSOLVER012` | Error    | The class doesn't implement `IAtmosWorldSolver`.                                                                                                                                                                                                 |
+| `NUMOSSOLVER013` | Error    | The class has no public or internal parameterless constructor for the generated factory to call.                                                                                                                                                 |
+| `NUMOSSOLVER014` | Error    | The name is blank.                                                                                                                                                                                                                               |
+| `NUMOSSOLVER015` | Error    | Both `After` and `Before` are set.                                                                                                                                                                                                               |
+| `NUMOSSOLVER016` | Error    | Both `RunsPerSecond` and `Interval` are set, or either is negative.                                                                                                                                                                              |
+| `NUMOSSOLVER017` | Warning  | Neither `RunsPerSecond` nor `Interval` is set, so the stage runs every tick.                                                                                                                                                                     |
+| `NUMOSSOLVER018` | Error    | Two classes in the compilation declare the same name. Each gets its partial, and neither is registered.                                                                                                                                          |
+| `NUMOSSOLVER019` | Error    | A `[SolverNeighborSelector]` method isn't `static bool M(AtmosExplicitLinkInfo)`, its key is blank, the class has more than one, or `Neighbors` is also set. A selector on a local function and an undefined `Neighbors` value are reported too. |
+| `NUMOSSOLVER020` | Error    | The class already declares `Descriptor` or implements `IAtmosSolverDefinition<T>` itself.                                                                                                                                                        |
+| `NUMOSSOLVER021` | Error    | `[SolverNeighborSelector]` is on a method of a class without `[AtmosSolver]`.                                                                                                                                                                    |
+
+#### Solver command diagnostics
+
+A `[SolverCommand]` method is a recorded input of a class solver (see
+[Recorded input from a mod](deterministic_replay.md#recorded-input-from-a-mod)). The generator implements the declared
+partial method and `IAtmosSolverCommands` on the class. Each command method encodes its arguments, runs the author's
+`Apply{Name}` inside an `AtmosSolverCommandScope`, and records one `InvokeAtmosSolverCommandOperation`.
+`InvokeCommand` decodes a recorded payload and calls `Apply{Name}` for replay. An `Apply{Name}` whose first parameter is
+an `AtmosWorld` gets the world that holds the solver in both calls. The world is not part of the payload. The switch lives in an
+`InvokeSolverCommand` hook. A class whose base classes have commands overrides the hook and passes an unknown id to the
+base, so a base command still replays through a derived instance. A module initializer registers the wire names, so a
+replay error prints the command name instead of its id. The generator reports these diagnostics.
+
+| ID                | Severity | Raised when                                                                                                                                         |
+|-------------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NUMOSCOMMAND001` | Error    | The class, or a type it's nested in, isn't `partial` or is `file`-local. Or the type isn't a class, or doesn't implement `IAtmosWorldSolver`.        |
+| `NUMOSCOMMAND002` | Error    | The method isn't an instance `partial void` declaration without a body, or it's generic.                                                            |
+| `NUMOSCOMMAND003` | Error    | A parameter is `ref`, `out`, `in`, or `params`, or has a type the state schema doesn't handle. Two parameters whose names hash to one id are reported too. The message names the parameter. |
+| `NUMOSCOMMAND004` | Error    | The class has no non-generic instance `Apply{Name}` method with the same by-value parameter types, with or without a leading `AtmosWorld` parameter. |
+| `NUMOSCOMMAND005` | Error    | Two commands of one class have the same command id. Neither is generated. A command with the id of a base class command is reported too, and only the base command is generated. |
+| `NUMOSCOMMAND006` | Error    | The wire name passed to `[SolverCommand]` is blank.                                                                                                 |
 
 ### 12.2 Solver-specific configuration
 
@@ -1694,7 +1819,8 @@ public sealed partial class CombustionSettings(float rate) : IAtmosSolverConfigu
     [NumosSerialize] public float Rate { get; } = rate;
 }
 
-public sealed class CombustionSolver : IAtmosWorldSolver
+[AtmosSolver("game/combustion", After = AtmosBuiltInSolvers.EulerFlow, RunsPerSecond = 20)]
+public sealed partial class CombustionSolver : IAtmosWorldSolver
 {
     public void Solve(AtmosWorldSolverContext context)
     {
@@ -1705,7 +1831,7 @@ public sealed class CombustionSolver : IAtmosWorldSolver
     }
 }
 
-world.Solvers.Register("game/combustion", new CombustionSolver(), after: AtmosBuiltInSolvers.EulerFlow);
+world.Solvers.Add<CombustionSolver>();
 
 var config = new AtmosConfig(world.Config);
 config.SolverConfigurations.Add(new CombustionSettings(rate: 0.5f));
@@ -1732,26 +1858,59 @@ configuration with `SolverConfigurationTypes` for loading. That needs the key at
 must return a constant string.
 
 A member's wire id is FNV-1a over its name, or over the name passed as `[NumosSerialize("OldName")]` after a rename.
-Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. The generator reports:
+Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. On a class solver or a simulation
+component, `[NumosScratch]` marks a member that Numos resets after a restore, through a generated
+`INumosScratchTarget.ResetScratch`.
+
+Every type the generator writes state code for also implements `INumosStateSchema`. Its `SchemaFingerprint` is a
+constant that the generator computes as FNV-1a 64 over each member's wire name and codec shape, in id order. A world
+checkpoint stores it in each solver state and component entry. A restore can then report each entry that a type with
+another schema wrote (`deterministic_replay.md`, "Schema fingerprints flag state saved with another shape").
+
+A class solver or simulation component can keep part of its state in a base class. The base class and every class
+derived from it write one wire object, with the bytes that one class holding all of their fields would write. The
+fingerprint of a derived class covers the same fields in id order. The generator chains the classes through
+`protected virtual` hooks, as it does for `InjectSolverDependencies`:
+
+| Hook                  | What an override does                                                                                  |
+|-----------------------|--------------------------------------------------------------------------------------------------------|
+| `WriteNumosState`     | Writes the fields with ids in a range. The base writes its own fields in the gaps between the override's, so the ids still ascend. |
+| `ReadNumosStateField` | Decodes one field into a pending object, or passes an id it doesn't know to the base.                  |
+| `ApplyNumosState`     | Writes the pending values into the instance, base class first, after the whole payload has decoded.    |
+| `HashNumosBulkState`  | Hashes the fields marked `HostEditable = false`, base class first.                                     |
+| `DescribeNumosState`  | Adds the member descriptors and bulk member names, base class first.                                   |
+| `ResetNumosScratch`   | Resets the `[NumosScratch]` members, base class first.                                                 |
+
+A base class that is neither a solver nor a component gets only the hooks, from the class restored in place that
+derives from it. Two such classes that share a base emit its hooks once. A class restored in place implements
+`INumosStateSchema`, `INumosStateDescribed`, and `INumosBulkStateTarget` again even when its base does, because those
+answers are per type. `INumosStateTarget` and `INumosScratchTarget` stay with the topmost class that implements them,
+and they reach a derived class through the virtual hooks. A sealed class with no stateful base keeps the inline code.
+
+A class restored in place that is not sealed also gets a `protected const string __numosSchemaFields`, which lists the
+wire name and codec shape of every field in its chain. A derived class in another assembly can't see the base's private
+fields, so its generator reads this constant for the fingerprint and for the id collision check.
+
+The generator reports:
 
 | ID              | Severity | Raised when                                                                                                   |
 |-----------------|----------|---------------------------------------------------------------------------------------------------------------|
-| `NUMOSSTATE001` | Error    | The type, or a type it's nested in, isn't `partial`.                                                          |
+| `NUMOSSTATE001` | Error    | The type, or a type it's nested in, isn't `partial`. This includes a class solver with only `[NumosScratch]` members. |
 | `NUMOSSTATE002` | Error    | The type is generic or nested in a generic type.                                                              |
-| `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id. The message names both.                                         |
-| `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
-| `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals`/`ComputeStateHash`, or a snapshot `Capture`/`RestoreInto`. |
+| `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id, in one class or across a class and its base classes. The message names both. |
+| `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, `List<T>` or `HashSet<T>` outside a class solver or simulation component, unknown quantity aliases, ...). |
+| `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals`/`ComputeStateHash`, a snapshot `Capture`/`RestoreInto`, a class solver `ResetScratch`, or a class declares one of the state hooks it would get. |
 | `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on a struct that implements `IAtmosWorldSolver`. Stateful solvers must be classes.       |
 | `NUMOSSTATE011` | Error    | A member has both `[NumosSerialize]` and `[NumosIgnore]`.                                                     |
 | `NUMOSSTATE012` | Error    | `[NumosSerialize]` is on a static or const member.                                                            |
-| `NUMOSSTATE013` | Error    | The class derives from a class other than `object`, whose members the generator can't see.                   |
+| `NUMOSSTATE013` | Error    | A type built from data (a configuration or value type) derives from a class other than `object`. A class solver or simulation component that marks a member derives from a class in another assembly with no generated state or none of the hooks above. |
 | `NUMOSSTATE014` | Error    | No constructor binds: a parameter matches no member, can't take its type, or a member has no setter.          |
 | `NUMOSSTATE015` | Error    | `Key` returns a blank string.                                                                                 |
-| `NUMOSSTATE016` | Warning  | A mutable field, or an auto-property with `set`/`init`, has neither `[NumosSerialize]` nor `[NumosIgnore]`. This includes a snapshot's live type, except a member a `Count` names. |
+| `NUMOSSTATE016` | Warning  | A mutable field, or an auto-property with `set`/`init`, has neither `[NumosSerialize]` nor `[NumosIgnore]`. This includes a snapshot's live type, except a member a `Count` names. A class solver gets it even when it marks nothing. On a class solver or simulation component, and on a base class of one in the same project, it also covers a `readonly` field or get-only auto-property that holds an array or a mutable `System.Collections.Generic` collection, and `[NumosScratch]` silences it too. |
 | `NUMOSSTATE017` | Error    | `[NumosSerialize("...")]` passes a blank wire name.                                                           |
 | `NUMOSSTATE018` | Error    | A solver configuration's `Key` doesn't return a compile-time constant.                                        |
 | `NUMOSSTATE019` | Warning  | A solver configuration is private or protected (or nested in one), so the module initializer can't name it.   |
-| `NUMOSSTATE020` | Error    | A solver's marked member is `readonly`, get-only, or `init`, so a restore can't assign it in place.           |
+| `NUMOSSTATE020` | Error    | A marked member of a solver or simulation component is `readonly`, get-only, or `init`, so a restore can't assign it in place. A non-nullable `List<T>`, `HashSet<T>`, or `Dictionary<TKey, TValue>` is exempt, because the restore refills it. |
 | `NUMOSSTATE021` | Error    | A `[NumosSnapshotOf]` snapshot, or a type it's nested in, isn't `partial`.                                      |
 | `NUMOSSTATE022` | Error    | The snapshot is a struct, record, generic, abstract, or static, or derives from a class other than `object`.    |
 | `NUMOSSTATE023` | Error    | The live type isn't a non-generic class in the same project, or it is `file`-local or nested in a `file` type.  |
@@ -1766,12 +1925,21 @@ Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE032` | Error    | A serializable type, class solver, or snapshot is `file`-local or nested in a `file` type.                      |
 | `NUMOSSTATE033` | Error    | A property has `[field: NumosSerialize]`. The mark lands on the backing field, which the generator doesn't read. Use `[NumosSerialize]` on the property. |
 | `NUMOSSTATE034` | Error    | `[NumosSerialize]` is on an indexer, which doesn't hold one value.                                              |
+| `NUMOSSTATE035` | Error    | A member has `[NumosScratch]` together with `[NumosSerialize]` or `[NumosIgnore]`.                              |
+| `NUMOSSTATE036` | Error    | `[NumosScratch]` is outside a class solver, a simulation component, or a base class of one, or on a static, const, indexer, or backing-field target. |
+| `NUMOSSTATE037` | Error    | A `[NumosScratch]` member is `readonly`, get-only, or `init`, and its type is not a class or interface with a parameterless `Clear()`. |
+| `NUMOSSTATE038` | Error    | A `[NumosScratch]` initializer reads a primary constructor parameter, is an array initializer, or holds a preprocessor directive. |
+| `NUMOSSTATE039` | Error    | A `[SimulationComponent]` class is a record, static, or abstract, has no public or internal parameterless constructor, is private or protected (or nested in such a type), or also implements `IAtmosWorldSolver` or `IAtmosSolverConfiguration`. |
+| `NUMOSSTATE040` | Error    | The key passed to `[SimulationComponent]` is blank.                                                             |
+| `NUMOSSTATE041` | Warning  | `[NumosSerialize(HostEditable = false)]` is on a member of a type that is neither a class solver nor a simulation component, where it has no effect. |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.
 
-The pipeline does not own or dispose custom solvers. Callers remain responsible for the lifetime of an `IDisposable`
-solver.
+The world owns the instance of a catalog solver. It disposes an `IDisposable` one when the stage is removed or the
+world is disposed. A stage removed during a tick, restore, or replay is disposed when that call ends, so a tick can
+still call it and a failed restore or replay can put it back. An instance passed to `Register` stays caller-owned,
+and the caller disposes it.
 
 ### 12.3 Per-chunk solver state with `ChunkField<T>`
 
@@ -1827,22 +1995,45 @@ chunk for the first time still get one shared array. Synchronizing writes to tha
 are valid only until the tick ends, and using one later throws. Ask the context again in each callback instead of
 keeping views.
 
+`chunk.Get(field)` creates the storage when the chunk has none. A solver that only looks at a field should call
+`chunk.TryGet(field, out var values)` instead. It returns `false` and `default` when the chunk has no storage, and it
+never allocates. `chunk.Has(field)` answers the same question without the view. A mixture page has the same two
+members. Both calls take no lock and throw like `Get` when the view is default or its tick has ended.
+
 Outside a tick, `simulation.TryGetChunkField(handle, field, out var values)` gives host code a read-only view of the
 same storage. It never allocates. It returns `false` when the chunk has no storage for the field yet, which reads as
 every element being `default`. Reading therefore cannot change a checkpoint or a state hash.
 
-Writing from host code goes through `simulation.Dangerous().GetChunkField(handle, field)`, which returns a writable
-view and creates the storage on first use. Field writes are not recorded operations, so a recording replays to a
-different state if a host writes between recorded ticks. Creating a rollback field's storage also adds a zero-filled
-array to the next checkpoint and changes the state hash. Seed rollback fields before capturing the starting
-checkpoint. After that point, only deterministic solver callbacks should change them. Replay re-runs the solver to
-regenerate its writes.
+Host code writes a rollback field through three recorded calls:
+
+- `simulation.SetChunkData(handle, field, index, value)` stores one element.
+- `simulation.WriteChunkData(handle, field, values, start)` copies a run of elements.
+- `simulation.FillChunkData(min, max, field, value)` stores one value in every voxel of a box in global voxel
+  coordinates. It works on per-voxel fields only, and it skips chunks that do not exist.
+
+Each call records one operation, so replay reproduces the write. The calls reject transient fields, because a restore
+clears those. A write creates the storage when the chunk has none, as `Get` does. It never wakes a sleeping chunk.
+"Write chunk data from host code" in `docs/deterministic_replay.md` covers the operations and their replay failures.
+
+`simulation.Dangerous().GetChunkField(handle, field)` also returns a writable view and creates the storage on first
+use. Writes through it are not recorded, so a recording replays to a different state if a host writes between
+recorded ticks. Creating a rollback field's storage also adds a zero-filled array to the next checkpoint and changes
+the state hash. Use the view only to seed rollback fields before capturing the starting checkpoint. After that point,
+change them through the recorded calls or deterministic solver callbacks. Replay re-runs the solver to regenerate its
+writes.
+
+While the world records, each `Dangerous().GetChunk` or `GetChunkField` call outside a tick raises
+`AtmosWorld.UnrecordedAccessCount`. The count measures views handed out, so a read-only use also counts. Calls from a
+solver callback do not count. `AtmosWorldRecording.UnrecordedAccessCount` holds the value at capture or stop. A
+nonzero value means replay of that recording may not match the original run. `StartRecording` resets the count and
+`ResumeRecording` keeps it. The count is not serialized, so a recording read from a file reports 0.
 
 #### Lifetime and allocation
 
-A chunk allocates a field's array the first time anything reads it, filled with default values. It does not allocate
-up front for every registered field. Zero-filled rollback arrays would then show up in every checkpoint and change
-state hashes for chunks no solver touched. Arrays survive ticks, sleep, and solver removal. Unregistering a chunk or
+A chunk allocates a field's array the first time anything calls `Get` or `Dangerous().GetChunkField` for it, or
+writes it through a recorded call, filled with default values. It does not allocate up front for every registered field. Zero-filled rollback arrays would then
+show up in every checkpoint and change state hashes for chunks no solver touched. `TryGet` and `Has` never allocate,
+so a solver can look at every chunk without creating the field in each one. Arrays survive ticks, sleep, and solver removal. Unregistering a chunk or
 restoring a checkpoint detaches them, so earlier references still point at the old storage.
 
 On restore, rollback fields get independent copies of their checkpoint values. Fields first created after the
@@ -1857,6 +2048,14 @@ Registering a key that already exists returns the same `ChunkField<T>` if the de
 length, rollback policy, and clear flags. Any difference throws `InvalidOperationException` that names both
 definitions. Two solvers cannot share incompatible storage. Each key holds a slot for the life of the process, so
 register fields once, not per tick or per simulation.
+
+An assembly registers its `[ChunkComponent]` fields, `[ChunkData]` fields, and solver configurations from one module
+initializer. The CLR runs it when something in the assembly first runs. A host that loads a `.numos` file before that
+point gets a `NotSupportedException` for an unknown key. To avoid it, call the generated
+`MyMod.NumosModule.EnsureRegistered()` first. The class is public and lives in a namespace built from the assembly name
+(`MyMod` here), with each part made a valid identifier. Numos emits it once per assembly that has any of these
+registrations. An assembly that declares its own
+`NumosModule` in that namespace gets none. `Numos.CoreSim` gets none either, because any load runs its code first.
 
 #### Rollback keys are a compatibility contract
 
@@ -1965,6 +2164,7 @@ The generator catches most mistakes at compile time, before they can throw at re
 | `NUMOSCHUNK013` | Error    | The project uses C# 13 or earlier; the accessors are C# 14 extension properties.                 |
 | `NUMOSCHUNK014` | Warning  | An accessor name collides with a chunk view member or another accessor.                          |
 | `NUMOSCHUNK015` | Error    | `AccessorName` isn't a valid C# identifier.                                                      |
+| `NUMOSCHUNK016` | Warning  | A saved field's element type isn't a primitive or enum, so a `.numos` file can't hold it.        |
 
 The key checks only see one compilation. A conflict between two assemblies still throws `InvalidOperationException`
 when the second one registers.
@@ -1973,6 +2173,142 @@ The generator ships inside the `Numos.API` package under `analyzers/dotnet/cs`. 
 `Numos.Serialization`, and `Numos.Viewer` pass it on. Projects in this repository that reference `src/Numos.API` with a
 `ProjectReference` do not get it that way. They reference `src/Numos.API.Generators` directly with
 `OutputItemType="Analyzer"`, as `tests/Numos.API.Tests` does.
+
+#### Grouping fields with `[ChunkComponent]`
+
+A solver's fields usually belong together, and it reads them together. A `[ChunkComponent]` struct declares the group
+once. Each instance field lowers to one `ChunkField<T>`, so the storage stays one array per field and per chunk. Numos
+never allocates an array of the struct, and a voxel loop over one field touches only that field's memory.
+
+```csharp
+[ChunkComponent("my-mod/fire", ClearOnVacuum = true)]
+public partial struct Fire
+{
+    [NumosSerialize] public float Exposure;              // my-mod/fire/Exposure, per voxel, saved
+    [NumosSerialize, PerChunk] public int BurnCount;     // my-mod/fire/BurnCount, one per chunk, saved
+    [NumosScratch] public float Heat;                    // my-mod/fire/Heat, per voxel, never saved
+}
+```
+
+The key of a field is `{component key}/{wire name}`. The wire name is the field name, or the name passed to
+`[NumosSerialize("...")]`, which keeps a key stable through a rename. The fields map onto `Register` like this:
+
+- `[NumosSerialize]` is `rollback: true`. The element type must be a primitive or an enum, so a `.numos` file can
+  hold every saved component field. A struct element is an error here, where `[ChunkData]` only warns
+  (`NUMOSCHUNK016`).
+- `[NumosScratch]` is `rollback: false`. The element type must be unmanaged.
+- `[PerChunk]` is `length: 1`, and `[PerChunk(Length = n)]` is `length: n`. Without it the field is per-voxel.
+- `ClearOnSleep` and `ClearOnVacuum` on the attribute apply to every field.
+
+Fields are opt-in. Every instance field needs `[NumosSerialize]` or `[NumosScratch]`. An unmarked field is a warning,
+and the generator leaves it out. A mark on a static field or a property is an error. `[NumosIgnore]` on a field is an
+error too, because the field would have no meaning. The state generator ignores the struct, although its fields carry
+state marks. `[NumosScratch]` on a component field is therefore not `NUMOSSTATE036`.
+
+Nothing reads or writes the struct's own fields. The generator ships a diagnostic suppressor that removes the
+compiler's unused-field warnings (CS0649, CS0169, CS0414) from marked fields, so an `internal` component builds with
+warnings as errors. An unmarked field keeps them.
+
+The generator adds two nested types to the struct and one accessor class next to it:
+
+- `Fire.Fields` holds one `ChunkField<T>` property per field. Host code passes `Fire.Fields.Exposure` to
+  `TryGetChunkField` and to the recorded `SetChunkData`, `WriteChunkData`, and `FillChunkData` calls. The class
+  initializes on first access, and the module initializer runs it when the assembly loads.
+- `Fire.View` is a `readonly ref struct` with one live `Span<T>` per field. Each extension member that returns it looks
+  every field up once.
+- `FireComponentAccessors` holds C# 14 extension members on `AtmosSolverChunk`, `AtmosSolverGasMixturePage`, and
+  `AtmosSolverChunks`. `AccessorName` replaces `Fire` in their names.
+
+| Member                      | On                       | Does                                                                      |
+|-----------------------------|--------------------------|---------------------------------------------------------------------------|
+| `GetFire()`                 | chunk view, mixture page | Returns the view and creates the storage of every missing field.          |
+| `TryGetFire(out Fire.View)` | chunk view, mixture page | Returns `false` and creates nothing when the first saved field is absent. |
+| `HasFire`                   | chunk view, mixture page | Tells whether the first saved field has storage. Never creates storage.   |
+| `WithFire()`                | `AtmosSolverChunks`      | Enumerates the chunks that have the first saved field, with their views.  |
+
+The first declared `[NumosSerialize]` field stands for the whole component, or the first field when none is saved. A
+restore drops scratch storage and keeps saved storage, so a saved field answers the same in a live run and after a
+restore. `GetFire()` creates every field at once, so one `Has` check is enough, and it costs one lookup instead of one
+per field. A host can still create one field alone with `SetChunkData`. A `TryGetFire` that then succeeds creates the
+other fields, as `GetFire()` does. So does each view that `WithFire()` yields. Each item from `WithFire()` has `Chunk`
+and `Fire` and deconstructs into both:
+
+```csharp
+foreach (var (chunk, fire) in context.Chunks(simulation).WithFire())
+{
+    for (int voxel = 0; voxel < fire.Exposure.Length; voxel++)
+        fire.Exposure[voxel] += fire.Heat[voxel];
+}
+```
+
+A component field and a `[ChunkData]` property go through the same key checks. One key with two identical definitions
+is `NUMOSCHUNK012`, and one key with two different definitions is `NUMOSCHUNK011`. A component with a conflicting key
+generates nothing. The component accessors also share the name check with `[ChunkData]` accessors in the same
+namespace. The component diagnostics are:
+
+| ID                  | Severity | Raised when                                                                                         |
+|---------------------|----------|-----------------------------------------------------------------------------------------------------|
+| `NUMOSCOMPONENT001` | Error    | The type isn't a struct, or it or a type around it isn't `partial`, is generic, or is `file`-local. |
+| `NUMOSCOMPONENT002` | Error    | The struct or a type around it isn't `public` or `internal`, so the accessors can't reach it.       |
+| `NUMOSCOMPONENT003` | Error    | The component key is blank.                                                                         |
+| `NUMOSCOMPONENT004` | Warning  | An instance field has neither `[NumosSerialize]` nor `[NumosScratch]`.                              |
+| `NUMOSCOMPONENT005` | Error    | A mark sits on a property or a static field, a field has `[NumosIgnore]`, or a mark is invalid.     |
+| `NUMOSCOMPONENT006` | Error    | A saved field's type isn't a primitive or an enum.                                                  |
+| `NUMOSCOMPONENT007` | Error    | A scratch field's type isn't unmanaged.                                                             |
+| `NUMOSCOMPONENT008` | Error    | A `PerChunk` length is negative.                                                                    |
+| `NUMOSCOMPONENT009` | Error    | `AccessorName` isn't a valid C# identifier.                                                         |
+| `NUMOSCOMPONENT010` | Warning  | An accessor name collides with a view member or another accessor. The component gets no accessors.  |
+| `NUMOSCOMPONENT011` | Error    | Two fields have the same wire name, so they would share a key.                                      |
+| `NUMOSCOMPONENT012` | Error    | The project uses C# 13 or earlier. `Fields` and `View` are still generated.                         |
+| `NUMOSCOMPONENT013` | Error    | The struct has no marked instance field.                                                            |
+| `NUMOSCOMPONENT014` | Error    | A member of the struct is named `Fields` or `View`, which the generated nested types use.           |
+| `NUMOSCOMPONENT015` | Warning  | A marked field has an initializer. Storage starts at the default value and never runs it.           |
+
+An invalid mark under `NUMOSCOMPONENT005` is both marks on one field, a blank wire name, a `Codec` or `Count` setting,
+a `ref` field, or a fixed-size buffer.
+
+#### Reading and writing gas through the chunk view
+
+A stage usually needs the gas state next to its own fields. The chunk view gives it read-only live spans, the same
+arrays that the dangerous view exposes:
+
+| Member                                  | Chunk view | Mixture page | Unit            |
+|-----------------------------------------|------------|--------------|-----------------|
+| `Temperature`                           | yes        | yes          | K               |
+| `Pressure`                              | yes        | yes          | Pa              |
+| `HeatCapacity`                          | yes        | yes          | J/K             |
+| `Moles(gasId)`, `HasGas(gasId)`         | yes        | yes          | mol             |
+| `Classification`                        | yes        | no           | room ID         |
+| `MomentumX`, `MomentumY`, `MomentumZ`   | yes        | no           | kg·m/s          |
+
+Reads are always allowed during a stage. Writes go through `Edit()`. `chunk.Edit()` returns an
+`AtmosSolverChunkEditor` with writable `Temperature`, `Moles(gasId)`, and momentum spans. `page.Edit()` returns an
+`AtmosSolverGasMixturePageEditor` with `Temperature` and `Moles(gasId)`.
+
+`Edit()` marks the chunk. When the stage returns, the pipeline repairs every marked chunk on the tick thread, in chunk
+grid order:
+
+1. A sleeping chunk wakes, and its sleep timer restarts. A gas or temperature write through the facade does the same.
+2. Gas and momentum written into solid or void voxels are cleared.
+3. Pressure, heat capacity, and the vacuum flags are rebuilt with the arithmetic of `derived-refresh`.
+4. A voxel left without gas becomes vacuum, which zeroes its momentum.
+5. The chunk revision advances, and the mark is cleared.
+
+A marked mixture page gets the pool's own refresh instead. Each allocated cell gets the pressure, heat capacity, and
+vacuum flag that its gas, temperature, and volume imply. Gas written into a free cell is cleared.
+
+The repair runs after built-in stages too, and also when a stage throws, so a mark never outlives its stage. A stage
+that opened no editor pays one read of a flag on the tick scope. A stage that opened editors pays one pass over each
+opened chunk, whether or not it wrote anything. Until the repair, `Pressure` and `HeatCapacity` show the state from
+before the edit.
+
+`Edit()` is safe on `Parallel.For` workers when each worker edits its own chunks, as with chunk fields. Each repair
+reads only its own chunk, so the result does not depend on which worker made the edit. `Moles(gasId)` scans the
+chunk's short channel list. The read returns an empty span for a gas the chunk has never held. The editor creates the
+channel at the end of the list, as `AddGasToVoxel` does. A new channel enters the checkpoint and the state hash even if
+it stays zero.
+
+Editor writes are not recorded. Replay re-runs the stage, so they must be deterministic, like field writes.
 
 ### 12.4 Live storage through Numos.API.Dangerous
 
@@ -1996,24 +2332,22 @@ simulation.World.Solvers.Register(
 ```
 
 From an `AtmosSolverChunk` view, `chunk.Dangerous()` gives the same live chunk without a handle lookup. It is safe
-on `Parallel.For` workers. The dangerous chunk adds only built-in storage. Custom fields stay on the safe view it came
-from:
+on `Parallel.For` workers. Custom fields stay on the safe view it came from. Reads of gas, temperature, momentum, and
+the caches are on the safe view too (§12.3), so a stage only needs the dangerous chunk for writes without repair or for
+the members below.
 
-```csharp
-var chunks = context.Chunks(simulation);
-Parallel.For(0, chunks.Count, index =>
-{
-    Span<float> exposure = chunks[index].Get(FireData.Exposure).AsSpan();
-    Span<float> temperature = chunks[index].Dangerous().Temperature;
-    for (int voxel = 0; voxel < exposure.Length; voxel++)
-        exposure[voxel] += temperature[voxel] > 500f ? 1f : 0f;
-});
-```
+The dangerous view keeps what the chunk view leaves out:
+
+- Raw writable spans for gas, temperature, momentum, the caches, and `VoxelRoomMap`. Numos repairs none of these
+  writes.
+- `SleepTimer`, `ActiveAirIndices`, `RebuildActiveAirIndices`, `Wake`, `Sleep`, and `MarkChanged`.
+- The derived-state and neighbor helpers in the list further down.
+- Cell volumes of a mixture page.
 
 Standalone gas mixtures are pool cells, so they are not in `context.Chunks(simulation)`. Use
 `context.GasMixtures` for their pages. `page.Dangerous()` gives the live page storage plus a `Volumes` span, and
 `context.Dangerous().GetGasMixturePage(cell)` resolves one mixture. Raw writes there must keep each cell's pressure
-and heat-capacity caches equal to what its gas, temperature, and volume imply.
+and heat-capacity caches equal to what its gas, temperature, and volume imply. `page.Edit()` keeps them equal for you.
 
 The dangerous chunk also exposes the kernel's derived-state and neighbor helpers. They let a custom stage reuse the
 built-in arithmetic instead of copying it:
@@ -2026,7 +2360,8 @@ built-in arithmetic instead of copying it:
 - `AtmosParallel.Run` runs a phase on the scheduler the built-in stages use. `AtmosParallel.WorkerCount` is its worker
   limit.
 
-A stage that edits temperature and runs before `advection` or `vacuum-cleanup` must refresh the caches those stages read:
+A write through `Edit()` gets this refresh automatically. A stage that writes temperature through raw spans and runs
+before `advection` or `vacuum-cleanup` must itself refresh the caches that those stages read:
 
 ```csharp
 readonly struct RefreshAction(AtmosSolverChunks chunks) : IAtmosParallelAction
@@ -2116,9 +2451,10 @@ The compiled topology describes only structural adjacency, so two obligations st
 - Solid and void cells still appear as neighbors. A portal endpoint in a wall or a vacuum voxel is still a
   valid edge in `GetOwnedEdges()`. Numos' own transport stages check `VoxelRoomMap` before moving anything. A
   custom stage needs the same guard, or it will inject gas into a solid voxel.
-- Waking is your job. If your stage mutates gas or heat through `Numos.API.Dangerous` (see §2.3), call `Wake()` on
-  every chunk you changed. Nothing else notices a raw span write. A chunk that was asleep before your mutation stays
-  marked asleep unless you wake it, so Numos never re-evaluates its new pressure.
+- Waking is your job after a raw write. A write through `chunk.Edit()` wakes the chunk for you (§12.3). If your stage
+  mutates gas or heat through `Numos.API.Dangerous` (see §2.3), call `Wake()` on every chunk you changed. Nothing else
+  notices a raw span write. A chunk that was asleep before your mutation stays marked asleep unless you wake it, so
+  Numos never re-evaluates its new pressure.
 
 If your stage moves gas or energy across a link, treat a cell with multiple explicit neighbors the way the built-in
 stage does. Compute every edge's request from one unchanged snapshot of the tick's starting state. Apply a single
@@ -2153,11 +2489,13 @@ with theirs:
 
 Velocity is derived, not stored. A custom stage that wants it reads momentum and divides by the voxel's gas mass,
 which is what `AtmosSimulation.GetVoxelVelocity` and `AtmosChunkSnapshotFields.Velocity` do for you from outside a
-tick. Inside one, the live arrays are on the dangerous chunk view as `MomentumX`/`MomentumY`/`MomentumZ` spans next
-to the other physical fields (§12.4), in kg·m/s for the voxel's whole gas content. Two rules apply to writing them:
-a vacuum voxel must end the tick with zero momentum (the Euler stage asserts it in debug builds), and raw writes are
-not recorded, so they only replay as deterministic solver work. `SetVoxelMomentum` through the facade follows the
-same invariant by ignoring writes to empty voxels. A call from a callback is applied but not recorded.
+tick. Inside one, the chunk view has `MomentumX`, `MomentumY`, and `MomentumZ` as read-only live spans next to the
+other physical fields (§12.3), in kg·m/s for the voxel's whole gas content. A vacuum voxel must end the tick with zero
+momentum (the Euler stage asserts it in debug builds). Writes through `chunk.Edit()` keep that rule, because the repair
+zeroes the momentum of every voxel left without gas. Raw writes through the dangerous view (§12.4) must keep it
+themselves. Neither kind is recorded, so both only replay as deterministic solver work. `SetVoxelMomentum` through the
+facade follows the same invariant by ignoring writes to empty voxels. A call from a callback is applied but not
+recorded.
 
 `AtmosSimulation.LastFlowDiagnostics` is the cost report of the latest `euler-flow` run (§5.7): substeps, simulated
 seconds, whether the cap engaged, the largest Courant number and signal speed, and the repair counters. It keeps its

@@ -183,6 +183,7 @@ public sealed class ConfigStateFieldTests
         {
             float => new object[] { 0.5f, 0.25f, 2f, 17f, 450f },
             int => new object[] { 3, 7, 1000 },
+            ulong => new object[] { 1UL, 0x9E3779B97F4A7C15UL },
             bool value => new object[] { !value },
             string => new object[] { "Perturbed" },
             _ => throw new NotSupportedException(

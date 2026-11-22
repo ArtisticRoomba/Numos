@@ -323,9 +323,7 @@ public sealed class ChunkDataGeneratorTests
         }
 
         Assert.That(
-            result.TrackedOutputSteps.SelectMany(static step => step.Value)
-                .SelectMany(static run => run.Outputs)
-                .Select(static output => output.Reason),
+            GeneratorHarness.SourceOutputReasons(result),
             Is.All.EqualTo(IncrementalStepRunReason.Cached));
     }
 

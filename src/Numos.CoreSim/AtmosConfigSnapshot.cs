@@ -72,6 +72,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             MinimumFlameSpeed = Math.Max(0, source.MinimumFlameSpeed),
             IgnitionTransferEnabled = source.IgnitionTransferEnabled,
             TransferSeedFraction = Math.Max(0, source.TransferSeedFraction),
+            // Every seed is valid.
+            RandomSeed = source.RandomSeed,
         };
 
         var gasRegistry = new GasRegistry();
@@ -176,6 +178,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public bool IgnitionTransferEnabled => Fields.IgnitionTransferEnabled;
     /// <inheritdoc cref="AtmosConfig.TransferSeedFraction" />
     public Scalar TransferSeedFraction => Fields.TransferSeedFraction;
+    /// <inheritdoc cref="AtmosConfig.RandomSeed" />
+    public ulong RandomSeed => Fields.RandomSeed;
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>

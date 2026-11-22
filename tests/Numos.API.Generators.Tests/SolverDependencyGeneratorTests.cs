@@ -458,9 +458,7 @@ public sealed class SolverDependencyGeneratorTests
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
 
         Assert.That(
-            result.TrackedOutputSteps.SelectMany(static step => step.Value)
-                .SelectMany(static run => run.Outputs)
-                .Select(static output => output.Reason),
+            GeneratorHarness.SourceOutputReasons(result),
             Is.All.EqualTo(IncrementalStepRunReason.Cached));
     }
 
@@ -498,9 +496,7 @@ public sealed class SolverDependencyGeneratorTests
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
 
         Assert.That(
-            result.TrackedOutputSteps.SelectMany(static step => step.Value)
-                .SelectMany(static run => run.Outputs)
-                .Select(static output => output.Reason),
+            GeneratorHarness.SourceOutputReasons(result),
             Is.All.EqualTo(IncrementalStepRunReason.Cached));
     }
 

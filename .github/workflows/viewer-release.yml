@@ -105,7 +105,7 @@ jobs:
         run: dotnet test Numos.slnx -c Release --no-build --no-restore
 
   publish:
-    name: Publish NativeAOT (${{ matrix.rid }})
+    name: Publish (${{ matrix.rid }})
     needs: [verify, test]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -135,7 +135,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Publish self-contained NativeAOT application
+      - name: Publish self-contained JIT application
         shell: pwsh
         env:
           TARGET_TAG: ${{ inputs.tag }}
@@ -146,14 +146,15 @@ jobs:
             -r ${{ matrix.rid }} `
             --self-contained true `
             --output $publishDirectory `
-            -p:PublishAot=true `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=true `
             -p:ContinuousIntegrationBuild=true `
             -p:SourceRevisionId="${{ needs.verify.outputs.commit }}" `
             -p:ViewerSourceReference="refs/tags/$env:TARGET_TAG" `
             -p:CoreSimSourceRevisionId="${{ needs.verify.outputs.core_sim_commit }}" `
             -p:CoreSimSourceReference="${{ needs.verify.outputs.core_sim_ref }}"
 
-      - name: Archive NativeAOT application
+      - name: Archive application
         shell: pwsh
         run: |
           $publishDirectory = "artifacts/viewer/${{ matrix.rid }}"
@@ -182,7 +183,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Download NativeAOT applications
+      - name: Download applications
         uses: actions/download-artifact@v8
         with:
           pattern: viewer-*

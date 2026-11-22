@@ -1,13 +1,13 @@
 namespace Numos.CoreSim;
 
 /// <summary>
-///     The default run rate of each built-in solver stage.
+///     The built-in run rates and the conversions between rates, ticks, and time.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///         A rate is runs per second of simulated time, so the stage interval (in ticks) follows from the tick rate. The
-///         world pipeline and the standalone <see cref="AtmosKernel" /> tick both read this table. They therefore
-///         agree on which tick runs which stage.
+///         world pipeline and the standalone <see cref="AtmosKernel" /> tick both take each stage's rate from
+///         <see cref="BuiltInStageTable" />. They therefore agree on which tick runs which stage.
 ///     </para>
 ///     <para>
 ///         The tick rate is a multiple of 20, so the gas and thermal intervals always come out exact. The
@@ -44,28 +44,14 @@ internal static class BuiltInStageSchedule
     /// <returns><see langword="true" /> when <paramref name="name" /> is a built-in stage.</returns>
     internal static bool TryGetRunsPerSecond(string name, out int runsPerSecond)
     {
-        switch (name)
+        if (BuiltInStageTable.TryGet(name, out BuiltInStage? stage))
         {
-            case "euler-flow":
-                runsPerSecond = EulerRunsPerSecond;
-                return true;
-            case "derived-refresh":
-            case "advection":
-            case "vacuum-cleanup":
-            case "explicit-gas-transport":
-            case "boundary-flow":
-            case "gas-reactions":
-                runsPerSecond = GasRunsPerSecond;
-                return true;
-            case "thermodynamics":
-            case "explicit-thermal-transport":
-            case "thermal-boundary":
-                runsPerSecond = ThermalRunsPerSecond;
-                return true;
-            default:
-                runsPerSecond = 0;
-                return false;
+            runsPerSecond = stage.RunsPerSecond;
+            return true;
         }
+
+        runsPerSecond = 0;
+        return false;
     }
 
     /// <summary>

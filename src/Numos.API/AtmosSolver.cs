@@ -17,7 +17,7 @@ public static class AtmosBuiltInSolvers
     ///     reads those caches. The two stages must share an interval. The Euler model leaves it out, because its
     ///     stages keep the caches current.
     /// </summary>
-    public const string DerivedRefresh = "derived-refresh";
+    public const string DerivedRefresh = BuiltInStageTable.DerivedRefresh;
 
     /// <summary>
     ///     Intra-chunk pressure-relaxation gas advection. Part of the <see cref="AtmosTransportModel.Legacy" />
@@ -25,7 +25,7 @@ public static class AtmosBuiltInSolvers
     ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> with that model. A new world
     ///     runs <see cref="EulerFlow" /> instead.
     /// </summary>
-    public const string Advection = "advection";
+    public const string Advection = BuiltInStageTable.Advection;
 
     /// <summary>
     ///     Compressible Euler gas transport within and between chunks, with CFL substeps. The default transport
@@ -33,21 +33,21 @@ public static class AtmosBuiltInSolvers
     ///     <see cref="BoundaryFlow" />. Configured through <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />
     ///     and reported on through <see cref="AtmosSimulation.LastFlowDiagnostics" />.
     /// </summary>
-    public const string EulerFlow = "euler-flow";
+    public const string EulerFlow = BuiltInStageTable.EulerFlow;
 
     /// <summary>
     ///     Empties air voxels whose pressure is below <see cref="AtmosConfig.VacuumThreshold" /> when every
     ///     neighboring air voxel is below it too. Present under both transport models, right after the intra-chunk
     ///     flow stage. Without it, trace gas that transport leaves behind stays in the grid.
     /// </summary>
-    public const string VacuumCleanup = "vacuum-cleanup";
+    public const string VacuumCleanup = BuiltInStageTable.VacuumCleanup;
 
     /// <summary>
     ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include
     ///     <see cref="ExplicitLinkFlags.GasTransport" />. Present under both transport models, right after the
     ///     intra-chunk flow stage.
     /// </summary>
-    public const string ExplicitGasTransport = "explicit-gas-transport";
+    public const string ExplicitGasTransport = BuiltInStageTable.ExplicitGasTransport;
 
     /// <summary>
     ///     Cartesian gas transport across ordinary chunk boundaries under the
@@ -55,27 +55,27 @@ public static class AtmosBuiltInSolvers
     ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />. <see cref="EulerFlow" />
     ///     sweeps across chunk faces itself.
     /// </summary>
-    public const string BoundaryFlow = "boundary-flow";
+    public const string BoundaryFlow = BuiltInStageTable.BoundaryFlow;
 
     /// <summary>
     ///     Intra-chunk thermal diffusion and phase changes.
     /// </summary>
-    public const string Thermodynamics = "thermodynamics";
+    public const string Thermodynamics = BuiltInStageTable.Thermodynamics;
 
     /// <summary>
     ///     Sparse thermal transport across explicit portal, dock, and arbitrary links whose flags include
     ///     <see cref="ExplicitLinkFlags.ThermalTransport" />. Runs on the same cadence as
     ///     <see cref="Thermodynamics" />, which is every 100 ms of simulated time by default.
     /// </summary>
-    public const string ExplicitThermalTransport = "explicit-thermal-transport";
+    public const string ExplicitThermalTransport = BuiltInStageTable.ExplicitThermalTransport;
 
     /// <summary>
     ///     Cartesian thermal transport across ordinary chunk boundaries.
     /// </summary>
-    public const string ThermalBoundary = "thermal-boundary";
+    public const string ThermalBoundary = BuiltInStageTable.ThermalBoundary;
 
     /// <summary>
     ///     Per-cell gas reactions.
     /// </summary>
-    public const string GasReactions = "gas-reactions";
+    public const string GasReactions = BuiltInStageTable.GasReactions;
 }

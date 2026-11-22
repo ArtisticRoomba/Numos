@@ -116,6 +116,50 @@ public sealed class AtmosSolverChunkTests
     }
 
     [Test]
+    public void VoxelIndexAndPosition_RoundTripInXFastestOrder()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(2, 3, 4);
+        simulation.CreateAndRegisterChunk(default);
+        var positions = new List<Int3>();
+        var indices = new List<int>();
+        var fieldPositions = new List<Int3>();
+
+        world.Solvers.Register(
+            "tests/solver-chunk/voxel-index",
+            context =>
+            {
+                var chunk = context.Chunks(simulation)[0];
+                var field = chunk.Get(Exposure);
+                for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
+                {
+                    Int3 position = chunk.GetVoxelPosition(voxel);
+                    positions.Add(position);
+                    indices.Add(chunk.GetVoxelIndex(position));
+                    fieldPositions.Add(field.GetPosition(voxel));
+                }
+
+                Assert.That(chunk.GetVoxelIndex(new Int3(1, 2, 3)), Is.EqualTo(1 + 2 * 2 + 3 * 2 * 3));
+                Assert.Throws<ArgumentOutOfRangeException>(() => chunk.GetVoxelPosition(-1));
+                Assert.Throws<ArgumentOutOfRangeException>(() => chunk.GetVoxelPosition(24));
+                Assert.Throws<ArgumentOutOfRangeException>(() => chunk.GetVoxelIndex(new Int3(2, 0, 0)));
+                Assert.Throws<ArgumentOutOfRangeException>(() => chunk.GetVoxelIndex(new Int3(0, -1, 0)));
+                Assert.Throws<ArgumentOutOfRangeException>(() => chunk.GetVoxelIndex(new Int3(0, 0, 4)));
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(indices, Is.EqualTo(Enumerable.Range(0, 24)));
+            Assert.That(positions, Is.EqualTo(fieldPositions));
+            Assert.That(positions[1], Is.EqualTo(new Int3(1, 0, 0)));
+            Assert.That(positions[2], Is.EqualTo(new Int3(0, 1, 0)));
+            Assert.That(positions[6], Is.EqualTo(new Int3(0, 0, 1)));
+        });
+    }
+
+    [Test]
     public void ParallelWorkers_ShareOneArrayPerChunk()
     {
         using var world = new AtmosWorld(new TestAtmosConfig());
@@ -366,6 +410,129 @@ public sealed class AtmosSolverChunkTests
     }
 
     [Test]
+    public void TryGet_UntouchedRollbackField_ReturnsFalseAndLeavesTheStateHashAlone()
+    {
+        var untouched = ChunkField<float>.Register("tests/solver-chunk/try-get-untouched", rollback: true);
+        using var looking = new AtmosWorld(new TestAtmosConfig());
+        using var idle = new AtmosWorld(new TestAtmosConfig());
+        var lookingSimulation = looking.CreateSimulation(2, 2, 2);
+        var idleSimulation = idle.CreateSimulation(2, 2, 2);
+        lookingSimulation.CreateAndRegisterChunk(default);
+        idleSimulation.CreateAndRegisterChunk(default);
+        bool found = true;
+        bool has = true;
+        FlatArray<float> values = new FlatArray<float>(new float[1]);
+
+        looking.Solvers.Register(
+            "tests/solver-chunk/try-get-untouched",
+            context =>
+            {
+                var chunk = context.Chunks(lookingSimulation)[0];
+                found = chunk.TryGet(untouched, out values);
+                has = chunk.Has(untouched);
+            });
+        idle.Solvers.Register("tests/solver-chunk/try-get-untouched", _ => { });
+
+        looking.Tick();
+        idle.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(found, Is.False);
+            Assert.That(has, Is.False);
+            Assert.That(values.Length, Is.Zero);
+            Assert.That(
+                lookingSimulation.TryGetChunkField(default, untouched, out _),
+                Is.False);
+            Assert.That(looking.ComputeStateHash(), Is.EqualTo(idle.ComputeStateHash()));
+        });
+    }
+
+    [Test]
+    public void TryGet_AfterGet_ViewsTheSameArrayWithChunkDimensions()
+    {
+        var perVoxel = ChunkField<float>.Register("tests/solver-chunk/try-get-per-voxel", rollback: true);
+        var fixedLength = ChunkField<int>.Register("tests/solver-chunk/try-get-fixed", rollback: true, length: 3);
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(2, 3, 4);
+        simulation.CreateAndRegisterChunk(default);
+        bool foundPerVoxel = false;
+        bool foundFixed = false;
+        bool hasPerVoxel = false;
+        bool hasFixed = false;
+        Int3 perVoxelDimensions = default;
+        Int3 fixedDimensions = default;
+        float viaGet = 0f;
+        int viaTryGet = 0;
+
+        world.Solvers.Register(
+            "tests/solver-chunk/try-get-after-get",
+            context =>
+            {
+                var chunk = context.Chunks(simulation)[0];
+                chunk.Get(perVoxel)[new Int3(1, 2, 3)] = 4f;
+                chunk.Get(fixedLength)[2] = 9;
+
+                foundPerVoxel = chunk.TryGet(perVoxel, out var perVoxelView);
+                foundFixed = chunk.TryGet(fixedLength, out var fixedView);
+                hasPerVoxel = chunk.Has(perVoxel);
+                hasFixed = chunk.Has(fixedLength);
+                perVoxelDimensions = perVoxelView.Dimensions;
+                fixedDimensions = fixedView.Dimensions;
+                viaTryGet = fixedView[2];
+
+                perVoxelView[new Int3(0, 1, 2)] = 7f;
+                viaGet = chunk.Get(perVoxel)[new Int3(0, 1, 2)];
+                fixedView[0] = 5;
+                Assert.That(chunk.Get(fixedLength)[0], Is.EqualTo(5));
+                Assert.That(chunk.Get(perVoxel)[new Int3(1, 2, 3)], Is.EqualTo(4f));
+            });
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(foundPerVoxel, Is.True);
+            Assert.That(foundFixed, Is.True);
+            Assert.That(hasPerVoxel, Is.True);
+            Assert.That(hasFixed, Is.True);
+            Assert.That(perVoxelDimensions, Is.EqualTo(new Int3(2, 3, 4)));
+            Assert.That(fixedDimensions, Is.EqualTo(new Int3(3, 1, 1)));
+            Assert.That(viaGet, Is.EqualTo(7f));
+            Assert.That(viaTryGet, Is.EqualTo(9));
+        });
+    }
+
+    [Test]
+    public void TryGetAndHas_AfterTheTickOrOnDefault_Throw()
+    {
+        using var world = new AtmosWorld(new TestAtmosConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        simulation.CreateAndRegisterChunk(default);
+        AtmosSolverChunk retained = default;
+
+        world.Solvers.Register(
+            "tests/solver-chunk/try-get-retained",
+            context =>
+            {
+                retained = context.Chunks(simulation)[0];
+                Assert.That(retained.Has(Exposure), Is.False);
+                Assert.That(() => retained.TryGet<float>(null!, out _), Throws.TypeOf<ArgumentNullException>());
+            });
+
+        world.Tick();
+        AtmosSolverChunk defaultChunk = default;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => retained.TryGet(Exposure, out _), Throws.InvalidOperationException);
+            Assert.That(() => retained.Has(Exposure), Throws.InvalidOperationException);
+            Assert.That(() => defaultChunk.TryGet(Exposure, out _), Throws.InvalidOperationException);
+            Assert.That(() => defaultChunk.Has(Exposure), Throws.InvalidOperationException);
+        });
+    }
+
+    [Test]
     public void DefaultViews_Throw()
     {
         AtmosSolverChunk chunk = default;
@@ -375,6 +542,8 @@ public sealed class AtmosSolverChunkTests
         {
             Assert.That(() => chunk.Handle, Throws.InvalidOperationException);
             Assert.That(() => chunk.Get(Exposure).Length, Throws.InvalidOperationException);
+            Assert.That(() => chunk.GetVoxelIndex(default), Throws.InvalidOperationException);
+            Assert.That(() => chunk.GetVoxelPosition(0), Throws.InvalidOperationException);
             Assert.That(() => chunks.Count, Throws.InvalidOperationException);
             Assert.That(() => chunks.TryGet(default, out _), Throws.InvalidOperationException);
         });

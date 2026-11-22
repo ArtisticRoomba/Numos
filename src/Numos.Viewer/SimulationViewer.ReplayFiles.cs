@@ -335,6 +335,14 @@ public partial class SimulationViewer
             case OperationCanceledException:
                 _replayFileError = Locale.GetString("replay-file-loading-cancelled-error");
                 break;
+            case MissingSolversException missing:
+                string solvers = string.Join(", ", missing.MissingSolvers);
+                _replayFileError = _solverLoader.IsSupported
+                    ? Locale.GetString("replay-file-missing-solvers-error", ("solvers", solvers))
+                    : Locale.GetString("replay-file-missing-solvers-unavailable-error", ("solvers", solvers));
+
+                _requestOpenReplayModal = true;
+                break;
             case var exception:
                 _replayFileError = Locale.GetString("replay-file-load-error", ("message", DescribeFailure(exception)));
                 _requestOpenReplayModal = true;

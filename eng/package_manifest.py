@@ -15,6 +15,7 @@ PACKAGE_DEPENDENCIES = {
     "Numos.API.Dangerous": ("Numos.API",),
     "Numos.Serialization": ("Numos.API",),
     "Numos.Serialization.FileSystem": ("Numos.Serialization",),
+    "Numos.Testing": ("Numos.API", "Numos.Serialization"),
     "Numos.SimDrawer": ("Numos.CoreSim",),
     "Numos.Workbench": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization", "Numos.Serialization.FileSystem"),
     "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization", "Numos.Serialization.FileSystem", "Numos.Workbench"),
@@ -31,6 +32,7 @@ PACKAGE_VERSION_FILES = {
     "Numos.API.Dangerous": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Serialization": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Serialization.FileSystem": Path("src/Numos.CoreSim/Version.props"),
+    "Numos.Testing": Path("src/Numos.CoreSim/Version.props"),
     "Numos.SimDrawer": Path("src/Numos.Viewer/Version.props"),
     "Numos.Workbench": Path("src/Numos.Viewer/Version.props"),
     "Numos.Viewer": Path("src/Numos.Viewer/Version.props"),
@@ -44,6 +46,7 @@ PACKAGE_FAMILIES = {
         "Numos.API.Dangerous",
         "Numos.Serialization",
         "Numos.Serialization.FileSystem",
+        "Numos.Testing",
     ),
     "viewer": (
         "Numos.SimDrawer",

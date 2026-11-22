@@ -136,54 +136,26 @@ internal sealed partial class AtmosKernel : IDisposable
         var context = BeginTickSimulation(chunks, checked(TickCount + 1L), TickRate);
         try
         {
-            // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
-            // kernel has no topology for. A stage runs when the tick count is a multiple of its interval, which is
-            // the cadence a world gives a stage that never changes interval. As in the world, every stage but
-            // euler-flow and vacuum-cleanup first marks the awake chunks changed, because only those two mark their
-            // own writes.
-            int eulerInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.EulerRunsPerSecond, TickRate);
-            int gasInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.GasRunsPerSecond, TickRate);
-            int thermalInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.ThermalRunsPerSecond, TickRate);
-            if (TransportModel == AtmosTransportModel.Euler)
+            // Runs the world's default layout for the model, minus the explicit-link stages a lone kernel has no
+            // topology for. A stage runs when the tick count is a multiple of its interval, which is the cadence a
+            // world gives a stage that never changes interval. As in the world, a stage that does not mark its own
+            // writes first marks the awake chunks changed.
+            var layout = BuiltInStageTable.GetLayout(
+                TransportModel == AtmosTransportModel.Euler ? AtmosTransportModel.Euler : AtmosTransportModel.Legacy);
+            foreach (BuiltInStage stage in layout)
             {
-                if (context.TickCount % eulerInterval == 0)
-                {
-                    context.BeginStage(eulerInterval, BuiltInStageSchedule.GapTime(eulerInterval, TickRate));
-                    SolveEulerFlow(context);
-                }
+                if (stage.SolveKernel is null)
+                    continue;
 
-                if (context.TickCount % gasInterval == 0)
-                {
-                    context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
-                    SolveVacuumCleanup(context);
-                }
-            }
-            else if (context.TickCount % gasInterval == 0)
-            {
-                context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
-                context.MarkAwakeChunksChanged();
-                SolveDerivedRefresh(context);
-                context.MarkAwakeChunksChanged();
-                SolveAdvection(context);
-                SolveVacuumCleanup(context);
-                context.MarkAwakeChunksChanged();
-                SolveBoundaryFlow(context);
-            }
+                int interval = BuiltInStageSchedule.IntervalFor(stage.RunsPerSecond, TickRate);
+                if (context.TickCount % interval != 0)
+                    continue;
 
-            if (context.TickCount % thermalInterval == 0)
-            {
-                context.BeginStage(thermalInterval, BuiltInStageSchedule.GapTime(thermalInterval, TickRate));
-                context.MarkAwakeChunksChanged();
-                SolveThermodynamics(context);
-                context.MarkAwakeChunksChanged();
-                SolveThermalBoundary(context);
-            }
+                context.BeginStage(interval, BuiltInStageSchedule.GapTime(interval, TickRate));
+                if (!stage.MarksOwnChanges)
+                    context.MarkAwakeChunksChanged();
 
-            if (context.TickCount % gasInterval == 0)
-            {
-                context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
-                context.MarkAwakeChunksChanged();
-                SolveGasReactions(context);
+                stage.SolveKernel(this, context);
             }
         }
         finally

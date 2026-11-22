@@ -44,6 +44,7 @@ public partial class SimulationViewer
         RenderResolutionConfirmationModal();
         RenderPerformanceOverlay();
         DrawReplayFileModals();
+        DrawSolverAssemblyModal();
         DrawWorldModals();
 
         if (!_frame.HasProject)
@@ -406,6 +407,9 @@ public partial class SimulationViewer
                     RequestCloseProject();
 
                 ImGui.EndDisabled();
+
+                ImGui.Separator();
+                RenderLoadSolversMenuItem();
 
                 ImGui.Separator();
                 if (ImGuiExtensions.MenuItemWithShortcut($"{Icons.LogOut} {Locale.GetString("exit")}", "Alt+F4"))

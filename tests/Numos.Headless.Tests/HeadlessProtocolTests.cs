@@ -306,6 +306,24 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task UpdateConfig_SetsTheRandomSeedToAnyUInt64()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("before", "getConfig"),
+            Request("update", "updateConfig", "\"config\":{\"randomSeed\":18446744073709551615}"),
+            Request("after", "getConfig"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.Result("before").GetProperty("config").GetProperty("randomSeed").GetUInt64(), Is.Zero);
+            Assert.That(
+                run.Result("after").GetProperty("config").GetProperty("randomSeed").GetUInt64(),
+                Is.EqualTo(ulong.MaxValue));
+        });
+    }
+
+    [Test]
     public async Task UpdateConfig_RejectsEulerAndMolarMassValuesOutsideTheirDomain()
     {
         var run = await RunAsync(
@@ -518,6 +536,59 @@ public sealed class HeadlessProtocolTests
             Assert.That(run.Result("resumed").GetProperty("timeline").GetProperty("inspecting").GetBoolean(), Is.False);
             Assert.That(back.GetProperty("checkpoints").GetArrayLength(), Is.GreaterThan(0));
             Assert.That(run.Result("branches").GetProperty("branches").GetArrayLength(), Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task VerifyDeterminism_ReportsBothRunsAndEndsOnTheRecordedHead()
+    {
+        string[] setup =
+        [
+            CreateProject("create", 2, 1, 1),
+            Request("add", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("gas", "injectGas", $"\"position\":{Coordinate0},\"voxel\":{Coordinate0},\"gasId\":0,\"moles\":4,\"temperatureK\":300"),
+            Request("warm", "tick", "\"count\":2")
+        ];
+
+        var run = await RunAsync(
+        [
+            ..setup,
+            Request("verify", "verifyDeterminism", "\"ticks\":5"),
+            Request("info", "timelineInfo"),
+            Request("missing", "verifyDeterminism"),
+            Request("zero", "verifyDeterminism", "\"ticks\":0"),
+            Request("seek", "seekTick", "\"tick\":1"),
+            Request("blocked", "verifyDeterminism", "\"ticks\":1"),
+            Request("head", "returnToHead"),
+            Request("after", "tick", "\"count\":1")
+        ]);
+        var plain = await RunAsync([..setup, Request("tick", "tick", "\"count\":5"), Request("info", "timelineInfo")]);
+
+        var verify = run.Find("verify");
+        var determinism = verify.GetProperty("result").GetProperty("determinism");
+        var info = run.Result("info").GetProperty("timeline");
+        Assert.Multiple(() =>
+        {
+            Assert.That(verify.GetProperty("ok").GetBoolean(), Is.True, verify.GetRawText());
+            Assert.That(verify.GetProperty("result").GetProperty("ticksExecuted").GetInt32(), Is.EqualTo(5));
+            Assert.That(verify.GetProperty("state").GetProperty("tick").GetInt32(), Is.EqualTo(7));
+            Assert.That(verify.GetProperty("state").GetProperty("inspecting").GetBoolean(), Is.False);
+            Assert.That(determinism.GetProperty("deterministic").GetBoolean(), Is.True);
+            Assert.That(determinism.GetProperty("startTick").GetInt32(), Is.EqualTo(2));
+            Assert.That(determinism.GetProperty("endTick").GetInt32(), Is.EqualTo(7));
+            Assert.That(
+                determinism.GetProperty("secondHash").GetString(),
+                Is.EqualTo(determinism.GetProperty("firstHash").GetString()));
+            Assert.That(determinism.GetProperty("differences").GetArrayLength(), Is.Zero);
+            Assert.That(info.GetProperty("headTick").GetInt32(), Is.EqualTo(7));
+            Assert.That(info.GetProperty("stateHash").GetString(), Is.EqualTo(determinism.GetProperty("firstHash").GetString()));
+            Assert.That(
+                info.GetProperty("stateHash").GetString(),
+                Is.EqualTo(plain.Result("info").GetProperty("timeline").GetProperty("stateHash").GetString()));
+            Assert.That(run.ErrorCode("missing"), Is.EqualTo("missingProperty"));
+            Assert.That(run.ErrorCode("zero"), Is.EqualTo("invalidTickCount"));
+            Assert.That(run.ErrorCode("blocked"), Is.EqualTo("operationRejected"));
+            Assert.That(run.Find("after").GetProperty("state").GetProperty("tick").GetInt32(), Is.EqualTo(8));
         });
     }
 
