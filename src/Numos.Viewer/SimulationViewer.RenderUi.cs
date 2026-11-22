@@ -296,13 +296,18 @@ public partial class SimulationViewer
             ImGuiChildFlags.Borders,
             ImGuiWindowFlags.None);
 
-        ImGui.Text("riccardi48");
-        ImGui.TextDisabled(Locale.GetString("numerical-methods-and-physics-guidance"));
+        var credits = Locale.ThanksCredits;
+        for (int i = 0; i < credits.Count; i++)
+        {
+            if (i > 0)
+                ImGui.Separator();
 
-        ImGui.Separator();
-
-        ImGui.Text("Ewanderer");
-        ImGui.TextDisabled(Locale.GetString("gas-reactions-solver"));
+            // Names and roles come from credits.ftl, so a literal % must not reach a printf-style format.
+            ImGui.TextUnformatted(credits[i].Name);
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+            ImGui.TextUnformatted(credits[i].Role);
+            ImGui.PopStyleColor();
+        }
 
         ImGui.EndChild();
     }

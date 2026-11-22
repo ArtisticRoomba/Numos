@@ -164,7 +164,9 @@ internal static partial class Locale
                         : $"  {e}")));
         }
 
-        return new LocaleState(culture, bundle);
+        var thanks = ParseCredits(Path.Combine(LocaleDirectory, CreditsFileName), culture);
+
+        return new LocaleState(culture, bundle, thanks);
     }
 
     private static Dictionary<string, IFluentType> GetArgumentCache()
@@ -206,5 +208,6 @@ internal static partial class Locale
 
     private sealed record LocaleState(
         CultureInfo Culture,
-        FluentBundle Bundle);
+        FluentBundle Bundle,
+        IReadOnlyList<LocaleCredit> Thanks);
 }

@@ -1,4 +1,4 @@
-﻿graphics = Graphics
+graphics = Graphics
 interface = Interface
 custom-resolution = {$width} x {$height} (custom)
 target-resolution = Target resolution
@@ -36,3 +36,13 @@ keep-resolution = Keep Resolution
 revert = Revert
 language = Language
 language-tooltip = Changes the language of the viewer interface.
+
+imgui-layout-not-initialized-error = The ImGui layout has not been initialized yet.
+imgui-layout-saved = Saved. This layout will be restored at the next launch.
+imgui-layout-save-error = Could not save the layout
+imgui-layout-load-error = Could not load the saved layout
+
+side-top-left = Top left
+side-top-right = Top right
+side-bottom-left = Bottom left
+side-bottom-right = Bottom right

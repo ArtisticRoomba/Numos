@@ -1,4 +1,4 @@
-﻿remove-simulation-button = Remove Simulation
+remove-simulation-button = Remove Simulation
 remove-simulation-tooltip = Removes the selected simulation, its chunks, and every link connected to it.
 chunk-width-label = Chunk width
 chunk-height-label = Chunk height

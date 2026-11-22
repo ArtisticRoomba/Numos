@@ -1,5 +1,4 @@
-﻿three-d-voxel = 3D Воксель
-
+three-d-voxel = 3D Воксель
 selected-voxel-count =
     { $count ->
         [one] { $count } воксель выбран
@@ -7,7 +6,6 @@ selected-voxel-count =
         [many] { $count } вокселей выбрано
        *[other] { $count } вокселя выбрано
     }
-
 clear-cell = Очистить Клетку
 unassigned-classification = Не назначен (0)
 solid-classification = Твёрдый (-2)
@@ -15,20 +13,17 @@ void-classification = Пустота (-1)
 draft-classification = Драфт ({ $classification })
 set-temperature = Установить Температуру на { $temperature } K
 frame-voxel = Сфокусироваться на Вокселе
-
 portal = Портал
 start-portal-here = Начать Портал здесь
 create-portal-to-here = Создать Портал сюда
 portal-first-endpoint = От: { $cell }
 portal-first-endpoint-instruction = Начать портал от его первого края.
 enable-transport-mode-in-topology = Включите режим передачи в свойствах топологии.
-
 inject = Впрыснуть
 no-gases-registered = Нет зарегистрированных газов
 moles-context-injection = Моли##context-injection
 temperature-kelvin = Температура: { $temperature } K
 inject-context-confirm = Впрыснуть##context-confirm
-
 set-classification-action = Установить классфикацию { $classification }
 register-gas-before-injecting-voxels = Зарегистрируйте газ прежде чем впрыскивать в воксели.
 injected-gas-into = Впрыснуто { $moles } моль { $gas } в
@@ -36,3 +31,23 @@ cleared-gas-from = Очищен газ из
 cleared-cells = Очищено
 set-temperature-for = Установлена температура { $temperature } K для
 voxel-mutation-feedback = { $action } { $edited } вокселей.
+
+select-box-tool = Выбрать / Коробка
+paint-room-tool = Рисовать Комнату
+paint-gas-tool = Рисовать Газ
+erase-gas-tool = Стирать Газ
+classification-label = Классификация
+toolbar-room-id-label = ID комнаты
+amount-mol-label = Количество (моль)
+temperature-k-label = Температура (K)
+no-voxels-selected = Воксели не выбраны.
+voxels-selected =
+    { $count ->
+        [one] Выбран { $count } воксель
+        [few] Выбрано { $count } вокселя
+        [many] Выбрано { $count } вокселей
+       *[other] Выбрано { $count } вокселя
+    }
+clear-selection-button = Очистить Выделение
+
+ignite-tool = Поджечь

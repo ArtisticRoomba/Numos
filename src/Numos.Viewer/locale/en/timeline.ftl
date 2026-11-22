@@ -1,4 +1,4 @@
-﻿timeline-window = Timeline
+timeline-window = Timeline
 timeline-branches = Branches
 timeline-transport = Transport
 timeline-selected-tick = Selected tick
@@ -66,12 +66,10 @@ replay-stage-table-column-index = #
 replay-stage-table-column-stage = Stage
 replay-stage-table-column-kind = Kind
 replay-stage-table-column-enabled = Enabled
-
 replay-applied-configuration = Applied configuration
 replay-configuration-column-setting = Setting
 replay-configuration-column-value = Value
 replay-configuration-column-unit = Unit
-
 replay-gas-registry = Gas registry
 replay-no-gases-registered = No gases are registered.
 replay-gas-column-id = ID
@@ -82,10 +80,8 @@ replay-gas-column-boiling-point = Boiling point (K)
 replay-gas-column-condensation = Condensation
 replay-gas-column-latent-heat = Latent heat (J/mol)
 replay-gas-column-liquid-id = Liquid ID
-
 replay-solver-configurations = Solver configurations
 replay-solver-configuration = Solver configuration
-
 replay-timeline-axis-title = SIMULATION TIME / TICK
 replay-restorable-tick-range-tooltip = Ticks { $startTick } through { $endTick } have recorded states that can be restored.
 replay-single-operation-tooltip = { $code }
@@ -95,7 +91,6 @@ replay-multiple-operations-tooltip = { $count } operations in tick { $tick }
 replay-checkpoint-tooltip = Checkpoint at tick { $tick }, after operation #{ $operationSequence }
     Reference hash { $digest }
 replay-divergent-checkpoint-tooltip = Divergent: the replayed state does not match this reference hash.
-
 replay-session-branches-title = SESSION BRANCHES
 replay-branch-history-tooltip = { $name }
     Fork tick { $forkTick }

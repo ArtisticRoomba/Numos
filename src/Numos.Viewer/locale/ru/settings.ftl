@@ -1,4 +1,4 @@
-﻿graphics = Графика
+graphics = Графика
 interface = Интерфейс
 custom-resolution = {$width} x {$height} (кастомное)
 target-resolution = Целевое разрешение
@@ -36,3 +36,13 @@ keep-resolution = Оставить разрешение
 revert = Отменить
 language = Язык
 language-tooltip = Меняет язык интерфейса.
+
+imgui-layout-not-initialized-error = ImGui макет ещё не был инициализирован.
+imgui-layout-saved = Сохранено. Этот макет будет восстановлен при следующем запуске.
+imgui-layout-save-error = Не удалось сохранить макет
+imgui-layout-load-error = Не удалось загрузить сохранённый макет
+
+side-top-left = Верхний левый
+side-top-right = Верхний правый
+side-bottom-left = Нижний левый
+side-bottom-right = Нижний правый

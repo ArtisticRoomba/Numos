@@ -74,9 +74,16 @@ class ViewerAssetTests(unittest.TestCase):
         f"{CONTENT}/locale/en/common.ftl",
     }
 
-    def check(self, names: set[str], cultures: dict[str, list[str]] | None = None) -> None:
+    def check(
+            self,
+            names: set[str],
+            cultures: dict[str, list[str]] | None = None,
+            root_files: list[str] | None = None,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            for file in root_files or []:
+                (root / file).write_text("")
             for culture, files in (cultures or {}).items():
                 (root / culture).mkdir()
                 for file in files:
@@ -103,6 +110,10 @@ class ViewerAssetTests(unittest.TestCase):
     def test_rejects_missing_culture_present_in_source(self) -> None:
         with self.assertRaisesRegex(ValueError, "locale/ru/common.ftl"):
             self.check(self.BASE, {"en": ["common.ftl"], "ru": ["common.ftl"]})
+
+    def test_rejects_missing_root_locale_file(self) -> None:
+        with self.assertRaisesRegex(ValueError, "locale/credits.ftl"):
+            self.check(self.BASE, {"en": ["common.ftl"]}, ["credits.ftl"])
 
 
 if __name__ == "__main__":

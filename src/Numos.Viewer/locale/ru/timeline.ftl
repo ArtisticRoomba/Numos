@@ -1,4 +1,4 @@
-﻿timeline-window = Таймлайн
+timeline-window = Таймлайн
 timeline-branches = Ветки
 timeline-transport = Транспорт
 timeline-selected-tick = Выбранный тик
@@ -66,12 +66,10 @@ replay-stage-table-column-index = #
 replay-stage-table-column-stage = Этап
 replay-stage-table-column-kind = Вид
 replay-stage-table-column-enabled = Включено
-
 replay-applied-configuration = Применённая конфигурация
 replay-configuration-column-setting = Настройки
 replay-configuration-column-value = Числа
 replay-configuration-column-unit = Единица
-
 replay-gas-registry = Регистр газов
 replay-no-gases-registered = Нет зарегистрированных газов.
 replay-gas-column-id = ID
@@ -82,10 +80,8 @@ replay-gas-column-boiling-point = Точка кипения (K)
 replay-gas-column-condensation = Конденсация
 replay-gas-column-latent-heat = Теплота затухания (J/mol)
 replay-gas-column-liquid-id = ID Жидкости
-
 replay-solver-configurations = Конфигурации Решателей
 replay-solver-configuration = Конфигурация Решателя
-
 replay-timeline-axis-title = ВРЕМЯ СИМУЛЯЦИИ / ТИК
 replay-restorable-tick-range-tooltip = Тики от { $startTick } до { $endTick } имеют записанные состояния, которые могут быть восстановлены.
 replay-single-operation-tooltip = { $code }
@@ -95,7 +91,6 @@ replay-multiple-operations-tooltip = { $count } операций в тике { $
 replay-checkpoint-tooltip = Контрольная точка на тике { $tick }, после операции #{ $operationSequence }
     Справочный хэш { $digest }
 replay-divergent-checkpoint-tooltip = Отклоняющийся: воспроизведённое состояние не соответсвует справочному хэшу.
-
 replay-session-branches-title = ВЕТВИ СЕССИИ
 replay-branch-history-tooltip = { $name }
     Отделённый тик { $forkTick }

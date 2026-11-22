@@ -54,8 +54,8 @@ def check_viewer_assets(package_name: str, names: set[str], locale_directory: Pa
         raise ValueError(f"{package_name}: missing English locale files under {content}/locale/en/")
 
     if locale_directory.is_dir():
-        for file in sorted(locale_directory.glob("*/*.ftl")):
-            asset = f"{content}/locale/{file.parent.name}/{file.name}"
+        for file in sorted(locale_directory.rglob("*.ftl")):
+            asset = f"{content}/locale/{file.relative_to(locale_directory).as_posix()}"
             if asset not in names:
                 raise ValueError(f"{package_name}: missing locale file {asset}")
 
