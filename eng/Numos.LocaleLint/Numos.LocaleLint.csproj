@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        This tool lives under eng/, so src/Directory.Build.props and .targets do not apply. It must not reference
+        Numos.Viewer, because the viewer pulls in native UI dependencies.
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <RootNamespace>Numos.LocaleLint</RootNamespace>
+        <AssemblyName>Numos.LocaleLint</AssemblyName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Linguini.Bundle" Version="0.11.0"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Numos.LocaleLint.Tests"/>
+    </ItemGroup>
+
+</Project>

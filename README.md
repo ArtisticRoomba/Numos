@@ -44,6 +44,7 @@ Documentation for APIs and the project itself is available under `/docs`. Also s
 - [Versioning](docs/versioning.md)
 - [Dimensional Analysis](docs/dimensional_analysis.md)
 - [Testing](docs/testing.md)
+- [Localizing the Viewer](docs/localization.md)
 - [CoreSim Benchmarks](benchmarks/README.md)
 
 ## Copyright, Credits & License

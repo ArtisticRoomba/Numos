@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <RootNamespace>Numos.LocaleLint.Tests</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\eng\Numos.LocaleLint\Numos.LocaleLint.csproj"/>
+    </ItemGroup>
+
+</Project>
