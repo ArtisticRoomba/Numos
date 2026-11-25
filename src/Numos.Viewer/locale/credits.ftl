@@ -8,3 +8,6 @@ riccardi48 = riccardi48
 
 ewanderer = Ewanderer
     .en = GasReactions solver
+
+rouden = Rouden
+    .en = Localization backend and Russian localization
