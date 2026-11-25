@@ -22,17 +22,38 @@ public sealed class LocaleCreditsTests
     [TearDown]
     public void TearDown() => Directory.Delete(_directory, recursive: true);
 
-    [TestCase("en")]
-    [TestCase("ru")]
-    public void ShippedFile_ListsCreditsInOrder(string culture)
+    [Test]
+    public void ParseCredits_KeepsFileOrder()
     {
-        var credits = Locale.ParseCredits(ShippedFile, CultureInfo.GetCultureInfo(culture));
+        string file = Write(
+            "b = Bravo\n    .en = Second role\n\n" +
+            "a = Alpha\n    .en = First role\n\n" +
+            "c = Charlie\n    .en = Third role\n");
 
-        Assert.That(credits, Is.EqualTo(new[]
+        Assert.That(Locale.ParseCredits(file, CultureInfo.GetCultureInfo("en")), Is.EqualTo(new[]
         {
-            new LocaleCredit("riccardi48", "Numerical methods and physics guidance"),
-            new LocaleCredit("Ewanderer", "GasReactions solver"),
+            new LocaleCredit("Bravo", "Second role"),
+            new LocaleCredit("Alpha", "First role"),
+            new LocaleCredit("Charlie", "Third role"),
         }));
+    }
+
+    [Test]
+    public void ShippedFile_ParsesForEveryCulture()
+    {
+        int entryCount = LinguiniParser.FromFile(ShippedFile).Parse().Entries.OfType<AstMessage>().Count();
+
+        foreach (string culture in Locale.AvailableCultures)
+        {
+            var credits = Locale.ParseCredits(ShippedFile, CultureInfo.GetCultureInfo(culture));
+
+            Assert.That(credits, Has.Count.EqualTo(entryCount), $"Credit count for '{culture}'.");
+            foreach (var credit in credits)
+            {
+                Assert.That(credit.Name, Does.Match(@"\S"), $"Name in '{culture}'.");
+                Assert.That(credit.Role, Does.Match(@"\S"), $"Role of '{credit.Name}' in '{culture}'.");
+            }
+        }
     }
 
     [Test]
@@ -40,7 +61,7 @@ public sealed class LocaleCreditsTests
     {
         Locale.SetCulture("en");
 
-        Assert.That(Locale.ThanksCredits.Select(static c => c.Name), Is.EqualTo(new[] { "riccardi48", "Ewanderer" }));
+        Assert.That(Locale.ThanksCredits, Is.EqualTo(Locale.ParseCredits(ShippedFile, CultureInfo.GetCultureInfo("en"))));
     }
 
     [Test]

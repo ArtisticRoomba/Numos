@@ -28,7 +28,7 @@ internal sealed class LocaleTree : IDisposable
             }
             button = Go##button
 
-            """);
+            """.ReplaceLineEndings("\n"));
 
         Write("en/b.ftl", "other = Other text.\n");
         Write(
@@ -44,7 +44,7 @@ internal sealed class LocaleTree : IDisposable
             }
             button = Вперёд##button
 
-            """);
+            """.ReplaceLineEndings("\n"));
 
         Write("ru/b.ftl", "other = Другой текст.\n");
         Write("credits.ftl", "alice = Alice\n    .en = Role\n    .ru = Роль\n");

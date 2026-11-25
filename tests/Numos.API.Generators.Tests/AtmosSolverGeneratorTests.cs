@@ -91,7 +91,7 @@ public sealed class AtmosSolverGeneratorTests
     [Test]
     public void NoNeighbors_PassesNoSelection()
     {
-        string source = FireSource.Replace(",\n    Neighbors = AtmosSolverNeighbors.All", "");
+        string source = FireSource.ReplaceLineEndings("\n").Replace(",\n    Neighbors = AtmosSolverNeighbors.All", "");
         GeneratorRunResult result = RunSolvers(out Compilation output, out var diagnostics, source);
 
         Assert.That(diagnostics, Is.Empty);
